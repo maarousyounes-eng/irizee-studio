@@ -1,0 +1,18 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #F4F4F5;
+  --card: #ffffff;
+  --ink: #0A0A0B;
+  --muted: #6B6B72;
+  --accent: #2B6EE8;
+  --accent-soft: #EBF2FF;
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+}

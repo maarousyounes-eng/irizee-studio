@@ -1,0 +1,1 @@
+-- Voir l'historique des migrations appliquées sur le projet Supabase (001_studio_schema, 002_harden_function_grants, 003_comment_author_name).
