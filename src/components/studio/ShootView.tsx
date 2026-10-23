@@ -267,6 +267,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
           </div>
           <div className="flex gap-2 flex-wrap">
             {approved.length > 0 && <Btn size="sm" variant="soft" onClick={() => downloadZip(approved)} disabled={zipping}>{zipping ? <Spinner /> : <Archive size={13} />} ZIP des approuvées ({approved.length})</Btn>}
+            <Link href={`/studio?again=${shoot.id}`}><Btn size="sm" variant="soft"><RotateCcw size={13} /> Recommencer</Btn></Link>
             {isStaff && <Btn size="sm" variant="ghost" onClick={() => setShowConcept(true)}><BookmarkPlus size={13} /> Enregistrer comme concept</Btn>}
             {isStaff && <Btn size="sm" variant="danger" onClick={deleteShoot}><Trash2 size={13} /></Btn>}
           </div>

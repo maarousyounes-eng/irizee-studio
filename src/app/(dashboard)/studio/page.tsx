@@ -5,7 +5,7 @@ import type { Role } from "@/types";
 
 export const dynamic = "force-dynamic";
 
-export default async function StudioPage({ searchParams }: { searchParams: { concept?: string; from?: string; product?: string } }) {
+export default async function StudioPage({ searchParams }: { searchParams: { concept?: string; from?: string; product?: string; again?: string } }) {
   const sb = createClient();
   const { data: { user } } = await sb.auth.getUser();
   const { data: profile } = await sb.from("profiles").select("role, monthly_quota").eq("id", user!.id).single();
@@ -31,6 +31,16 @@ export default async function StudioPage({ searchParams }: { searchParams: { con
     if (img?.path) initial = { inspirationPaths: [img.path], productId: (img as any).shoots?.product_id, aspect: img.aspect ?? undefined };
   }
 
+  // « Recommencer » : mêmes réglages qu'un shooting existant (produit, mannequins, inspirations, consigne, format…)
+  let again: { productId: string; projectId: string | null; modelIds: string[]; noPeople: boolean; prompt: string; aspect: string; size: string; engine: string; variants: number; inspirationPaths: string[] } | undefined;
+  if (searchParams.again) {
+    const { data: sh } = await sb.from("shoots").select("id, project_id, product_id, model_ids, no_people, prompt, aspect, size, engine, inspiration_paths").eq("id", searchParams.again).single();
+    if (sh) {
+      const { count } = await sb.from("images").select("id", { count: "exact", head: true }).eq("shoot_id", sh.id).eq("kind", "generated");
+      again = { productId: sh.product_id, projectId: sh.project_id, modelIds: sh.model_ids ?? [], noPeople: !!sh.no_people, prompt: sh.prompt, aspect: sh.aspect, size: sh.size, engine: sh.engine, variants: Math.min(12, Math.max(1, count ?? 6)), inspirationPaths: sh.inspiration_paths ?? [] };
+    }
+  }
+
   return (
     <div>
       <PageHeader
@@ -48,6 +58,7 @@ export default async function StudioPage({ searchParams }: { searchParams: { con
         initialConceptId={searchParams.concept}
         initialProductId={searchParams.product}
         initial={initial}
+        again={again}
       />
     </div>
   );

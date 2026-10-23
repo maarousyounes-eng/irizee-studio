@@ -18,6 +18,7 @@ interface Props {
   initialConceptId?: string;
   initialProductId?: string;
   initial: { inspirationPaths: string[]; productId?: string; aspect?: string };
+  again?: { productId: string; projectId: string | null; modelIds: string[]; noPeople: boolean; prompt: string; aspect: string; size: string; engine: string; variants: number; inspirationPaths: string[] };
 }
 
 export default function NewShootForm(p: Props) {
@@ -26,19 +27,19 @@ export default function NewShootForm(p: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const isCreator = p.role === "creator";
 
-  const [projectId, setProjectId] = useState<string>(isCreator ? p.projects[0]?.id ?? "" : "");
-  const [productId, setProductId] = useState(p.initial.productId ?? p.initialProductId ?? "");
+  const [projectId, setProjectId] = useState<string>(p.again?.projectId ?? (isCreator ? p.projects[0]?.id ?? "" : ""));
+  const [productId, setProductId] = useState(p.again?.productId ?? p.initial.productId ?? p.initialProductId ?? "");
   // Mannequins : par défaut, les mannequins de la marque (ou tous ceux qui existent)
   const brandIds = p.models.filter((m) => m.is_brand_model).map((m) => m.id);
-  const [peopleMode, setPeopleMode] = useState<"models" | "random" | "none">(p.models.length ? "models" : "random");
-  const [modelIds, setModelIds] = useState<string[]>(brandIds.length ? brandIds : p.models.map((m) => m.id));
+  const [peopleMode, setPeopleMode] = useState<"models" | "random" | "none">(p.again ? (p.again.noPeople ? "none" : p.again.modelIds.length ? "models" : "random") : p.models.length ? "models" : "random");
+  const [modelIds, setModelIds] = useState<string[]>(p.again?.modelIds.length ? p.again.modelIds : brandIds.length ? brandIds : p.models.map((m) => m.id));
   const [conceptId, setConceptId] = useState<string>("");
-  const [prompt, setPrompt] = useState("");
-  const [aspect, setAspect] = useState(p.initial.aspect && FORMATS[p.initial.aspect] ? p.initial.aspect : "4:5");
-  const [variants, setVariants] = useState(6);
-  const [engine, setEngine] = useState("pro");
-  const [size, setSize] = useState("2K");
-  const [inspirations, setInspirations] = useState<string[]>(p.initial.inspirationPaths);
+  const [prompt, setPrompt] = useState(p.again?.prompt ?? "");
+  const [aspect, setAspect] = useState(p.again && FORMATS[p.again.aspect] ? p.again.aspect : p.initial.aspect && FORMATS[p.initial.aspect] ? p.initial.aspect : "4:5");
+  const [variants, setVariants] = useState(p.again?.variants ?? 6);
+  const [engine, setEngine] = useState(p.again?.engine ?? "pro");
+  const [size, setSize] = useState(p.again?.size ?? "2K");
+  const [inspirations, setInspirations] = useState<string[]>(p.again?.inspirationPaths ?? p.initial.inspirationPaths);
   const [uploading, setUploading] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
