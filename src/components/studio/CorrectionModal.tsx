@@ -8,6 +8,7 @@ export interface Zone { x: number; y: number; w: number; h: number }
 
 // Corrections fréquentes : un clic pré-remplit une consigne claire, à compléter si besoin.
 const PRESETS: { label: string; text: string }[] = [
+  { label: "Elle tient le produit", text: "Elle doit tenir le produit dans sa main : les doigts entourent le produit, l'étiquette bien visible face à l'objectif, à sa taille réelle. Il ne doit plus flotter." },
   { label: "Main / doigts", text: "Corrige la main : cinq doigts naturels, bonne anatomie et bonnes proportions." },
   { label: "Texte du produit", text: "Le texte sur le produit est faux ou illisible : corrige-le exactement comme sur le packshot." },
   { label: "Produit trop grand", text: "Réduis la taille du produit : il doit être à l'échelle réelle par rapport à la main et au corps." },
@@ -83,7 +84,7 @@ export default function CorrectionModal({ imageUrl, aspect, isStaff, onClose, on
             <Label>3. Dis ce que tu veux changer</Label>
             <textarea className={INPUT + " min-h-[110px]"} value={text} onChange={(e) => setText(e.target.value)} autoFocus
               placeholder="Ex : la main de gauche a six doigts / le flacon est trop grand / enlève les lunettes" />
-            <p className="text-[11px] text-[#A0A0A8] mt-1">Écris comme tu parles. Tout le reste de l&apos;image est conservé tel quel. Après l&apos;application, la carte te montrera « Compris : … » pour vérifier.</p>
+            <p className="text-[11px] text-[#A0A0A8] mt-1">Écris comme tu parles. La plateforme te propose 3 versions, vérifie chacune (ta demande est-elle faite ? rien d&apos;autre n&apos;a-t-il changé ?) et met la meilleure en avant. Le « Compris : … » sur chaque carte te montre comment ta demande a été interprétée.</p>
           </div>
           {isStaff && (
             <label className="flex items-start gap-2 text-[12px] text-[#6B6B72]">
@@ -92,7 +93,7 @@ export default function CorrectionModal({ imageUrl, aspect, isStaff, onClose, on
             </label>
           )}
           <div className="flex gap-2 pt-1">
-            <Btn onClick={apply} disabled={busy || !text.trim()}>{busy ? "Envoi…" : zone ? "Appliquer sur la zone" : "Appliquer à toute l'image"}</Btn>
+            <Btn onClick={apply} disabled={busy || !text.trim()}>{busy ? "Envoi…" : "Proposer 3 corrections"}</Btn>
             <Btn variant="ghost" onClick={onClose}>Annuler</Btn>
           </div>
         </div>

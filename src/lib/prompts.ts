@@ -89,6 +89,7 @@ export function correctionPrompt(a: { product: Product; rules: string[]; feedbac
   return [...head,
     `TASK: apply this correction requested by the client, and change nothing else: "${a.feedback}".`,
     zoneTxt,
+    "THE REQUESTED CHANGE MUST BE CLEARLY VISIBLE in the result: never return an unchanged copy of Image 1. If the request is a pose change (a hand holding an object, a different gesture), actually redraw the hand and fingers in the new pose and move the object accordingly, while everything else stays as it is.",
     "The product must remain identical to the packshot (shape, color, every printed text). Keep the SAME person (same face, hair, eyewear, jewelry, outfit), the SAME background, the SAME camera framing and the SAME lighting: change only what the correction asks for, and keep every other element exactly as it is. If an object moves or is re-held, completely erase it from its old position (no ghost or duplicate).",
     "Keep the visible fine skin texture and individual eyebrow hair strokes: never smooth the skin.",
     texts].filter(Boolean).join("\n");
@@ -114,15 +115,16 @@ export function modelSheetPrompt(a: { name: string; description: string }) {
   ].join("\n");
 }
 
-export function qcPrompt(p: Product) {
+export function qcPrompt(p: Product, correction?: { instruction: string }) {
   return [
     "You are a strict quality inspector for a cosmetics brand.",
-    "Image 1 = the REAL product packshot. Image 2 = a generated advertising photo that must show this exact product.",
+    "Image 1 = the REAL product packshot. Image 2 = a generated advertising photo that must show this exact product." + (correction ? " Image 3 = the same photo BEFORE a correction was applied." : ""),
+    correction ? `A correction was requested: "${correction.instruction}". Compare image 3 (before) and image 2 (after): set instruction_followed to true ONLY if the requested change is clearly and convincingly visible in image 2 (for example, if a hand must hold the product, the fingers must visibly wrap around it and it must not float). List in unwanted_changes every element that changed although it was NOT requested (face, outfit, background, product shape or text, framing...), or an empty string if none. Set ghost_or_duplicate to true if a leftover, ghost or duplicate of a moved or removed object is visible.` : "",
     `Expected printed texts on the product: ${JSON.stringify(p.texts ?? [])}.`,
     p.look ? `Expected look: ${p.look}` : "",
     "For each expected text, read what is actually printed on the product in image 2 and answer 'ok' (exactly right), 'wrong' (misspelled, garbled, mirrored or different) or 'unreadable' (too small, blurred or hidden).",
     "Also judge: color/material/shape/cap versus the real packshot; count how many product instances (bottles/tubes) are visible in total, and whether EVERY instance (including small, blurred or background ones) is an exact replica of the real packshot, with the same proportions and label layout; whether the printed text direction on the product matches the packshot (not rotated or restyled); any foreign brand logo; natural anatomy of hands/fingers/face; whether the skin looks like real photographed skin (fine pores and texture still visible, brows with individual hair strokes, even with glamorous makeup and polished retouching) rather than plastic, blurred or AI-smooth skin; and composition (product height as % of the image height, product is a hero in the foreground, realistic scale versus hand/body, natural perspective).",
-    'Return JSON only: {"texts":[{"expected":str,"status":"ok|wrong|unreadable","read":str}],"color_ok":bool,"shape_ok":bool,"foreign_logo":bool,"anatomy_ok":bool,"skin_natural":bool,"product_count":int,"all_copies_exact":bool,"label_orientation_ok":bool,"product_height_pct":int,"hero_foreground":bool,"proportion_ok":bool,"angle_ok":bool,"realism_0_10":int,"comment":str (one short sentence in French)}',
+    `Return JSON only: {"texts":[{"expected":str,"status":"ok|wrong|unreadable","read":str}],"color_ok":bool,"shape_ok":bool,"foreign_logo":bool,"anatomy_ok":bool,"skin_natural":bool,"product_count":int,"all_copies_exact":bool,"label_orientation_ok":bool,"product_height_pct":int,"hero_foreground":bool,"proportion_ok":bool,"angle_ok":bool,"realism_0_10":int,"comment":str (one short sentence in French)${correction ? ",\"instruction_followed\":bool,\"unwanted_changes\":str,\"ghost_or_duplicate\":bool" : ""}}`,
   ].filter(Boolean).join("\n");
 }
 
@@ -134,17 +136,29 @@ export const ANALYZE_PROMPT =
   "Say how the product(s) are arranged (a single hero product or several copies, their relative scale, whether they float or are held), but refer to them only as \"the product\": do NOT describe the product's type, shape or packaging. " +
   "Do NOT describe the identity of any person and do NOT mention any brand names or text printed in the image.";
 
-export function interpretPrompt(a: { feedback: string; hasZone: boolean }) {
+const RECIPES = [
+  "RETOUCH RECIPES (apply the ones that fit the request, and write them into the instruction):",
+  "- Holding the product: the hand pose MUST change (an open or spread hand must close and curl around the product): the fingers wrap naturally around the BODY of the product (thumb on one side, the other fingers on the opposite side, some fingertips visible in front), the product stays upright or slightly tilted, its label faces the camera and stays fully visible and unobstructed, at its real size compared with the hand; erase the product from its old position (no ghost, no duplicate) and add a soft contact shadow. Never turn it into a different object.",
+  "- Hand anatomy: exactly five fingers, natural joints and proportions, consistent nails with the same polish.",
+  "- Product too big / too small: resize it to its real-world size relative to the hand and body, keep the label legible.",
+  "- Removing an element: erase it completely and rebuild what was behind it (skin, fabric, background) with the same lighting.",
+  "- Changing a color: change only the named element, keep fabric folds, shadows and highlights.",
+  "- Skin too smooth: restore visible fine pores and natural texture while keeping the glamorous makeup.",
+].join("\n");
+
+export function interpretPrompt(a: { feedback: string; hasZone: boolean; avoid?: string }) {
   return [
-    "You help a photo retoucher understand a client's correction request on an advertising photo of a cosmetics product. The client writes casually in French.",
+    "You help a photo retoucher understand a client's correction request on an advertising photo of a cosmetics product. The client writes casually in French and is not a technician: infer what they obviously mean.",
     "Image 1 = the photo." + (a.hasZone ? " Image 2 = a zoomed crop of the area the client circled." : ""),
     `Client request: "${a.feedback}"`,
+    a.avoid ? `A previous attempt FAILED because: ${a.avoid}. Write the instruction so that this mistake does not happen again, with more explicit and concrete details.` : "",
     'Return JSON only: {"instruction": str, "understood": str, "scope": "local"|"global", "boxes": [[ymin, xmin, ymax, xmax], ...]}.',
-    "instruction = a precise English instruction for the retoucher: what exactly to change, in which element (hand, product, outfit, background, light, skin...), the target result. Never ask to change the product's shape, label text or logo unless the client explicitly asks to fix them to match the packshot.",
+    "instruction = a precise, concrete English instruction for the retoucher: what exactly to change, in which element (hand, product, outfit, background, light, skin...), the exact target result, and what must stay unchanged. Never ask to change the product's shape, label text or logo unless the client explicitly asks to fix them to match the packshot.",
+    RECIPES,
     "understood = one short French sentence (max 20 words) restating what will be changed, in simple words, so the client can check it was understood.",
     "scope = \"local\" when the change concerns ONE identifiable element or region (a hand, a finger, a face part, glasses, jewelry, an outfit piece, an object, the product), \"global\" only when it must affect the whole image (overall lighting or color grade, the whole background, the whole composition).",
     "boxes = for a local scope, one bounding box for EVERY element involved in the change, in Image 1, with integer coordinates from 0 to 1000 relative to Image 1 (ymin, xmin, ymax, xmax). Include the ENTIRE product whenever it must move, be resized or be held differently (its current position will have to be erased), and the part of the body concerned (hand, arm, face part). Cover each element completely, never partially. Use [[0,0,1000,1000]] for a global scope.",
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 }
 
 /** Retouche locale : le modèle ne voit qu'un recadrage et ne doit rien changer d'autre. */

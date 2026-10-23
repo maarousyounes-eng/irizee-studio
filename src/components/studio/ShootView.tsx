@@ -37,6 +37,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
   const [images, setImages] = useState<ImageRow[]>(initialImages);
   const [filter, setFilter] = useState<"all" | "valid" | "review" | "rejected" | "pending" | "approved">("all");
   const [hideRejected, setHideRejected] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
   const [zoom, setZoom] = useState<string | null>(null);
   const [fix, setFix] = useState<string | null>(null);
   const [compare, setCompare] = useState<string | null>(null);
@@ -85,14 +86,41 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
 
   const visible = useMemo(() => {
     const list = images.filter((i) => {
+      if (!showArchived && i.params?.archived) return false;
       if (hideRejected && i.verdict === "rejected") return false;
       if (filter === "all") return true;
       if (filter === "pending" || filter === "approved") return i.review_status === filter;
       return i.verdict === filter;
     });
     return list.sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || a.variant_index - b.variant_index || a.version - b.version);
-  }, [images, filter, hideRejected]);
+  }, [images, filter, hideRejected, showArchived]);
 
+  // Si aucune proposition ne répond à la demande, la plateforme réessaie seule (une fois), en disant à l'IA ce qui a échoué.
+  const retried = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const groups = new Map<string, ImageRow[]>();
+    images.forEach((i) => { const g = i.params?.group; if (g && i.kind === "correction" && !i.params?.archived) groups.set(g, [...(groups.get(g) ?? []), i]); });
+    groups.forEach((list, g) => {
+      if (retried.current.has(g) || list[0].created_by !== me.id) return;
+      if (list.some((i) => i.state === "generating" || (i.state === "done" && !i.qc) || running.has(i.id))) return;
+      if (Number(list[0].params?.round ?? 0) >= 1) return;
+      const judged = list.filter((i) => i.state === "done" && i.qc);
+      if (!judged.length || judged.some((i) => i.qc!.instruction_followed !== false && !i.qc!.ghost_or_duplicate)) return;
+      retried.current.add(g);
+      const parent = images.find((i) => i.id === list[0].parent_id);
+      if (!parent) return;
+      const issues = Array.from(new Set(judged.map((i) => [
+        i.qc!.instruction_followed === false ? "the requested change was not clearly visible (the image looked unchanged)" : "",
+        i.qc!.ghost_or_duplicate ? "a ghost or duplicate of the old object was left" : "",
+        i.qc!.comment ?? "",
+      ].filter(Boolean).join("; ")))).slice(0, 2).join(" | ");
+      Promise.all(list.map((i) => sb.from("images").update({ params: { ...i.params, archived: true } }).eq("id", i.id))).then(() =>
+        submitFix(parent, "edit", { feedback: String(list[0].params?.original ?? list[0].feedback ?? ""), zone: (list[0].params?.zone as Zone) ?? null, remember: false }, issues, 1));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [images, running]);
+
+  const archivedCount = images.filter((i) => i.params?.archived).length;
   const counts = useMemo(() => ({
     valid: images.filter((i) => i.verdict === "valid").length,
     review: images.filter((i) => i.verdict === "review").length,
@@ -102,13 +130,38 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
     generating: images.filter((i) => i.state === "generating").length,
   }), [images]);
 
-  async function submitFix(img: ImageRow, mode: "edit" | "label", v?: { feedback: string; zone: Zone | null; remember: boolean }) {
+  async function submitFix(img: ImageRow, mode: "edit" | "label", v?: { feedback: string; zone: Zone | null; remember: boolean }, avoid?: string, round = 0) {
     try {
-      const r = await api<{ imageId: string }>(`/api/images/${img.id}/correct`, { mode, feedback: v?.feedback ?? "", zone: v?.zone ?? null, remember: !!v?.remember });
+      const r = await api<{ imageIds: string[] }>(`/api/images/${img.id}/correct`, { mode, feedback: v?.feedback ?? "", zone: v?.zone ?? null, remember: !!v?.remember, avoid, round, candidates: 3 });
       setFix(null);
-      await load(); run([r.imageId]);
-      flash(v?.remember ? "Correction lancée — consigne mémorisée pour ce produit" : "Correction lancée");
+      await load(); run(r.imageIds);
+      flash(mode === "label" ? "Réparation de l'étiquette lancée" : round > 0 ? "Aucune proposition ne convenait : je réessaie automatiquement avec une consigne plus précise" : `${r.imageIds.length} propositions lancées — la meilleure sera mise en avant`);
     } catch (e) { flash(e instanceof Error ? e.message : "Erreur"); }
+  }
+
+  /** Relance la correction depuis l'image d'origine, en disant à l'IA ce qui n'a pas marché la dernière fois. */
+  async function retryFix(img: ImageRow) {
+    const parent = images.find((i) => i.id === img.parent_id);
+    if (!parent) return;
+    const q = img.qc;
+    const issues = [
+      q?.instruction_followed === false ? "the requested change was not clearly visible" : "",
+      q?.ghost_or_duplicate ? "a ghost or duplicate of the old object was left" : "",
+      q?.unwanted_changes ? `unrequested changes: ${q.unwanted_changes}` : "",
+      q?.comment ?? "",
+    ].filter(Boolean).join("; ");
+    // les anciennes propositions sont écartées pour ne pas encombrer la page
+    await archiveGroup(img, null);
+    await submitFix(parent, "edit", { feedback: String(img.params?.original ?? img.feedback ?? ""), zone: (img.params?.zone as Zone) ?? null, remember: false }, issues || "the result did not match the request");
+  }
+
+  /** Garde cette proposition et écarte les autres essais du même groupe. */
+  async function archiveGroup(keep: ImageRow, _unused: null | undefined = undefined) {
+    const g = keep.params?.group;
+    if (!g) return;
+    const sibs = images.filter((i) => i.params?.group === g && i.id !== keep.id && !i.params?.archived);
+    await Promise.all(sibs.map((s) => sb.from("images").update({ params: { ...s.params, archived: true } }).eq("id", s.id)));
+    await load();
   }
 
   async function launchFormats() {
@@ -205,6 +258,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
         {chip("pending", "En validation", counts.pending)}
         {chip("approved", "Approuvées", counts.approved)}
         <label className="ml-auto flex items-center gap-1.5 text-xs text-[#6B6B72]"><input type="checkbox" checked={hideRejected} onChange={(e) => setHideRejected(e.target.checked)} /> Masquer les rejetées</label>
+        {archivedCount > 0 && <label className="flex items-center gap-1.5 text-xs text-[#6B6B72]"><input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} /> Afficher les essais écartés ({archivedCount})</label>}
       </div>
       {counts.generating > 0 && <p className="text-xs text-[#6B6B72] mb-3 flex items-center gap-2"><Spinner /> {counts.generating} image(s) en cours de génération — tu peux rester sur cette page.</p>}
 
@@ -238,7 +292,8 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
                   <div className="absolute top-2 left-2 right-2 flex justify-between items-start gap-1">
                     <div className="flex flex-col gap-1 items-start">
                       {v ? <Badge tone={v.tone} className="bg-white/95">{v.label}</Badge> : <Badge tone="gray" className="bg-white/95"><Spinner className="w-3 h-3" /> Contrôle…</Badge>}
-                      {(img.kind !== "generated" || img.version > 1) && <Badge tone="blue" className="bg-white/95">{img.kind === "format" ? `Format ${FORMATS[img.aspect ?? ""]?.short ?? img.aspect}` : `Version ${img.version}`}</Badge>}
+                      {(img.kind !== "generated" || img.version > 1) && <Badge tone="blue" className="bg-white/95">{img.kind === "format" ? `Format ${FORMATS[img.aspect ?? ""]?.short ?? img.aspect}` : img.params?.n > 1 ? `Proposition ${img.params.i}/${img.params.n}` : `Version ${img.version}`}</Badge>}
+                      {img.params?.archived && <Badge tone="gray" className="bg-white/95">Écartée</Badge>}
                     </div>
                     {img.score !== null && <span className="bg-black/65 text-white rounded-full px-2 py-0.5 text-[11px] font-bold">{img.score}/100</span>}
                   </div>
@@ -252,6 +307,12 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
                     {img.feedback && <span className="text-[11px] text-[#A0A0A8] truncate" title={img.feedback}>{img.feedback}</span>}
                   </div>
                   {img.params?.understood && <p className="text-[#2B6EE8] bg-[#EBF2FF] rounded-lg px-2.5 py-1.5 leading-snug"><span className="font-semibold">Compris :</span> {String(img.params.understood)}</p>}
+                  {img.kind === "correction" && qc && qc.instruction_followed !== undefined && (
+                    <p className={`leading-snug font-semibold ${qc.instruction_followed && !qc.ghost_or_duplicate ? "text-[#16A249]" : "text-[#E8444A]"}`}>
+                      {qc.instruction_followed && !qc.ghost_or_duplicate ? "✓ Ta demande a été faite" : qc.ghost_or_duplicate ? "✗ Un reste de l'ancien élément est visible" : "✗ Ta demande n'est pas visible"}
+                      {qc.unwanted_changes && !/^(none|aucun|-)?$/i.test(qc.unwanted_changes.trim()) && <span className="block font-normal text-[#B45309]">Autres changements : {qc.unwanted_changes}</span>}
+                    </p>
+                  )}
                   {qc?.comment && <p className="text-[#6B6B72] leading-snug">{qc.comment}</p>}
                   {qc && (
                     <details className="text-[#6B6B72]">
@@ -270,6 +331,8 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
 
                     <div className="flex flex-wrap gap-1.5 mt-auto">
                       <Btn size="sm" variant="ghost" onClick={() => setFix(img.id)}><Pencil size={12} /> Corriger</Btn>
+                      {img.kind === "correction" && img.params?.n > 1 && !img.params?.archived && <Btn size="sm" onClick={() => { archiveGroup(img); flash("Proposition gardée, les autres sont écartées"); }}><Check size={12} /> Garder celle-ci</Btn>}
+                      {img.kind === "correction" && !img.params?.archived && <Btn size="sm" variant="ghost" onClick={() => retryFix(img)} title="Relance 3 nouvelles propositions en tenant compte de ce qui n'a pas marché"><RotateCcw size={12} /> Réessayer</Btn>}
                       {img.parent_id && img.kind !== "format" && <Btn size="sm" variant="ghost" onClick={() => setCompare(img.id)}>Avant / après</Btn>}
                       <Btn size="sm" variant="ghost" onClick={() => submitFix(img, "label")} title="Corrige uniquement le texte de l'étiquette"><Type size={12} /> Étiquette</Btn>
                       <Btn size="sm" variant="ghost" onClick={() => { setFormatFor(img.id); setFormats([]); }}><LayoutTemplate size={12} /> Décliner</Btn>

@@ -46,6 +46,33 @@ export async function analyzeInspirations(sb: SupabaseClient, paths: string[], p
   return out.join("\n\n");
 }
 
+
+export interface Interpretation { instruction: string; understood: string; region: Zone | null }
+
+/** Comprend la demande : instruction précise, phrase « Compris », zone à retoucher (zone entourée + éléments concernés). */
+export async function interpretCorrection(prev: { buf: Buffer; mime: string }, feedback: string, userZone: Zone | null, avoid?: string): Promise<Interpretation> {
+  const meta = await sharp(prev.buf).metadata();
+  const W = meta.width ?? 0, H = meta.height ?? 0;
+  let instruction = feedback, understood = "", region: Zone | null = userZone;
+  try {
+    const zoneCrop = userZone && W && H ? await sharp(prev.buf).extract({
+      left: Math.round(Math.max(0, userZone.x * W)), top: Math.round(Math.max(0, userZone.y * H)),
+      width: Math.max(1, Math.min(W - Math.round(userZone.x * W), Math.round(userZone.w * W))), height: Math.max(1, Math.min(H - Math.round(userZone.y * H), Math.round(userZone.h * H))),
+    }).png().toBuffer() : null;
+    const r = await gemini(MODELS.text, [{ text: interpretPrompt({ feedback, hasZone: !!zoneCrop, avoid }) }, imgPart(prev.buf, prev.mime), ...(zoneCrop ? [imgPart(zoneCrop, "image/png")] : [])], { json: true, timeoutMs: 40_000 });
+    const it = parseJson<{ instruction?: string; understood?: string; scope?: string; boxes?: unknown; box?: unknown }>(firstText(r));
+    if (it.instruction) instruction = it.instruction;
+    if (it.understood) understood = it.understood;
+    if (it.scope === "local") {
+      const found = zonesFromBoxes(it.boxes ?? (it.box ? [it.box] : []));
+      const u = unionZones([...(userZone ? [userZone] : []), ...found]);
+      // Petit ou moyen élément : retouche locale (reste identique au pixel près). Grand changement : image complète.
+      region = u && u.w * u.h <= 0.45 ? u : null;
+    } else region = null;
+  } catch { /* on garde la demande telle quelle */ }
+  return { instruction, understood, region };
+}
+
 export async function generateImage(sb: SupabaseClient, image: ImageRow, userId: string) {
   const { data: shoot } = await sb.from("shoots").select("*").eq("id", image.shoot_id).single();
   if (!shoot) throw new Error("Shooting introuvable");
@@ -81,34 +108,19 @@ export async function generateImage(sb: SupabaseClient, image: ImageRow, userId:
     model = MODELS.pro;
     const meta = await sharp(prev.buf).metadata();
     const W = meta.width ?? 0, H = meta.height ?? 0;
-    let instruction = image.feedback ?? "";
-    const userZone = (image.params as any)?.zone as Zone | undefined;
-    let region: Zone | null = userZone ?? null;
+    const prm = (image.params ?? {}) as Record<string, any>;
+    let instruction: string = prm.instruction ?? image.feedback ?? "";
+    let region: Zone | null = prm.region ?? null;
 
-    if (image.kind === "correction") {
-      // Compréhension de la demande : instruction précise, « Compris : … » pour l'utilisateur, et repérage de la zone à modifier
-      try {
-        const zoneCrop = userZone && W && H ? await sharp(prev.buf).extract({
-          left: Math.round(Math.max(0, userZone.x * W)), top: Math.round(Math.max(0, userZone.y * H)),
-          width: Math.max(1, Math.min(W - Math.round(userZone.x * W), Math.round(userZone.w * W))), height: Math.max(1, Math.min(H - Math.round(userZone.y * H), Math.round(userZone.h * H))),
-        }).png().toBuffer() : null;
-        const r = await gemini(MODELS.text, [{ text: interpretPrompt({ feedback: image.feedback ?? "", hasZone: !!zoneCrop }) }, imgPart(prev.buf, prev.mime), ...(zoneCrop ? [imgPart(zoneCrop, "image/png")] : [])], { json: true });
-        const it = parseJson<{ instruction?: string; understood?: string; scope?: string; boxes?: unknown; box?: unknown }>(firstText(r));
-        if (it.instruction) instruction = it.instruction;
-        if (it.scope === "local") {
-          // La zone retouchée englobe la zone entourée ET chaque élément concerné en entier (ex. l'ancien produit à effacer)
-          const found = zonesFromBoxes(it.boxes ?? (it.box ? [it.box] : []));
-          const u = unionZones([...(userZone ? [userZone] : []), ...found]);
-          // Petit ou moyen élément : retouche locale (reste identique au pixel près). Grand changement (pose, produit tenu en main) : image complète.
-          region = u && u.w * u.h <= 0.45 ? u : null;
-        }
-        const understood = it.understood ? { understood: it.understood } : {};
-        await sb.from("images").update({ params: { ...(image.params ?? {}), ...understood, localised: !!region } }).eq("id", image.id);
-      } catch { /* on garde la demande telle quelle */ }
+    if (image.kind === "correction" && !prm.instruction) {
+      // Filet de sécurité : demande non interprétée à la création
+      const it = await interpretCorrection(prev, image.feedback ?? "", prm.zone ?? null, prm.avoid);
+      instruction = it.instruction; region = it.region;
+      await sb.from("images").update({ params: { ...prm, instruction, understood: it.understood, region } }).eq("id", image.id);
     } else if (image.kind === "label") {
       // Réparation d'étiquette : on repère le produit et on ne retouche que lui
       try {
-        const r = await gemini(MODELS.text, [{ text: LOCATE_PRODUCT_PROMPT }, imgPart(prev.buf, prev.mime)], { json: true });
+        const r = await gemini(MODELS.text, [{ text: LOCATE_PRODUCT_PROMPT }, imgPart(prev.buf, prev.mime)], { json: true, timeoutMs: 40_000 });
         const z = zoneFromBox(parseJson<{ box?: unknown }>(firstText(r)).box, 0.01);
         if (z && z.w * z.h < 0.85) region = z;
       } catch { region = null; }
@@ -151,11 +163,12 @@ export async function generateImage(sb: SupabaseClient, image: ImageRow, userId:
 function verdict(qc: QC) {
   const wrong = qc.texts.filter((t) => t.status === "wrong").length;
   const unread = qc.texts.filter((t) => t.status === "unreadable").length;
-  const hard = wrong > 0 || qc.all_copies_exact === false || qc.label_orientation_ok === false || !qc.color_ok || !qc.shape_ok || qc.foreign_logo || !qc.anatomy_ok;
-  const soft = qc.skin_natural === false || unread > 1 || !qc.hero_foreground || !qc.proportion_ok || !qc.angle_ok || (qc.product_height_pct ?? 100) < 20 || qc.realism_0_10 < 6;
+  const hard = wrong > 0 || qc.instruction_followed === false || qc.ghost_or_duplicate === true || qc.all_copies_exact === false || qc.label_orientation_ok === false || !qc.color_ok || !qc.shape_ok || qc.foreign_logo || !qc.anatomy_ok;
+  const unwanted = !!qc.unwanted_changes && !/^(none|aucun|n\/a|-)?$/i.test(qc.unwanted_changes.trim());
+  const soft = unwanted || qc.skin_natural === false || unread > 1 || !qc.hero_foreground || !qc.proportion_ok || !qc.angle_ok || (qc.product_height_pct ?? 100) < 20 || qc.realism_0_10 < 6;
   const score = Math.max(0, Math.min(100, Math.round(
     qc.realism_0_10 * 6 - wrong * 12 - unread * 3 - (qc.color_ok ? 0 : 20) - (qc.shape_ok ? 0 : 15) - (qc.foreign_logo ? 20 : 0)
-    - (qc.anatomy_ok ? 0 : 10) - (qc.skin_natural === false ? 15 : 0) - (qc.all_copies_exact === false ? 20 : 0) - (qc.label_orientation_ok === false ? 15 : 0) - (qc.hero_foreground ? 0 : 8) - (qc.proportion_ok ? 0 : 8) - (qc.angle_ok ? 0 : 5) + 40)));
+    - (qc.anatomy_ok ? 0 : 10) - (qc.instruction_followed === false ? 40 : 0) - (qc.ghost_or_duplicate ? 20 : 0) - (unwanted ? 10 : 0) - (qc.skin_natural === false ? 15 : 0) - (qc.all_copies_exact === false ? 20 : 0) - (qc.label_orientation_ok === false ? 15 : 0) - (qc.hero_foreground ? 0 : 8) - (qc.proportion_ok ? 0 : 8) - (qc.angle_ok ? 0 : 5) + 40)));
   return { verdict: (hard ? "rejected" : soft ? "review" : "valid") as ImageRow["verdict"], score };
 }
 
@@ -165,7 +178,13 @@ export async function qualityCheck(sb: SupabaseClient, image: ImageRow) {
   const { product, imagePaths } = await loadProduct(sb, shoot!.product_id);
   const pack = await download(sb, imagePaths[0]);
   const gen = await download(sb, image.path);
-  const qcParts = [{ text: qcPrompt(product) }, imgPart(pack.buf, pack.mime), imgPart(gen.buf, gen.mime)];
+  let before: { buf: Buffer; mime: string } | null = null;
+  const instr = (image.params as any)?.instruction as string | undefined;
+  if (image.kind === "correction" && image.parent_id && instr) {
+    const { data: par } = await sb.from("images").select("path").eq("id", image.parent_id).single();
+    if (par?.path) before = await download(sb, par.path);
+  }
+  const qcParts = [{ text: qcPrompt(product, before ? { instruction: instr! } : undefined) }, imgPart(pack.buf, pack.mime), imgPart(gen.buf, gen.mime), ...(before ? [imgPart(before.buf, before.mime)] : [])];
   let r: any;
   try { r = await gemini(MODELS.vision, qcParts, { json: true, timeoutMs: 70_000 }); }
   catch { r = await gemini(MODELS.text, qcParts, { json: true, timeoutMs: 35_000 }); } // modèle plus rapide si le premier est trop lent

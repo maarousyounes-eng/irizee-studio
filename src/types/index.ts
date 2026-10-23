@@ -26,7 +26,7 @@ export interface Shoot {
 }
 export interface QC {
   texts: { expected: string; status: "ok" | "wrong" | "unreadable"; read: string }[];
-  color_ok: boolean; shape_ok: boolean; foreign_logo: boolean; anatomy_ok: boolean; skin_natural?: boolean; product_count?: number; all_copies_exact?: boolean; label_orientation_ok?: boolean;
+  color_ok: boolean; shape_ok: boolean; foreign_logo: boolean; anatomy_ok: boolean; skin_natural?: boolean; instruction_followed?: boolean; unwanted_changes?: string; ghost_or_duplicate?: boolean; product_count?: number; all_copies_exact?: boolean; label_orientation_ok?: boolean;
   product_height_pct: number; hero_foreground: boolean; proportion_ok: boolean; angle_ok: boolean;
   realism_0_10: number; comment: string;
 }
