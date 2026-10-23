@@ -62,3 +62,17 @@ export function zoneFromBox(box: unknown, pad = 0.02): Zone | null {
   if (w < 0.03 || h < 0.03) return null;
   return { x, y, w, h };
 }
+
+/** Plus petite zone contenant toutes les zones données. */
+export function unionZones(zones: Zone[]): Zone | null {
+  if (!zones.length) return null;
+  const x0 = Math.min(...zones.map((z) => z.x)), y0 = Math.min(...zones.map((z) => z.y));
+  const x1 = Math.max(...zones.map((z) => z.x + z.w)), y1 = Math.max(...zones.map((z) => z.y + z.h));
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+
+/** Plusieurs boîtes [ymin, xmin, ymax, xmax] (0–1000) → zones normalisées. */
+export function zonesFromBoxes(boxes: unknown, pad = 0.02): Zone[] {
+  if (!Array.isArray(boxes)) return [];
+  return boxes.map((b) => zoneFromBox(b, pad)).filter((z): z is Zone => !!z);
+}

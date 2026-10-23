@@ -89,7 +89,7 @@ export function correctionPrompt(a: { product: Product; rules: string[]; feedbac
   return [...head,
     `TASK: apply this correction requested by the client, and change nothing else: "${a.feedback}".`,
     zoneTxt,
-    "The product must remain identical to the packshot (shape, color, every printed text). Keep the composition and the person unless the correction says otherwise.",
+    "The product must remain identical to the packshot (shape, color, every printed text). Keep the SAME person (same face, hair, eyewear, jewelry, outfit), the SAME background, the SAME camera framing and the SAME lighting: change only what the correction asks for, and keep every other element exactly as it is. If an object moves or is re-held, completely erase it from its old position (no ghost or duplicate).",
     "Keep the visible fine skin texture and individual eyebrow hair strokes: never smooth the skin.",
     texts].filter(Boolean).join("\n");
 }
@@ -139,11 +139,11 @@ export function interpretPrompt(a: { feedback: string; hasZone: boolean }) {
     "You help a photo retoucher understand a client's correction request on an advertising photo of a cosmetics product. The client writes casually in French.",
     "Image 1 = the photo." + (a.hasZone ? " Image 2 = a zoomed crop of the area the client circled." : ""),
     `Client request: "${a.feedback}"`,
-    'Return JSON only: {"instruction": str, "understood": str, "scope": "local"|"global", "box": [ymin, xmin, ymax, xmax]}.',
+    'Return JSON only: {"instruction": str, "understood": str, "scope": "local"|"global", "boxes": [[ymin, xmin, ymax, xmax], ...]}.',
     "instruction = a precise English instruction for the retoucher: what exactly to change, in which element (hand, product, outfit, background, light, skin...), the target result. Never ask to change the product's shape, label text or logo unless the client explicitly asks to fix them to match the packshot.",
     "understood = one short French sentence (max 20 words) restating what will be changed, in simple words, so the client can check it was understood.",
     "scope = \"local\" when the change concerns ONE identifiable element or region (a hand, a finger, a face part, glasses, jewelry, an outfit piece, an object, the product), \"global\" only when it must affect the whole image (overall lighting or color grade, the whole background, the whole composition).",
-    "box = for a local scope, the bounding box of the whole element to modify in Image 1, with integer coordinates from 0 to 1000 relative to Image 1 (ymin, xmin, ymax, xmax). Cover the entire element generously. Use [0,0,1000,1000] for a global scope.",
+    "boxes = for a local scope, one bounding box for EVERY element involved in the change, in Image 1, with integer coordinates from 0 to 1000 relative to Image 1 (ymin, xmin, ymax, xmax). Include the ENTIRE product whenever it must move, be resized or be held differently (its current position will have to be erased), and the part of the body concerned (hand, arm, face part). Cover each element completely, never partially. Use [[0,0,1000,1000]] for a global scope.",
   ].join("\n");
 }
 
@@ -157,6 +157,7 @@ export function localEditPrompt(a: { product: Product; rules: string[]; instruct
     a.mode === "label"
       ? "TASK: fix ONLY the printed label of the product visible in the crop so that every word, logo and number matches the real packshot exactly, sharp and legible, with the same layout, text direction and colors."
       : `TASK: ${a.instruction}`,
+    "If the task moves, resizes or re-positions an object, you must COMPLETELY erase it from its previous position and rebuild the background and body parts that were behind it, so that no ghost, duplicate or leftover of the old object remains.",
     "HARD CONSTRAINTS: keep the exact same framing, camera angle, scale and position of every element, the same lighting, colors and background. Change ONLY what the task asks for. Everything that is not mentioned must stay pixel-identical to Image 1 (same person, same face, same outfit, same product, same text). Do not zoom, shift, crop or re-compose. Output the same crop with the same framing.",
     "Keep the visible fine skin texture and individual eyebrow hair strokes: never smooth the skin.",
     texts,

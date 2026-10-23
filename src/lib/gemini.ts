@@ -12,9 +12,9 @@ export const imgPart = (buf: Buffer | Uint8Array, mime: string): Part => ({
   inline_data: { mime_type: mime, data: Buffer.from(buf).toString("base64") },
 });
 
-interface Opts { image?: boolean; json?: boolean; aspect?: string; size?: string }
+interface Opts { image?: boolean; json?: boolean; aspect?: string; size?: string; timeoutMs?: number }
 
-export async function gemini(model: string, parts: Part[], { image, json, aspect, size }: Opts = {}) {
+export async function gemini(model: string, parts: Part[], { image, json, aspect, size, timeoutMs }: Opts = {}) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new Error("GEMINI_API_KEY manquante côté serveur");
   const generationConfig: Record<string, unknown> = image
@@ -30,7 +30,7 @@ export async function gemini(model: string, parts: Part[], { image, json, aspect
       method: "POST",
       headers: { "Content-Type": "application/json", "x-goog-api-key": key },
       body,
-      signal: AbortSignal.timeout(270_000),
+      signal: AbortSignal.timeout(timeoutMs ?? 270_000),
     });
     if (res.ok) return res.json();
     const txt = await res.text();

@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { MODELS, gemini, imgPart, firstImage, firstText, parseJson, type Part } from "./gemini";
 import sharp from "sharp";
 import { buildPrompt, correctionPrompt, formatPrompt, interpretPrompt, localEditPrompt, LOCATE_PRODUCT_PROMPT, qcPrompt, variationHint } from "./prompts";
-import { cropBoxFor, cropImage, pasteBack, zoneFromBox, type Zone } from "./localedit";
+import { cropBoxFor, cropImage, pasteBack, unionZones, zoneFromBox, zonesFromBoxes, type Zone } from "./localedit";
 import type { ImageRow, Product, QC } from "@/types";
 
 const BUCKET = "studio";
@@ -93,11 +93,14 @@ export async function generateImage(sb: SupabaseClient, image: ImageRow, userId:
           width: Math.max(1, Math.min(W - Math.round(userZone.x * W), Math.round(userZone.w * W))), height: Math.max(1, Math.min(H - Math.round(userZone.y * H), Math.round(userZone.h * H))),
         }).png().toBuffer() : null;
         const r = await gemini(MODELS.text, [{ text: interpretPrompt({ feedback: image.feedback ?? "", hasZone: !!zoneCrop }) }, imgPart(prev.buf, prev.mime), ...(zoneCrop ? [imgPart(zoneCrop, "image/png")] : [])], { json: true });
-        const it = parseJson<{ instruction?: string; understood?: string; scope?: string; box?: unknown }>(firstText(r));
+        const it = parseJson<{ instruction?: string; understood?: string; scope?: string; boxes?: unknown; box?: unknown }>(firstText(r));
         if (it.instruction) instruction = it.instruction;
-        if (!region && it.scope === "local") {
-          const z = zoneFromBox(it.box);
-          if (z && z.w * z.h < 0.7) region = z;
+        if (it.scope === "local") {
+          // La zone retouchée englobe la zone entourée ET chaque élément concerné en entier (ex. l'ancien produit à effacer)
+          const found = zonesFromBoxes(it.boxes ?? (it.box ? [it.box] : []));
+          const u = unionZones([...(userZone ? [userZone] : []), ...found]);
+          // Petit ou moyen élément : retouche locale (reste identique au pixel près). Grand changement (pose, produit tenu en main) : image complète.
+          region = u && u.w * u.h <= 0.45 ? u : null;
         }
         const understood = it.understood ? { understood: it.understood } : {};
         await sb.from("images").update({ params: { ...(image.params ?? {}), ...understood, localised: !!region } }).eq("id", image.id);
@@ -162,7 +165,10 @@ export async function qualityCheck(sb: SupabaseClient, image: ImageRow) {
   const { product, imagePaths } = await loadProduct(sb, shoot!.product_id);
   const pack = await download(sb, imagePaths[0]);
   const gen = await download(sb, image.path);
-  const r = await gemini(MODELS.vision, [{ text: qcPrompt(product) }, imgPart(pack.buf, pack.mime), imgPart(gen.buf, gen.mime)], { json: true });
+  const qcParts = [{ text: qcPrompt(product) }, imgPart(pack.buf, pack.mime), imgPart(gen.buf, gen.mime)];
+  let r: any;
+  try { r = await gemini(MODELS.vision, qcParts, { json: true, timeoutMs: 70_000 }); }
+  catch { r = await gemini(MODELS.text, qcParts, { json: true, timeoutMs: 35_000 }); } // modèle plus rapide si le premier est trop lent
   const qc = parseJson<QC>(firstText(r));
   qc.texts = qc.texts ?? [];
   const v = verdict(qc);
