@@ -82,7 +82,7 @@ export async function gemini(model: string, parts: Part[], { purpose, image, jso
     if (res.ok) {
       const j = await res.json();
       const n = ((j.candidates?.[0]?.content?.parts ?? []) as any[]).filter((x) => x.inlineData || x.inline_data).length;
-      await logCall({ purpose: why, model, status: "ok", ms: Date.now() - t0, usage: j.usageMetadata, imagesOut: n, size: image ? size ?? "1K" : undefined });
+      await logCall({ purpose: why, model, status: "ok", ms: Date.now() - t0, usage: j.usageMetadata, imagesOut: n, size: image ? size ?? "1K" : undefined, note: image && n === 0 ? noImageReason(j) : undefined });
       return j;
     }
     const txt = await res.text();
@@ -94,6 +94,13 @@ export async function gemini(model: string, parts: Part[], { purpose, image, jso
   throw lastErr;
 }
 
+/** Pourquoi Gemini n'a rendu aucune image (filtre de sécurité, contenu bloqué, texte seul…). */
+export function noImageReason(r: any): string {
+  const block = r?.promptFeedback?.blockReason;
+  const fin = r?.candidates?.[0]?.finishReason;
+  const txt = firstText(r).trim().slice(0, 120);
+  return [block && `bloqué (${block})`, fin && fin !== "STOP" && `fin : ${fin}`, txt && `message : ${txt}`].filter(Boolean).join(" · ") || "réponse vide";
+}
 export function firstText(r: any): string {
   return ((r.candidates?.[0]?.content?.parts ?? []) as any[]).filter((p) => p.text).map((p) => p.text).join("");
 }

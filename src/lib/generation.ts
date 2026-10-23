@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { MODELS, gemini, imgPart, firstImage, firstText, parseJson, withAiCtx, type Part } from "./gemini";
+import { MODELS, gemini, imgPart, firstImage, firstText, noImageReason, parseJson, withAiCtx, type Part } from "./gemini";
 import sharp from "sharp";
 import { buildPrompt, correctionPrompt, sizeLine, formatPrompt, interpretPrompt, localEditPrompt, LOCATE_PRODUCT_PROMPT, qcPrompt, variationHint } from "./prompts";
 import { cropBoxFor, cropImage, pasteBack, unionZones, zoneFromBox, zonesFromBoxes, type CropBox, type Zone } from "./localedit";
@@ -144,6 +144,7 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
   let buf: Buffer | null = null;
   let prevImg: { buf: Buffer; mime: string } | null = null;
   let origImg: { buf: Buffer; mime: string } | null = null;
+  let nInsp = 0;
 
   if (image.kind === "generated") {
     model = shoot.engine === "pro" ? MODELS.pro : shoot.engine === "flash" ? MODELS.flash : (image.variant_index % 2 === 0 ? MODELS.flash : MODELS.pro);
@@ -160,6 +161,7 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
       variation: variationHint(image.variant_index, shoot.no_people), nProductImages: packshots.length,
       hasModelRef: !!modelRef, modelDescription, noPeople: shoot.no_people,
     });
+    nInsp = inspirations.length;
     parts = [{ text: prompt }, ...packshots.map((p) => imgPart(p.buf, p.mime)), ...(modelRef ? [imgPart(modelRef.buf, modelRef.mime)] : []), ...inspirations.map((p) => imgPart(p.buf, p.mime))];
   } else {
     if (!image.parent_id) throw new Error("Image parente manquante");
@@ -286,11 +288,17 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
   }
 
   let lastErr: unknown;
+  let noImage = "";
   for (let a = 0; a < 2 && !buf; a++) {
-    try { buf = firstImage(await gemini(model, parts, { purpose: image.kind === "generated" ? "génération" : image.kind === "format" ? "déclinaison format" : "retouche globale", image: true, aspect, size: a === 0 ? shoot.size : undefined, signal })); }
-    catch (e) { lastErr = e; }
+    // 2e essai après un refus : sans les photos d'inspiration (déjà résumées en texte dans l'analyse), qui déclenchent souvent le filtre de sécurité
+    const tryParts = a === 1 && noImage && image.kind === "generated" && nInsp > 0 ? parts.slice(0, parts.length - nInsp) : parts;
+    try {
+      const resp = await gemini(model, tryParts, { purpose: image.kind === "generated" ? (a === 1 ? "génération (sans inspirations)" : "génération") : image.kind === "format" ? "déclinaison format" : "retouche globale", image: true, aspect, size: a === 0 ? shoot.size : undefined, signal });
+      buf = firstImage(resp);
+      if (!buf) noImage = noImageReason(resp);
+    } catch (e) { lastErr = e; }
   }
-  if (!buf) throw lastErr instanceof Error ? lastErr : new Error("Aucune image renvoyée par le modèle");
+  if (!buf) throw lastErr instanceof Error ? lastErr : new Error(`Google n'a renvoyé aucune image (${noImage || "raison inconnue"})`);
 
   // Annulée entre-temps : on ne l'enregistre pas et on ne la compte pas
   const { data: cur } = await sb.from("images").select("state, params").eq("id", image.id).single();
