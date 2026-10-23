@@ -113,9 +113,10 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
       if (retried.current.has(g) || list[0].created_by !== me.id) return;
       if (list.some((i) => i.state === "generating" || (i.state === "done" && !i.qc) || running.has(i.id))) return;
       const round = Number(list[0].params?.round ?? 0);
-      if (round >= 2) return;
+      if (round >= 1) return; // une seule relance automatique (chaque essai coûte de l'argent)
       const judged = list.filter((i) => i.state === "done" && i.qc);
-      if (!judged.length || judged.some((i) => i.qc!.instruction_followed !== false && !i.qc!.ghost_or_duplicate)) return;
+      if (!judged.length || judged.some((i) => i.qc!.unchanged)) return; // déjà 2 tentatives sans effet côté serveur : inutile de payer encore
+      if (judged.some((i) => i.qc!.instruction_followed !== false && !i.qc!.ghost_or_duplicate)) return;
       retried.current.add(g);
       const parent = images.find((i) => i.id === list[0].parent_id);
       if (!parent) return;
@@ -154,7 +155,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
       const r = await api<{ imageIds: string[] }>(`/api/images/${img.id}/correct`, { mode, feedback: v?.feedback ?? "", zones: v?.zones ?? [], remember: !!v?.remember, refs: v?.refs ?? [], avoid, round, candidates: 1 });
       setFix(null);
       await load(); run(r.imageIds);
-      flash(mode === "label" ? "Réparation de l'étiquette lancée" : round > 0 ? `La correction n'a pas marché : je réessaie automatiquement (essai ${round + 1}/3) avec une consigne plus précise` : v?.remember ? "Correction lancée — consigne mémorisée pour ce produit" : "Correction lancée : je vérifie le résultat et je réessaie seul si besoin");
+      flash(mode === "label" ? "Réparation de l'étiquette lancée" : round > 0 ? `La correction n'a pas marché : je réessaie automatiquement (essai ${round + 1}/2) avec une consigne plus précise` : v?.remember ? "Correction lancée — consigne mémorisée pour ce produit" : "Correction lancée : je vérifie le résultat et je réessaie seul si besoin");
     } catch (e) { flash(e instanceof Error ? e.message : "Erreur"); }
   }
 

@@ -54,7 +54,7 @@ export function buildPrompt(a: {
     all,
     "",
     a.product.look ? `Product appearance: ${a.product.look}` : "",
-    a.product.real_size ? `Real-world size: ${a.product.real_size}. Keep this exact scale versus hands and body.` : "",
+    a.product.real_size ? `Real-world size: ${a.product.real_size}. Keep this exact scale versus hands and body: a hand-held product of this size is only about as long as the model's hand (palm and fingers), never oversized, never giant.` : "",
     a.product.texts?.length ? `Exact printed texts on the product (must be legible and spelled exactly like this):\n${textsBlock(a.product)}` : "",
     "",
     a.analysis ? `Analysis of the inspiration photo (reproduce the concept, not the identity):\n${a.analysis}` : "",
@@ -73,6 +73,8 @@ const originalNote = "The image after Image 1 is the ORIGINAL version of this ph
 const refNote = (n: number) =>
   `The next ${n} image(s) are REFERENCE image(s) supplied by the client to show what they want (a pose, a grip, an arrangement, a style, an element). Reproduce the IDEA they show (pose, arrangement, shape) in the requested change, but never copy any person, face, brand, logo or text from them: the person, the product and everything else stay as in Image 1.`;
 
+export const sizeLine = (p: Product) => p.real_size ? `REAL SIZE of the product: ${p.real_size.replace(/\n/g, ", ")}. Respect this real scale relative to the hands and body (a hand-held product of this size is only about as long as the model's hand).` : "";
+
 export function correctionPrompt(a: { product: Product; rules: string[]; feedback: string; mode: "edit" | "label"; refCount?: number; hasOriginal?: boolean }) {
   const head = [
     "You are retouching an advertising photo for the cosmetics brand Irizée.",
@@ -90,6 +92,7 @@ export function correctionPrompt(a: { product: Product; rules: string[]; feedbac
     "ANATOMY: the person has exactly two arms and two hands. Never add an extra hand, arm, finger or limb, and never leave the old hand pose behind: modify the EXISTING hand and fingers only.",
     "THE REQUESTED CHANGE MUST BE CLEARLY VISIBLE in the result: never return an unchanged copy of Image 1. If the request is a pose change (a hand holding an object, a different gesture), actually redraw the hand and fingers in the new pose and move the object accordingly, while everything else stays as it is.",
     "The product must remain identical to the packshot (shape, color, every printed text). Keep the SAME person (same face, hair, eyewear, jewelry, outfit), the SAME background, the SAME camera framing and the SAME lighting: change only what the correction asks for, and keep every other element exactly as it is. If an object moves or is re-held, completely erase it from its old position (no ghost or duplicate).",
+    sizeLine(a.product),
     "Keep the visible fine skin texture and individual eyebrow hair strokes: never smooth the skin.",
     texts].filter(Boolean).join("\n");
 }
@@ -120,6 +123,7 @@ export function qcPrompt(p: Product, correction?: { instruction: string; refCoun
     "Image 1 = the REAL product packshot. Image 2 = a generated advertising photo that must show this exact product." + (correction ? " Image 3 = the same photo BEFORE a correction was applied." + (correction.refCount ? ` The last ${correction.refCount} image(s) are REFERENCE image(s) supplied by the client showing what they wanted.` : "") : ""),
     correction ? `A correction was requested: "${correction.instruction}". Compare image 3 (before) and image 2 (after): set instruction_followed to true ONLY if the requested change is clearly and convincingly visible in image 2 (for example, if a hand must hold the product, the fingers must visibly wrap around it and it must not float). List in unwanted_changes every element that changed although it was NOT requested (face, outfit, background, product shape or text, framing...), or an empty string if none. Set ghost_or_duplicate to true if a leftover, ghost or duplicate of a moved or removed object is visible. BE A DEMANDING ART DIRECTOR about the quality of the modified or added element: edit_quality_0_10 = how natural and well executed it is (correct proportions and scale, perspective, lighting, shadows, depth of field and sharpness consistent with the scene, clean edges, no distortion, no artifacts, realistic like a real photograph). Give 8 or more ONLY if you would publish it without any retouching; give 4 or less if it looks fake, pasted, deformed or badly drawn. List the visible defects of the modification in edit_defects (short French sentence, empty if none).${correction.refCount ? " Set matches_reference to false if the result clearly does not look like what the reference shows (same kind, style, shape, colors); otherwise true." : ""}` : "",
     `Expected printed texts on the product: ${JSON.stringify(p.texts ?? [])}.`,
+    p.real_size ? `Real size of the product: ${p.real_size.replace(/\n/g, ", ")}. proportion_ok must be false if it looks oversized or tiny compared with the hand and body.` : "",
     p.look ? `Expected look: ${p.look}` : "",
     "Judge the texts ONLY on the largest, most prominent product of image 2 (the hero product): ignore small, distant, blurred or partially hidden copies for the text check. For each expected text, read what is actually printed on that hero product and answer 'ok' (exactly right), 'wrong' (misspelled, garbled, mirrored or different) or 'unreadable' (too small, blurred or hidden).",
     "Also judge: color/material/shape/cap versus the real packshot; count how many product instances (bottles/tubes) are visible in total, and whether the other instances are faithful copies: set all_copies_exact to false ONLY if a copy has a clearly different silhouette, color, cap or logo layout than the real packshot; illegible or tiny text on small, blurred or background decorative copies is acceptable and must NOT cause a failure; whether the printed text direction on the product matches the packshot (not rotated or restyled); any foreign brand logo; natural anatomy of hands/fingers/face; whether the skin looks like real photographed skin (fine pores and texture still visible, brows with individual hair strokes, even with glamorous makeup and polished retouching) rather than plastic, blurred or AI-smooth skin; and composition (product height as % of the image height, product is a hero in the foreground, realistic scale versus hand/body, natural perspective).",
@@ -145,12 +149,13 @@ const RECIPES = [
   "- Skin too smooth: restore visible fine pores and natural texture while keeping the glamorous makeup.",
 ].join("\n");
 
-export function interpretPrompt(a: { feedback: string; hasZone: boolean; avoid?: string; refCount?: number; hasOriginal?: boolean }) {
+export function interpretPrompt(a: { realSize?: string; feedback: string; hasZone: boolean; avoid?: string; refCount?: number; hasOriginal?: boolean }) {
   return [
     "You help a photo retoucher understand a client's correction request on an advertising photo of a cosmetics product. The client writes casually in French and is not a technician: infer what they obviously mean.",
     "Image 1 = the photo to correct." + (a.hasOriginal ? " The next image is the ORIGINAL version of this photo, before any earlier correction." : "") + (a.hasZone ? " The next image is a zoomed crop of the area the client circled." : ""),
     "STRICT FIDELITY TO THE REQUEST: the instruction must contain ONLY what the client asked for, interpreted generously but never extended. Do NOT add any other change: no new clothes, shoes or accessories, no spelling fixes, no retouching or improvement that the client did not mention. If the client says that something disappeared, changed, or is missing compared to the main/original photo, the task is to RESTORE ONLY that named element exactly as it was in the ORIGINAL image. Every other difference between the current photo and the original is an intentional earlier correction and MUST be kept as it is.",
     a.refCount ? `The LAST ${a.refCount} image(s) are REFERENCE image(s) the client supplied only to EXPLAIN what they want (a pose, a grip, an arrangement, a style, an element). IMPORTANT: the retoucher will NEVER see these references and nothing from them must be pasted or copied into the photo. Describe in the instruction, in precise words, everything to reproduce: where the hand and each finger are, how they wrap around the object, the angle, the orientation, the arrangement, the proportions. Never describe or reuse the person's identity, brand, logo, text or background of the reference.` : "",
+    a.realSize ? `REAL SIZE of the product: ${a.realSize.replace(/\n/g, ", ")}. If the request concerns the size or scale of the product, write the instruction with concrete proportions based on this real size (for example: the tube must be about as long as the model's hand, from wrist to fingertips, and clearly smaller than her face and shoulders).` : "",
     `Client request: "${a.feedback}"`,
     a.avoid ? `A previous attempt FAILED because: ${a.avoid}. Write the instruction so that this mistake does not happen again, with more explicit and concrete details.` : "",
     'Return JSON only: {"instruction": str, "understood": str, "scope": "local"|"global", "intent": "edit"|"label", "boxes": [[ymin, xmin, ymax, xmax], ...]}.',
@@ -175,6 +180,7 @@ export function localEditPrompt(a: { product: Product; rules: string[]; instruct
       : `TASK: ${a.instruction}`,
     "If the task moves, resizes or re-positions an object, you must COMPLETELY erase it from its previous position and rebuild the background and body parts that were behind it, so that no ghost, duplicate or leftover of the old object remains.",
     "HARD CONSTRAINTS: keep the exact same framing, camera angle, scale and position of every element, the same lighting, colors and background. Change ONLY what the task asks for. Everything that is not mentioned must stay pixel-identical to Image 1 (same person, same face, same outfit, same product, same text). Do not zoom, shift, crop or re-compose. Output the same crop with the same framing.",
+    a.mode === "edit" ? sizeLine(a.product) : "",
     "Keep the visible fine skin texture and individual eyebrow hair strokes: never smooth the skin.",
     texts,
   ].filter(Boolean).join("\n");

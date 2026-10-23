@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { MODELS, gemini, imgPart, firstImage, firstText, parseJson, withAiCtx, type Part } from "./gemini";
 import sharp from "sharp";
-import { buildPrompt, correctionPrompt, formatPrompt, interpretPrompt, localEditPrompt, LOCATE_PRODUCT_PROMPT, qcPrompt, variationHint } from "./prompts";
+import { buildPrompt, correctionPrompt, sizeLine, formatPrompt, interpretPrompt, localEditPrompt, LOCATE_PRODUCT_PROMPT, qcPrompt, variationHint } from "./prompts";
 import { cropBoxFor, cropImage, pasteBack, unionZones, zoneFromBox, zonesFromBoxes, type CropBox, type Zone } from "./localedit";
 import type { ImageRow, Product, QC } from "@/types";
 
@@ -70,6 +70,22 @@ async function localEditCrop(a: {
   return edited ? { edited, box } : null;
 }
 
+/** Vrai si l'image a réellement changé (comparaison de pixels, sans IA, gratuite). */
+async function hasChanged(a: Buffer, b: Buffer): Promise<boolean> {
+  const raw = (x: Buffer) => sharp(x).resize(256, 256, { fit: "fill" }).greyscale().raw().toBuffer();
+  const [ra, rb] = await Promise.all([raw(a), raw(b)]);
+  let diff = 0;
+  for (let i = 0; i < ra.length; i++) if (Math.abs(ra[i] - rb[i]) > 22) diff++;
+  return diff / ra.length > 0.003;
+}
+
+const UNCHANGED_QC = {
+  texts: [], color_ok: true, shape_ok: true, foreign_logo: false, anatomy_ok: true, instruction_followed: false, unchanged: true,
+  edit_quality_0_10: 0, edit_defects: "Le modèle a renvoyé la photo sans la modifier, même après une 2e tentative renforcée. Entoure la zone concernée pour une retouche locale, ou reformule.",
+  product_height_pct: 0, hero_foreground: true, proportion_ok: true, angle_ok: true, realism_0_10: 0,
+  comment: "Aucun changement visible : contrôle qualité non lancé (pas de dépense inutile).",
+} as unknown as QC;
+
 /** Boîte du produit principal (pour réparer son étiquette sans toucher au reste). */
 async function locateProduct(img: { buf: Buffer; mime: string }): Promise<Zone | null> {
   try {
@@ -87,7 +103,7 @@ function splitTasks(text: string): string[] {
 export interface Interpretation { instruction: string; understood: string; region: Zone | null; intent: "edit" | "label" }
 
 /** Comprend la demande : instruction précise, phrase « Compris », zone à retoucher (zone entourée + éléments concernés). */
-export async function interpretCorrection(prev: { buf: Buffer; mime: string }, feedback: string, userZone: Zone | null, avoid?: string, refs: { buf: Buffer; mime: string }[] = [], original: { buf: Buffer; mime: string } | null = null): Promise<Interpretation> {
+export async function interpretCorrection(prev: { buf: Buffer; mime: string }, feedback: string, userZone: Zone | null, avoid?: string, refs: { buf: Buffer; mime: string }[] = [], original: { buf: Buffer; mime: string } | null = null, realSize?: string): Promise<Interpretation> {
   const meta = await sharp(prev.buf).metadata();
   const W = meta.width ?? 0, H = meta.height ?? 0;
   let instruction = feedback, understood = "", region: Zone | null = userZone, intent: "edit" | "label" = "edit";
@@ -96,7 +112,7 @@ export async function interpretCorrection(prev: { buf: Buffer; mime: string }, f
       left: Math.round(Math.max(0, userZone.x * W)), top: Math.round(Math.max(0, userZone.y * H)),
       width: Math.max(1, Math.min(W - Math.round(userZone.x * W), Math.round(userZone.w * W))), height: Math.max(1, Math.min(H - Math.round(userZone.y * H), Math.round(userZone.h * H))),
     }).png().toBuffer() : null;
-    const r = await gemini(MODELS.text, [{ text: interpretPrompt({ feedback, hasZone: !!zoneCrop, avoid, refCount: refs.length, hasOriginal: !!original }) }, imgPart(prev.buf, prev.mime), ...(original ? [imgPart(original.buf, original.mime)] : []), ...(zoneCrop ? [imgPart(zoneCrop, "image/png")] : []), ...refs.map((r) => imgPart(r.buf, r.mime))], { purpose: "localisation produit", json: true, timeoutMs: 40_000 });
+    const r = await gemini(MODELS.text, [{ text: interpretPrompt({ realSize, feedback, hasZone: !!zoneCrop, avoid, refCount: refs.length, hasOriginal: !!original }) }, imgPart(prev.buf, prev.mime), ...(original ? [imgPart(original.buf, original.mime)] : []), ...(zoneCrop ? [imgPart(zoneCrop, "image/png")] : []), ...refs.map((r) => imgPart(r.buf, r.mime))], { purpose: "localisation produit", json: true, timeoutMs: 40_000 });
     const it = parseJson<{ instruction?: string; understood?: string; scope?: string; intent?: string; boxes?: unknown; box?: unknown }>(firstText(r));
     if (it.intent === "label") intent = "label";
     if (it.instruction) instruction = it.instruction;
@@ -126,6 +142,8 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
   let parts: Part[] = [];
   let model: string;
   let buf: Buffer | null = null;
+  let prevImg: { buf: Buffer; mime: string } | null = null;
+  let origImg: { buf: Buffer; mime: string } | null = null;
 
   if (image.kind === "generated") {
     model = shoot.engine === "pro" ? MODELS.pro : shoot.engine === "flash" ? MODELS.flash : (image.variant_index % 2 === 0 ? MODELS.flash : MODELS.pro);
@@ -166,6 +184,7 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
       }
       if (rootPath && rootPath !== parent.path) original = await download(sb, rootPath).catch(() => null);
     }
+    prevImg = prev; origImg = original;
     let instruction: string = prm.instruction ?? image.feedback ?? "";
     let region: Zone | null = prm.region ?? null;
     let editMode: "edit" | "label" = image.kind === "label" ? "label" : "edit";
@@ -175,7 +194,7 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
     // Plusieurs demandes (une par ligne) : chacune est traitée à sa manière, puis recollées sur la même image
     const tasks = image.kind === "correction" && zonesIn.length === 0 ? splitTasks(image.feedback ?? "") : [];
     if (tasks.length >= 2 && W && H) {
-      const its = await Promise.all(tasks.map((t) => interpretCorrection(prev, t, null, prm.avoid, refs, original)));
+      const its = await Promise.all(tasks.map((t) => interpretCorrection(prev, t, null, prm.avoid, refs, original, product.real_size)));
       const items = its.map((it, k) => ({ it, k }));
       const labelTasks = items.filter(({ it }) => it.intent === "label");
       const localTasks = items.filter(({ it }) => it.intent !== "label" && it.region);
@@ -220,7 +239,7 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
 
     if (image.kind === "correction" && zonesIn.length >= 2 && W && H && !buf) {
       const outs = await Promise.all(zonesIn.slice(0, 5).map(async (z) => {
-        const it = await interpretCorrection(prev, (z.note ?? "").trim() || image.feedback || "", z, prm.avoid, refs, original);
+        const it = await interpretCorrection(prev, (z.note ?? "").trim() || image.feedback || "", z, prm.avoid, refs, original, product.real_size);
         const reg: Zone = it.region ?? z;
         const r = await localEditCrop({ prev: prev.buf, W, H, region: reg, instruction: it.instruction, mode: "edit", product, rules, refs, packshots, original, model, signal });
         return r ? { ...r, region: reg, understood: it.understood, instruction: it.instruction } : null;
@@ -239,7 +258,7 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
 
     if (image.kind === "correction" && !prm.instruction && !buf) {
       // Filet de sécurité : demande non interprétée à la création
-      const it = await interpretCorrection(prev, image.feedback ?? "", zonesIn[0] ?? null, prm.avoid, refs, original);
+      const it = await interpretCorrection(prev, image.feedback ?? "", zonesIn[0] ?? null, prm.avoid, refs, original, product.real_size);
       instruction = it.instruction; region = it.region;
       if (it.intent === "label") { editMode = "label"; const z = await locateProduct(prev); region = z; }
       await sb.from("images").update({ params: { ...prm, instruction, understood: it.understood, region } }).eq("id", image.id);
@@ -277,6 +296,21 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
   const { data: cur } = await sb.from("images").select("state, params").eq("id", image.id).single();
   if (!cur || cur.state !== "generating" || (cur.params as any)?.cancelled) return;
 
+  // Retouche sans effet ? (comparaison de pixels gratuite) → 2e tentative renforcée, avec la taille réelle du produit
+  let unchanged = false;
+  if (image.kind === "correction" && prevImg && buf && !(await hasChanged(prevImg.buf, buf))) {
+    const instr = String((cur.params as any)?.instruction ?? image.feedback ?? "");
+    const strong = correctionPrompt({
+      product, rules, mode: "edit", hasOriginal: !!origImg,
+      feedback: `${instr}\nCRITICAL: a previous attempt returned the photo practically unchanged, which is a failure. This time the change MUST be obvious at first glance. ${sizeLine(product)} Redraw the affected elements from scratch if needed, keeping everything else (person, face, hair, background, light, product design and printed texts) the same.`,
+    });
+    const sp: Part[] = [{ text: strong }, imgPart(prevImg.buf, prevImg.mime), ...(origImg ? [imgPart(origImg.buf, origImg.mime)] : []), ...packshots.map((p) => imgPart(p.buf, p.mime))];
+    try {
+      const nb = firstImage(await gemini(MODELS.pro, sp, { purpose: "retouche renforcée", image: true, aspect, size: shoot.size, signal, timeoutMs: left() }));
+      if (nb && (await hasChanged(prevImg.buf, nb))) buf = nb; else unchanged = true;
+    } catch { unchanged = true; }
+  }
+
   // Image finale en JPEG haute qualité (≈ 1 Mo au lieu de 3-7 Mo en PNG) + miniature WebP pour les grilles
   const full = await sharp(buf).jpeg({ quality: 94, chromaSubsampling: "4:4:4", mozjpeg: true }).toBuffer();
   const thumb = await sharp(buf).resize({ width: 640, withoutEnlargement: true }).webp({ quality: 78 }).toBuffer();
@@ -287,7 +321,7 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
     sb.storage.from(BUCKET).upload(thumbPath, thumb, { contentType: "image/webp", upsert: true }),
   ]);
   if (up.error) throw new Error("Enregistrement de l'image impossible : " + up.error.message);
-  await sb.from("images").update({ path, thumb_path: upT.error ? null : thumbPath, state: "done", model_used: model, error: null, aspect }).eq("id", image.id);
+  await sb.from("images").update({ path, thumb_path: upT.error ? null : thumbPath, state: "done", model_used: model, error: null, aspect, ...(unchanged ? { qc: UNCHANGED_QC, verdict: "rejected", score: 0 } : {}) }).eq("id", image.id);
   await sb.from("usage_events").insert({ user_id: userId, kind: image.kind, units: 1, model });
 }
 
