@@ -62,7 +62,7 @@ async function localEditCrop(a: {
   if (a.original) {
     try { const om = await sharp(a.original.buf).metadata(); if (om.width === a.W && om.height === a.H) originalCrop = await cropImage(a.original.buf, box); } catch { originalCrop = null; }
   }
-  const lp = [{ text: localEditPrompt({ product: a.product, rules: a.rules, instruction: a.instruction, mode: a.mode, refCount: a.refs.length, hasOriginal: !!originalCrop }) }, imgPart(crop, "image/png"), ...(originalCrop ? [imgPart(originalCrop, "image/png")] : []), ...a.refs.map((r) => imgPart(r.buf, r.mime)), ...a.packshots.map((p) => imgPart(p.buf, p.mime))] as Part[];
+  const lp = [{ text: localEditPrompt({ product: a.product, rules: a.rules, instruction: a.instruction, mode: a.mode, hasOriginal: !!originalCrop }) }, imgPart(crop, "image/png"), ...(originalCrop ? [imgPart(originalCrop, "image/png")] : []), ...a.packshots.map((p) => imgPart(p.buf, p.mime))] as Part[];
   let edited: Buffer | null = null;
   for (let t = 0; t < 2 && !edited; t++) {
     try { edited = firstImage(await gemini(a.model, lp, { image: true, aspect: box.ratio, size: t === 0 ? "2K" : undefined, signal: a.signal })); } catch { /* nouvelle tentative */ }
@@ -193,8 +193,8 @@ export async function generateImage(sb: SupabaseClient, image: ImageRow, userId:
       // Modification globale (lumière, fond entier…) ou repli : régénération complète de l'image
       const prompt = image.kind === "format"
         ? formatPrompt({ product, rules, aspect })
-        : correctionPrompt({ product, rules, feedback: instruction, mode: image.kind === "label" ? "label" : "edit", refCount: refs.length, hasOriginal: !!original });
-      parts = [{ text: prompt }, imgPart(prev.buf, prev.mime), ...(original ? [imgPart(original.buf, original.mime)] : []), ...refs.map((r) => imgPart(r.buf, r.mime)), ...packshots.map((p) => imgPart(p.buf, p.mime))];
+        : correctionPrompt({ product, rules, feedback: instruction, mode: image.kind === "label" ? "label" : "edit", hasOriginal: !!original });
+      parts = [{ text: prompt }, imgPart(prev.buf, prev.mime), ...(original ? [imgPart(original.buf, original.mime)] : []), ...packshots.map((p) => imgPart(p.buf, p.mime))];
     }
   }
 

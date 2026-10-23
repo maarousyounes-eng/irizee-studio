@@ -181,7 +181,7 @@ export default function CorrectionModal({ bases, currentId, aspect, isStaff, onC
               </div>
             )}
             {refError && <p className="text-[11px] text-[#E8444A] mt-1">{refError}</p>}
-            <p className="text-[11px] text-[#A0A0A8] mt-1">Elle sert d&apos;exemple de ce que tu veux (pose, geste, disposition). Le visage, la marque et le texte de la référence ne sont jamais copiés.</p>
+            <p className="text-[11px] text-[#A0A0A8] mt-1">La plateforme la regarde pour comprendre ce que tu veux (pose, geste, disposition) et le traduit en mots. Elle n&apos;est jamais collée ni copiée dans l&apos;image.</p>
           </div>
           {isStaff && (
             <label className="flex items-start gap-2 text-[12px] text-[#6B6B72]">
