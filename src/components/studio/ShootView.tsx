@@ -377,9 +377,18 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
       {visible.length === 0 && <p className="text-sm text-[#6B6B72] text-center py-10">Aucune image dans ce filtre.</p>}
 
       <Lightbox src={zoom} onClose={() => setZoom(null)} />
-      {fix && (() => { const img = images.find((i) => i.id === fix); const url = img?.path ? (img.thumb_path && urls[img.thumb_path] ? urls[img.thumb_path] : urls[img.path]) : undefined; return img && url ? (
-        <CorrectionModal imageUrl={url} aspect={img.aspect ?? shoot.aspect} isStaff={isStaff} onClose={() => setFix(null)} onSubmit={(v) => submitFix(img, "edit", v)} />
-      ) : null; })()}
+      {fix && (() => {
+        const img = images.find((i) => i.id === fix);
+        if (!img?.path) return null;
+        // Chaîne des versions (de l'originale à l'image courante) : on peut repartir d'une version précédente
+        const chain: ImageRow[] = []; let cur: ImageRow | undefined = img;
+        for (let k = 0; cur && k < 8; k++) { if (cur.path) chain.unshift(cur); cur = images.find((i) => i.id === cur!.parent_id); }
+        const bases = chain.map((c, k) => ({ id: c.id, label: k === 0 && !c.parent_id ? "Originale" : `Version ${c.version}`, url: (c.thumb_path && urls[c.thumb_path]) || urls[c.path!] })).filter((b) => b.url);
+        return bases.length ? (
+          <CorrectionModal bases={bases} currentId={img.id} aspect={img.aspect ?? shoot.aspect} isStaff={isStaff} onClose={() => setFix(null)}
+            onSubmit={(v) => submitFix(images.find((i) => i.id === v.baseId) ?? img, "edit", v)} />
+        ) : null;
+      })()}
       {compare && (() => { const img = images.find((i) => i.id === compare); const par = images.find((i) => i.id === img?.parent_id); const a = par?.path ? urls[par.path] : undefined; const b = img?.path ? urls[img.path] : undefined; return img && a && b ? (
         <Modal title="Avant / après" onClose={() => setCompare(null)} wide>
           <div className="grid grid-cols-2 gap-3">

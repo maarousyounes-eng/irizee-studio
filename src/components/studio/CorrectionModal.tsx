@@ -22,15 +22,21 @@ const PRESETS: { label: string; text: string }[] = [
   { label: "Enlever un élément", text: "Supprime de l'image : " },
 ];
 
+export interface BaseVersion { id: string; label: string; url: string }
+
 interface Props {
-  imageUrl: string;
+  bases: BaseVersion[];
+  currentId: string;
   aspect: string;
   isStaff: boolean;
   onClose: () => void;
-  onSubmit: (v: { feedback: string; zone: Zone | null; remember: boolean; refs: string[] }) => Promise<void> | void;
+  onSubmit: (v: { feedback: string; zone: Zone | null; remember: boolean; refs: string[]; baseId: string }) => Promise<void> | void;
 }
 
-export default function CorrectionModal({ imageUrl, aspect, isStaff, onClose, onSubmit }: Props) {
+export default function CorrectionModal({ bases, currentId, aspect, isStaff, onClose, onSubmit }: Props) {
+  const [baseId, setBaseId] = useState(currentId);
+  const base = bases.find((b) => b.id === baseId) ?? bases[bases.length - 1];
+  const imageUrl = base.url;
   const box = useRef<HTMLDivElement>(null);
   const start = useRef<{ x: number; y: number } | null>(null);
   const [zone, setZone] = useState<Zone | null>(null);
@@ -79,13 +85,28 @@ export default function CorrectionModal({ imageUrl, aspect, isStaff, onClose, on
 
   async function apply() {
     setBusy(true);
-    try { await onSubmit({ feedback: text.trim(), zone, remember, refs: refs.map((r) => r.path) }); } finally { setBusy(false); }
+    try { await onSubmit({ feedback: text.trim(), zone, remember, refs: refs.map((r) => r.path), baseId }); } finally { setBusy(false); }
   }
 
   return (
     <Modal title="Corriger cette image" onClose={onClose} wide>
       <div className="grid md:grid-cols-[minmax(0,320px)_1fr] gap-6">
         <div>
+          {bases.length > 1 && (
+            <div className="mb-4">
+              <Label>Partir de quelle version ?</Label>
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {bases.map((b) => (
+                  <button key={b.id} onClick={() => { setBaseId(b.id); setZone(null); }} className={`flex-shrink-0 w-16 text-left rounded-lg border-2 overflow-hidden ${b.id === baseId ? "border-[#2B6EE8]" : "border-[#E4E4E7] opacity-70 hover:opacity-100"}`}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={b.url} alt={b.label} className="w-full aspect-[4/5] object-cover" />
+                    <span className="block text-[9px] font-semibold px-1 py-0.5 truncate">{b.label}</span>
+                  </button>
+                ))}
+              </div>
+              {bases.length >= 4 && <p className="text-[11px] text-[#B45309] mt-1">Cette image a déjà {bases.length - 1} corrections successives : à chaque régénération la qualité peut se dégrader. Repars plutôt d&apos;une version précédente.</p>}
+            </div>
+          )}
           <Label>1. Entoure la zone concernée <span className="normal-case tracking-normal font-normal">(facultatif)</span></Label>
           <div ref={box} onPointerDown={down} onPointerMove={move} onPointerUp={up}
             className="relative rounded-xl overflow-hidden border border-[#E4E4E7] cursor-crosshair touch-none select-none bg-[#F4F4F5]" style={{ aspectRatio: aspect.replace(":", " / ") }}>
@@ -111,7 +132,7 @@ export default function CorrectionModal({ imageUrl, aspect, isStaff, onClose, on
           <div>
             <Label>3. Dis ce que tu veux changer</Label>
             <textarea className={INPUT + " min-h-[110px]"} value={text} onChange={(e) => setText(e.target.value)} autoFocus
-              placeholder="Ex : la main de gauche a six doigts / le flacon est trop grand / enlève les lunettes" />
+              placeholder="Ex : la main de gauche a six doigts / le flacon est trop grand / enlève les lunettes. Tu peux écrire plusieurs demandes à la suite, une par ligne." />
             <p className="text-[11px] text-[#A0A0A8] mt-1">Écris comme tu parles. La plateforme génère 1 version et la vérifie (ta demande est-elle faite ? rien d&apos;autre n&apos;a-t-il changé ?). Si ce n&apos;est pas le cas, elle réessaie seule, jusqu&apos;à 2 fois. Le « Compris : … » sur la carte te montre comment ta demande a été interprétée.</p>
           </div>
           <div>
