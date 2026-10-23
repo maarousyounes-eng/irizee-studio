@@ -32,7 +32,7 @@ const textsBlock = (p: Product) => (p.texts ?? []).map((t) => `- ${t}`).join("\n
 
 export function buildPrompt(a: {
   product: Product; rules: string[]; userPrompt: string; aspect: string; analysis: string;
-  variation: string; nProductImages: number; hasModelRef: boolean; modelDescription?: string; noPeople: boolean; copies: "single" | "inspiration";
+  variation: string; nProductImages: number; hasModelRef: boolean; modelDescription?: string; noPeople: boolean;
 }) {
   const all = numbered([...a.rules, ...(a.product.rules ?? [])]);
   const people = a.noPeople
@@ -40,9 +40,10 @@ export function buildPrompt(a: {
     : a.hasModelRef
       ? `The person in the photo MUST be exactly the same fictional person as in the MODEL REFERENCE image: reproduce that exact face (face shape, eyes, eyebrows, nose, lips, freckles and marks), the same skin tone, age impression and hair colour${a.modelDescription ? `. Description: ${a.modelDescription}` : ""}. Only the outfit, pose and expression come from the brief. Never use the person from the inspiration images.`
       : a.variation;
-  const copies = a.copies === "inspiration"
-    ? "PRODUCT COUNT: you may repeat the product several times as in the inspiration (floating, scattered, different scales), but EVERY copy, even small or blurred, must be an exact replica of the real packshot: same proportions, same label layout, same text direction along the product, same cap and colors. Never invent a different product shape."
-    : "PRODUCT COUNT: show the product EXACTLY ONCE, as the single hero. The inspiration may contain several repeated or floating products: do NOT copy that. Do not add any other bottle, tube, jar or stick anywhere in the image (no duplicates, no floating copies, no look-alike props).";
+  // Le nombre de produits suit l'inspiration (un produit héros, ou plusieurs copies), sauf consigne contraire du client.
+  const copies =
+    "PRODUCT ARRANGEMENT: reproduce the arrangement of the product(s) seen in the inspiration (a single hero product, or several repeated / floating copies at different scales), unless the client brief says otherwise. " +
+    "EVERY copy of the product, even small, blurred or in the background, must be an exact replica of the real packshot: same proportions, same label layout, same text direction along the product, same cap and colors. Never invent a different product shape and never add look-alike products that are not the packshot.";
   return [
     "You are a world-class advertising photographer producing a photorealistic campaign photo for the cosmetics brand Irizée.",
     `The FIRST ${a.nProductImages} image(s) are the REAL product reference photos (packshots) of "${a.product.name}".` +
@@ -123,5 +124,6 @@ export const EXTRACT_PROMPT =
   'This is a packshot of a cosmetics product. Return JSON only: {"name":str (product name as printed, short),"texts":[every distinct printed text on the product, exactly as printed, accents included. Join the lines that belong to the same sentence or title into ONE string. Include the volume line and the brand logo word],"look":str (2 sentences in English: shape, material, colors, cap; and the layout of the printed text, including its direction relative to the product axis: horizontal, or vertical along the length, and the reading direction of the large logo),"realSize":str (estimated real-world size in English from the volume and shape, e.g. "about 9 cm tall, fits in the palm of one hand")}';
 
 export const ANALYZE_PROMPT =
-  "Describe this advertising photo in about 120 words, in English, as a brief for a photographer: camera angle and lens, composition, lighting, color palette, background and graphic elements, styling and mood, and where the hero product sits relative to the person (foreground/hand). " +
-  "Refer to any product only as \"the product\": do NOT describe the product's type, shape or packaging, and do NOT say how many products appear or that they float or repeat. Do NOT describe the identity of any person and do NOT mention any brand names or text printed in the image.";
+  "Describe this advertising photo in about 120 words, in English, as a brief for a photographer: camera angle and lens, composition, lighting, color palette, background and graphic elements, styling and mood. " +
+  "Say how the product(s) are arranged (a single hero product or several copies, their relative scale, whether they float or are held), but refer to them only as \"the product\": do NOT describe the product's type, shape or packaging. " +
+  "Do NOT describe the identity of any person and do NOT mention any brand names or text printed in the image.";

@@ -67,7 +67,7 @@ export async function generateImage(sb: SupabaseClient, image: ImageRow, userId:
     const prompt = buildPrompt({
       product, rules, userPrompt: shoot.prompt, aspect, analysis: shoot.analysis ?? "",
       variation: variationHint(image.variant_index, shoot.no_people), nProductImages: packshots.length,
-      hasModelRef: !!modelRef, modelDescription, noPeople: shoot.no_people, copies: shoot.product_copies === "inspiration" ? "inspiration" : "single",
+      hasModelRef: !!modelRef, modelDescription, noPeople: shoot.no_people,
     });
     parts = [{ text: prompt }, ...packshots.map((p) => imgPart(p.buf, p.mime)), ...(modelRef ? [imgPart(modelRef.buf, modelRef.mime)] : []), ...inspirations.map((p) => imgPart(p.buf, p.mime))];
   } else {
