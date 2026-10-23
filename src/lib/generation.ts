@@ -59,8 +59,9 @@ export async function generateImage(sb: SupabaseClient, image: ImageRow, userId:
     const inspirations = await Promise.all((shoot.inspiration_paths as string[]).map((p) => download(sb, p)));
     let modelRef: { buf: Buffer; mime: string } | null = null;
     let modelDescription = "";
-    if (shoot.model_id && !shoot.no_people) {
-      const { data: m } = await sb.from("models").select("path, description").eq("id", shoot.model_id).single();
+    const modelId = (image as any).model_id ?? shoot.model_id;
+    if (modelId && !shoot.no_people) {
+      const { data: m } = await sb.from("models").select("path, description").eq("id", modelId).single();
       if (m?.path) { modelRef = await download(sb, m.path); modelDescription = m.description; }
     }
     const prompt = buildPrompt({
@@ -100,10 +101,10 @@ function verdict(qc: QC) {
   const wrong = qc.texts.filter((t) => t.status === "wrong").length;
   const unread = qc.texts.filter((t) => t.status === "unreadable").length;
   const hard = wrong > 0 || !qc.color_ok || !qc.shape_ok || qc.foreign_logo || !qc.anatomy_ok;
-  const soft = unread > 1 || !qc.hero_foreground || !qc.proportion_ok || !qc.angle_ok || (qc.product_height_pct ?? 100) < 20 || qc.realism_0_10 < 6;
+  const soft = qc.skin_natural === false || unread > 1 || !qc.hero_foreground || !qc.proportion_ok || !qc.angle_ok || (qc.product_height_pct ?? 100) < 20 || qc.realism_0_10 < 6;
   const score = Math.max(0, Math.min(100, Math.round(
     qc.realism_0_10 * 6 - wrong * 12 - unread * 3 - (qc.color_ok ? 0 : 20) - (qc.shape_ok ? 0 : 15) - (qc.foreign_logo ? 20 : 0)
-    - (qc.anatomy_ok ? 0 : 10) - (qc.hero_foreground ? 0 : 8) - (qc.proportion_ok ? 0 : 8) - (qc.angle_ok ? 0 : 5) + 40)));
+    - (qc.anatomy_ok ? 0 : 10) - (qc.skin_natural === false ? 15 : 0) - (qc.hero_foreground ? 0 : 8) - (qc.proportion_ok ? 0 : 8) - (qc.angle_ok ? 0 : 5) + 40)));
   return { verdict: (hard ? "rejected" : soft ? "review" : "valid") as ImageRow["verdict"], score };
 }
 

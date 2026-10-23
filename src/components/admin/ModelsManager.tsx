@@ -89,7 +89,7 @@ export default function ModelsManager({ initial, userId }: { initial: Model[]; u
             <div><Label>Nom interne</Label><input className={INPUT} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex : Nila" autoFocus /></div>
             <div>
               <Label>Apparence</Label>
-              <textarea className={INPUT + " min-h-[100px]"} value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="Âge, teint, cheveux, traits…" />
+              <textarea className={INPUT + " min-h-[100px]"} value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="Âge, teint, cheveux, traits, maquillage (ex : eyeliner graphique, gloss)…" />
               <div className="flex flex-wrap gap-1.5 mt-2">{EXAMPLES.map((e, i) => <button key={i} onClick={() => setDesc(e)} className="text-[11px] px-2 py-1 rounded-lg bg-[#F4F4F5] hover:bg-[#EBF2FF] text-[#6B6B72]">Exemple {i + 1}</button>)}</div>
             </div>
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={brand} onChange={(e) => setBrand(e.target.checked)} /> Mannequin de la marque (visage récurrent)</label>

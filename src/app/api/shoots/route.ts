@@ -22,13 +22,14 @@ export async function POST(req: Request) {
       const { data: c } = await sb.from("concepts").select("analysis").eq("id", b.conceptId).single();
       analysis = c?.analysis ?? null;
     }
+    const modelIds: string[] = Array.isArray(b.modelIds) ? b.modelIds.filter((x: unknown) => typeof x === "string").slice(0, 12) : [];
     const paths: string[] = Array.isArray(b.inspirationPaths) ? b.inspirationPaths : [];
     if (!analysis && paths.length) {
       try { analysis = await analyzeInspirations(sb, paths, ANALYZE_PROMPT); } catch { analysis = null; }
     }
 
     const { data: shoot, error } = await sb.from("shoots").insert({
-      project_id: b.projectId || null, product_id: b.productId, model_id: b.modelId || null, concept_id: b.conceptId || null,
+      project_id: b.projectId || null, product_id: b.productId, model_id: modelIds[0] ?? null, model_ids: modelIds, concept_id: b.conceptId || null,
       prompt: String(b.prompt).trim(), aspect: b.aspect, size: ["1K", "2K", "4K"].includes(b.size) ? b.size : "2K",
       engine: ["flash", "pro", "mix"].includes(b.engine) ? b.engine : "mix", no_people: !!b.noPeople,
       inspiration_paths: paths, analysis, created_by: user.id,
@@ -37,6 +38,7 @@ export async function POST(req: Request) {
 
     const rows = Array.from({ length: n }, (_, i) => ({
       shoot_id: shoot.id, kind: "generated", variant_index: i, aspect: b.aspect, created_by: user.id,
+      model_id: b.noPeople || !modelIds.length ? null : modelIds[i % modelIds.length],
     }));
     const { data: imgs, error: e2 } = await sb.from("images").insert(rows).select("id");
     if (e2) throw new HttpError(400, e2.message);

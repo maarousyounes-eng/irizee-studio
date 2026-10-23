@@ -12,7 +12,7 @@ import { FORMATS, type ImageRow, type Role } from "@/types";
 interface Props {
   shoot: { id: string; prompt: string; aspect: string; product_id: string; created_by: string; created_at: string; analysis: string | null; inspiration_paths: string[]; engine: string; size: string };
   productName: string;
-  modelName: string | null;
+  modelNames: string[];
   me: { id: string; name: string; role: Role };
   initialImages: ImageRow[];
 }
@@ -29,7 +29,7 @@ const REVIEW: Record<string, { label: string; tone: "gray" | "blue" | "green" | 
   rejected: { label: "Refusée", tone: "red" },
 };
 
-export default function ShootView({ shoot, productName, modelName, me, initialImages }: Props) {
+export default function ShootView({ shoot, productName, modelNames, me, initialImages }: Props) {
   const sb = useSupabase();
   const router = useRouter();
   const isStaff = me.role !== "creator";
@@ -179,7 +179,7 @@ export default function ShootView({ shoot, productName, modelName, me, initialIm
             <p className="text-sm text-[#6B6B72] max-w-3xl mt-0.5">{shoot.prompt}</p>
             <div className="flex flex-wrap gap-1.5 mt-2">
               <Badge tone="blue">{FORMATS[shoot.aspect]?.short ?? shoot.aspect}</Badge>
-              <Badge>{modelName ? `Mannequin : ${modelName}` : "Mannequins variés"}</Badge>
+              <Badge>{modelNames.length ? `${modelNames.length > 1 ? "Mannequins" : "Mannequin"} : ${modelNames.join(", ")}` : "Mannequins variés (IA)"}</Badge>
               <Badge>{new Date(shoot.created_at).toLocaleDateString("fr-FR")}</Badge>
             </div>
           </div>

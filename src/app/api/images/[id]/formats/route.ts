@@ -10,7 +10,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     const { data: parent } = await sb.from("images").select("*").eq("id", params.id).single();
     if (!parent?.path) throw new HttpError(404, "Image introuvable");
     const rows = wanted.filter((a: string) => a !== parent.aspect).map((a: string) => ({
-      shoot_id: parent.shoot_id, parent_id: parent.id, kind: "format", version: 1, variant_index: parent.variant_index,
+      shoot_id: parent.shoot_id, parent_id: parent.id, kind: "format", version: 1, variant_index: parent.variant_index, model_id: parent.model_id,
       aspect: a, feedback: `Déclinaison ${FORMATS[a].short}`, created_by: user.id,
     }));
     if (!rows.length) throw new HttpError(400, "Cette image est déjà dans ce format");

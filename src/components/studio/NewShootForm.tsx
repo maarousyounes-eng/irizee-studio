@@ -10,7 +10,7 @@ import { FORMATS, type Role } from "@/types";
 interface Props {
   role: Role;
   products: { id: string; name: string }[];
-  models: { id: string; name: string; is_brand_model: boolean }[];
+  models: { id: string; name: string; is_brand_model: boolean; path: string | null }[];
   concepts: { id: string; name: string; prompt: string; aspect: string; inspiration_paths: string[] }[];
   projects: { id: string; name: string }[];
   projectProducts: Record<string, string[]>;
@@ -28,12 +28,15 @@ export default function NewShootForm(p: Props) {
 
   const [projectId, setProjectId] = useState<string>(isCreator ? p.projects[0]?.id ?? "" : "");
   const [productId, setProductId] = useState(p.initial.productId ?? p.initialProductId ?? "");
-  const [modelId, setModelId] = useState<string>("random"); // random | none | <id>
+  // Mannequins : par défaut, les mannequins de la marque (ou tous ceux qui existent)
+  const brandIds = p.models.filter((m) => m.is_brand_model).map((m) => m.id);
+  const [peopleMode, setPeopleMode] = useState<"models" | "random" | "none">(p.models.length ? "models" : "random");
+  const [modelIds, setModelIds] = useState<string[]>(brandIds.length ? brandIds : p.models.map((m) => m.id));
   const [conceptId, setConceptId] = useState<string>("");
   const [prompt, setPrompt] = useState("");
   const [aspect, setAspect] = useState(p.initial.aspect && FORMATS[p.initial.aspect] ? p.initial.aspect : "4:5");
   const [variants, setVariants] = useState(6);
-  const [engine, setEngine] = useState("mix");
+  const [engine, setEngine] = useState("pro");
   const [size, setSize] = useState("2K");
   const [inspirations, setInspirations] = useState<string[]>(p.initial.inspirationPaths);
   const [uploading, setUploading] = useState(0);
@@ -41,6 +44,7 @@ export default function NewShootForm(p: Props) {
   const [error, setError] = useState<string | null>(null);
 
   const urls = useSignedUrls(inspirations);
+  const modelUrls = useSignedUrls(p.models.map((m) => m.path));
 
   const allowedProducts = useMemo(() => {
     if (!projectId) return p.products;
@@ -91,17 +95,18 @@ export default function NewShootForm(p: Props) {
   }, []);
 
   const remaining = p.quota.limit === null ? Infinity : p.quota.limit - p.quota.used;
-  const noPeople = modelId === "none";
+  const noPeople = peopleMode === "none";
 
   async function submit() {
     setError(null);
     if (!productId) return setError("Choisis un produit");
     if (!prompt.trim()) return setError("Écris une consigne");
     if (isCreator && !projectId) return setError("Choisis un projet");
+    if (peopleMode === "models" && !modelIds.length) return setError("Coche au moins un mannequin, ou choisis « Varié » / « Sans personne »");
     setBusy(true);
     try {
       const r = await api<{ shootId: string; imageIds: string[] }>("/api/shoots", {
-        productId, projectId: projectId || null, modelId: modelId === "random" || modelId === "none" ? null : modelId,
+        productId, projectId: projectId || null, modelIds: peopleMode === "models" ? modelIds : [],
         conceptId: conceptId || null, prompt, aspect, size, engine, variants, noPeople, inspirationPaths: inspirations,
       });
       sessionStorage.setItem(`run:${r.shootId}`, JSON.stringify(r.imageIds));
@@ -177,12 +182,36 @@ export default function NewShootForm(p: Props) {
           </select>
         </div>
         <div>
-          <Label>Mannequin</Label>
-          <select className={INPUT} value={modelId} onChange={(e) => setModelId(e.target.value)}>
-            <option value="random">Varié (un mannequin différent par image)</option>
-            {p.models.map((m) => <option key={m.id} value={m.id}>{m.is_brand_model ? "★ " : ""}{m.name}</option>)}
-            <option value="none">Sans personne (produit seul)</option>
-          </select>
+          <Label>Personnes sur les photos</Label>
+          <div className="grid grid-cols-3 gap-1.5 mb-2">
+            {([["models", "Mes mannequins"], ["random", "Varié (IA)"], ["none", "Produit seul"]] as const).map(([k, l]) => (
+              <button key={k} type="button" onClick={() => setPeopleMode(k)} disabled={k === "models" && !p.models.length}
+                className={`px-2 py-2 rounded-xl text-[11px] font-semibold border transition disabled:opacity-40 ${peopleMode === k ? "bg-[#EBF2FF] border-[#2B6EE8] text-[#2B6EE8]" : "bg-white border-[#E4E4E7] text-[#6B6B72] hover:bg-[#F4F4F5]"}`}>{l}</button>
+            ))}
+          </div>
+          {peopleMode === "models" && (
+            <>
+              <div className="grid grid-cols-3 gap-2">
+                {p.models.map((m) => {
+                  const on = modelIds.includes(m.id);
+                  return (
+                    <button key={m.id} type="button" onClick={() => setModelIds(on ? modelIds.filter((x) => x !== m.id) : [...modelIds, m.id])}
+                      className={`relative rounded-xl overflow-hidden border-2 text-left transition ${on ? "border-[#2B6EE8]" : "border-[#E4E4E7] opacity-70 hover:opacity-100"}`}>
+                      <div className="aspect-[3/4] bg-[#F4F4F5]">
+                        {m.path && modelUrls[m.path] && /* eslint-disable-next-line @next/next/no-img-element */ <img src={modelUrls[m.path]} alt={m.name} className="w-full h-full object-cover" />}
+                      </div>
+                      <p className="text-[11px] font-semibold px-1.5 py-1 truncate">{m.is_brand_model ? "★ " : ""}{m.name}</p>
+                      {on && <span className="absolute top-1 right-1 w-5 h-5 rounded-full bg-[#2B6EE8] text-white text-[11px] flex items-center justify-center">✓</span>}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-[11px] text-[#A0A0A8] mt-1.5">
+                {modelIds.length > 1 ? `Les ${variants} variantes alternent entre les ${modelIds.length} mannequins cochés.` : modelIds.length === 1 ? "Toutes les variantes utilisent ce mannequin." : "Coche au moins un mannequin."}
+              </p>
+            </>
+          )}
+          {peopleMode === "random" && <p className="text-[11px] text-[#A0A0A8]">L&apos;IA invente un visage différent à chaque image (ils ne seront pas ceux de ta page Mannequins).</p>}
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
@@ -202,9 +231,9 @@ export default function NewShootForm(p: Props) {
           <div>
             <Label>Moteur</Label>
             <select className={INPUT} value={engine} onChange={(e) => setEngine(e.target.value)}>
-              <option value="mix">Mix (conseillé)</option>
+              <option value="pro">Qualité max (conseillé)</option>
+              <option value="mix">Mix</option>
               <option value="flash">Rapide</option>
-              <option value="pro">Qualité max</option>
             </select>
           </div>
           <div>

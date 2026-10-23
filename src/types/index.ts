@@ -20,13 +20,13 @@ export interface Concept {
 }
 export interface Project { id: string; name: string; description: string }
 export interface Shoot {
-  id: string; project_id: string | null; product_id: string; model_id: string | null; prompt: string;
+  id: string; project_id: string | null; product_id: string; model_id: string | null; model_ids?: string[]; prompt: string;
   aspect: string; size: string; engine: string; no_people: boolean; inspiration_paths: string[];
   analysis: string | null; created_by: string; created_at: string;
 }
 export interface QC {
   texts: { expected: string; status: "ok" | "wrong" | "unreadable"; read: string }[];
-  color_ok: boolean; shape_ok: boolean; foreign_logo: boolean; anatomy_ok: boolean;
+  color_ok: boolean; shape_ok: boolean; foreign_logo: boolean; anatomy_ok: boolean; skin_natural?: boolean;
   product_height_pct: number; hero_foreground: boolean; proportion_ok: boolean; angle_ok: boolean;
   realism_0_10: number; comment: string;
 }

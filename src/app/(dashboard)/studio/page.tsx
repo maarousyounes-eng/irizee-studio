@@ -13,7 +13,7 @@ export default async function StudioPage({ searchParams }: { searchParams: { con
 
   const [products, models, concepts, projects, links, usage] = await Promise.all([
     sb.from("products").select("id, name").order("name"),
-    sb.from("models").select("id, name, is_brand_model").eq("state", "ready").order("is_brand_model", { ascending: false }).order("name"),
+    sb.from("models").select("id, name, is_brand_model, path").eq("state", "ready").order("is_brand_model", { ascending: false }).order("name"),
     sb.from("concepts").select("id, name, prompt, aspect, inspiration_paths").order("created_at", { ascending: false }),
     sb.from("projects").select("id, name").order("name"),
     sb.from("project_products").select("project_id, product_id"),

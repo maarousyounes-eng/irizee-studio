@@ -18,7 +18,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     }
     const { data: img, error } = await sb.from("images").insert({
       shoot_id: parent.shoot_id, parent_id: parent.id, kind: mode === "label" ? "label" : "correction",
-      version: (parent.version ?? 1) + 1, variant_index: parent.variant_index, aspect: parent.aspect,
+      version: (parent.version ?? 1) + 1, variant_index: parent.variant_index, aspect: parent.aspect, model_id: parent.model_id,
       feedback: mode === "label" ? "Réparation de l'étiquette" : feedback, created_by: user.id,
     }).select("id").single();
     if (error || !img) throw new HttpError(400, error?.message ?? "Création impossible");
