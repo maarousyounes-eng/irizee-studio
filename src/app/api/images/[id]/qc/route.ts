@@ -9,6 +9,7 @@ export async function POST(_: Request, { params }: { params: { id: string } }) {
     const { sb } = await requireUser();
     const { data: image } = await sb.from("images").select("*").eq("id", params.id).single();
     if (!image) throw new HttpError(404, "Image introuvable");
+    if ((image.params as any)?.cancelled || !image.path) return { verdict: null, score: null, cancelled: true };
     try {
       return await qualityCheck(sb, image as ImageRow);
     } catch (e) {

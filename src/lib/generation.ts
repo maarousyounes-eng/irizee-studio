@@ -73,7 +73,7 @@ export async function interpretCorrection(prev: { buf: Buffer; mime: string }, f
   return { instruction, understood, region };
 }
 
-export async function generateImage(sb: SupabaseClient, image: ImageRow, userId: string) {
+export async function generateImage(sb: SupabaseClient, image: ImageRow, userId: string, signal?: AbortSignal) {
   const { data: shoot } = await sb.from("shoots").select("*").eq("id", image.shoot_id).single();
   if (!shoot) throw new Error("Shooting introuvable");
   const { product, imagePaths } = await loadProduct(sb, shoot.product_id);
@@ -133,7 +133,7 @@ export async function generateImage(sb: SupabaseClient, image: ImageRow, userId:
       const lp = [{ text: localEditPrompt({ product, rules, instruction, mode: image.kind === "label" ? "label" : "edit" }) }, imgPart(crop, "image/png"), ...packshots.map((p) => imgPart(p.buf, p.mime))] as Part[];
       let edited: Buffer | null = null;
       for (let a = 0; a < 2 && !edited; a++) {
-        try { edited = firstImage(await gemini(model, lp, { image: true, aspect: box.ratio, size: a === 0 ? "2K" : undefined })); } catch { /* nouvelle tentative */ }
+        try { edited = firstImage(await gemini(model, lp, { image: true, aspect: box.ratio, size: a === 0 ? "2K" : undefined, signal })); } catch { /* nouvelle tentative */ }
       }
       if (edited) buf = await pasteBack(prev.buf, edited, box, region, W, H);
     }
@@ -148,10 +148,14 @@ export async function generateImage(sb: SupabaseClient, image: ImageRow, userId:
 
   let lastErr: unknown;
   for (let a = 0; a < 2 && !buf; a++) {
-    try { buf = firstImage(await gemini(model, parts, { image: true, aspect, size: a === 0 ? shoot.size : undefined })); }
+    try { buf = firstImage(await gemini(model, parts, { image: true, aspect, size: a === 0 ? shoot.size : undefined, signal })); }
     catch (e) { lastErr = e; }
   }
   if (!buf) throw lastErr instanceof Error ? lastErr : new Error("Aucune image renvoyée par le modèle");
+
+  // Annulée entre-temps : on ne l'enregistre pas et on ne la compte pas
+  const { data: cur } = await sb.from("images").select("state, params").eq("id", image.id).single();
+  if (!cur || cur.state !== "generating" || (cur.params as any)?.cancelled) return;
 
   const path = `generated/${shoot.id}/${image.id}.png`;
   const up = await sb.storage.from(BUCKET).upload(path, buf, { contentType: "image/png", upsert: true });

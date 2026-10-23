@@ -3,8 +3,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 
-export async function api<T = any>(url: string, body?: unknown, method = "POST"): Promise<T> {
-  const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+export async function api<T = any>(url: string, body?: unknown, method = "POST", signal?: AbortSignal): Promise<T> {
+  const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body), signal });
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(j.error || `Erreur ${res.status}`);
   return j as T;
@@ -74,6 +74,8 @@ export function usePipeline(onChange: () => void) {
   const active = useRef(0);
   const inFlight = useRef<Set<string>>(new Set());
   const errors = useRef<Record<string, string>>({});
+  const ctrls = useRef<Map<string, AbortController>>(new Map());
+  const cancelled = useRef<Set<string>>(new Set());
   const [, force] = useState(0);
 
   const sync = useCallback(() => setRunning(new Set(inFlight.current)), []);
@@ -83,14 +85,17 @@ export function usePipeline(onChange: () => void) {
       const job = queue.current.shift()!;
       active.current++;
       inFlight.current.add(job.id); sync();
+      const ctrl = new AbortController();
+      ctrls.current.set(job.id, ctrl);
       (async () => {
         try {
-          if (!job.qcOnly) await api(`/api/images/${job.id}/generate`);
+          if (!job.qcOnly) await api(`/api/images/${job.id}/generate`, undefined, "POST", ctrl.signal);
           onChange();
-          await api(`/api/images/${job.id}/qc`);
+          if (!cancelled.current.has(job.id)) await api(`/api/images/${job.id}/qc`, undefined, "POST", ctrl.signal);
         } catch (e) {
-          errors.current[job.id] = e instanceof Error ? e.message : "Erreur";
+          if (!cancelled.current.has(job.id)) errors.current[job.id] = e instanceof Error ? e.message : "Erreur";
         } finally {
+          ctrls.current.delete(job.id);
           active.current--; inFlight.current.delete(job.id); sync(); onChange(); force((n) => n + 1); pump();
         }
       })();
@@ -102,5 +107,16 @@ export function usePipeline(onChange: () => void) {
     sync(); pump();
   }, [pump, sync]);
 
-  return { running, run, errors: errors.current };
+  /** Annule des images : retire celles en attente et interrompt celles en cours. */
+  const cancel = useCallback((ids: string[]) => {
+    ids.forEach((id) => {
+      cancelled.current.add(id);
+      queue.current = queue.current.filter((j) => j.id !== id);
+      ctrls.current.get(id)?.abort();
+      inFlight.current.delete(id);
+    });
+    sync();
+  }, [sync]);
+
+  return { running, run, cancel, errors: errors.current };
 }

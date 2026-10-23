@@ -55,7 +55,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
     if (data) setImages(data as ImageRow[]);
   }, [sb, shoot.id]);
 
-  const { running, run, errors } = usePipeline(load);
+  const { running, run, cancel, errors } = usePipeline(load);
 
   const flash = (m: string) => { setToast(m); setTimeout(() => setToast(null), 4000); };
 
@@ -119,6 +119,15 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [images, running]);
+
+  /** Annule des générations : elles sont écartées et ne sont pas facturées si l'IA n'a pas fini. */
+  async function cancelImages(list: ImageRow[]) {
+    if (!list.length) return;
+    cancel(list.map((i) => i.id));
+    await Promise.all(list.map((i) => sb.from("images").update({ state: "error", error: "Annulée", params: { ...i.params, cancelled: true, archived: true } }).eq("id", i.id)));
+    await load();
+    flash(list.length > 1 ? `${list.length} générations annulées` : "Génération annulée");
+  }
 
   const archivedCount = images.filter((i) => i.params?.archived).length;
   const counts = useMemo(() => ({
@@ -260,7 +269,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
         <label className="ml-auto flex items-center gap-1.5 text-xs text-[#6B6B72]"><input type="checkbox" checked={hideRejected} onChange={(e) => setHideRejected(e.target.checked)} /> Masquer les rejetées</label>
         {archivedCount > 0 && <label className="flex items-center gap-1.5 text-xs text-[#6B6B72]"><input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} /> Afficher les essais écartés ({archivedCount})</label>}
       </div>
-      {counts.generating > 0 && <p className="text-xs text-[#6B6B72] mb-3 flex items-center gap-2"><Spinner /> {counts.generating} image(s) en cours de génération — tu peux rester sur cette page.</p>}
+      {counts.generating > 0 && <div className="text-xs text-[#6B6B72] mb-3 flex flex-wrap items-center gap-3"><span className="flex items-center gap-2"><Spinner /> {counts.generating} image(s) en cours de génération — tu peux rester sur cette page.</span><Btn size="sm" variant="danger" onClick={() => { if (confirm(`Annuler les ${counts.generating} générations en cours ?`)) cancelImages(images.filter((i) => i.state === "generating")); }}><X size={12} /> Tout annuler</Btn></div>}
 
       <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
         {visible.map((img) => {
@@ -282,6 +291,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
                 ) : generating ? (
                   <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-[#6B6B72]">
                     <Spinner className="w-6 h-6" /> Génération…
+                    <Btn size="sm" variant="ghost" onClick={() => cancelImages([img])}><X size={12} /> Annuler</Btn>
                     {stuck && <Btn size="sm" variant="ghost" onClick={() => run([img.id])}><RotateCcw size={12} /> Relancer</Btn>}
                   </div>
                 ) : url ? (
