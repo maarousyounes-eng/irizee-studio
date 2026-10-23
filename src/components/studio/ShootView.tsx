@@ -38,6 +38,8 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
   const [filter, setFilter] = useState<"all" | "valid" | "review" | "rejected" | "pending" | "approved">("all");
   const [hideRejected, setHideRejected] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [zoom, setZoom] = useState<string | null>(null);
   const [fix, setFix] = useState<string | null>(null);
   const [compare, setCompare] = useState<string | null>(null);
@@ -199,11 +201,26 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
     load(); router.refresh();
   }
 
-  async function removeImage(img: ImageRow) {
-    if (!confirm("Supprimer cette image ?")) return;
-    await sb.from("images").delete().eq("id", img.id);
-    load();
+  /** Supprime des images. L'équipe les supprime définitivement ; un créateur les masque (il n'a pas le droit de supprimer). */
+  async function deleteImages(list: ImageRow[], ask = true) {
+    if (!list.length) return;
+    if (ask && !confirm(list.length === 1 ? "Supprimer cette image ?" : `Supprimer ces ${list.length} images ?`)) return;
+    cancel(list.filter((i) => i.state === "generating").map((i) => i.id));
+    if (isStaff) {
+      const paths = list.flatMap((i) => [i.path, i.thumb_path]).filter(Boolean) as string[];
+      if (paths.length) await sb.storage.from("studio").remove(paths);
+      await sb.from("images").delete().in("id", list.map((i) => i.id));
+    } else {
+      await Promise.all(list.map((i) => sb.from("images").update({ params: { ...i.params, archived: true } }).eq("id", i.id)));
+    }
+    setSelected(new Set());
+    await load();
+    flash(list.length === 1 ? "Image supprimée" : `${list.length} images supprimées`);
   }
+  const removeImage = (img: ImageRow) => deleteImages([img]);
+  const toggleSel = (id: string) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const failed = images.filter((i) => i.state === "error");
+
 
   const fileName = (img: ImageRow) => `irizee_${productName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}_${(img.aspect ?? shoot.aspect).replace(":", "x")}_${img.id.slice(0, 6)}.${img.path?.split(".").pop() ?? "jpg"}`;
 
@@ -274,7 +291,22 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
         <span className="w-px h-5 bg-[#E4E4E7] mx-1" />
         {chip("pending", "En validation", counts.pending)}
         {chip("approved", "Approuvées", counts.approved)}
-        <label className="ml-auto flex items-center gap-1.5 text-xs text-[#6B6B72]"><input type="checkbox" checked={hideRejected} onChange={(e) => setHideRejected(e.target.checked)} /> Masquer les rejetées</label>
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          {!selectMode ? (
+            <>
+              {failed.length > 0 && <Btn size="sm" variant="danger" onClick={() => deleteImages(failed)}><Trash2 size={12} /> Supprimer les échecs ({failed.length})</Btn>}
+              <Btn size="sm" variant="ghost" onClick={() => setSelectMode(true)}><Check size={12} /> Sélectionner</Btn>
+            </>
+          ) : (
+            <>
+              <span className="text-xs text-[#6B6B72]">{selected.size} sélectionnée(s)</span>
+              <Btn size="sm" variant="ghost" onClick={() => setSelected(selected.size === visible.length ? new Set() : new Set(visible.map((i) => i.id)))}>{selected.size === visible.length ? "Tout désélectionner" : "Tout sélectionner"}</Btn>
+              <Btn size="sm" variant="danger" disabled={!selected.size} onClick={() => deleteImages(images.filter((i) => selected.has(i.id)))}><Trash2 size={12} /> Supprimer ({selected.size})</Btn>
+              <Btn size="sm" variant="ghost" onClick={() => { setSelectMode(false); setSelected(new Set()); }}>Terminer</Btn>
+            </>
+          )}
+        </div>
+        <label className="flex items-center gap-1.5 text-xs text-[#6B6B72]"><input type="checkbox" checked={hideRejected} onChange={(e) => setHideRejected(e.target.checked)} /> Masquer les rejetées</label>
         {archivedCount > 0 && <label className="flex items-center gap-1.5 text-xs text-[#6B6B72]"><input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} /> Afficher les essais écartés ({archivedCount})</label>}
       </div>
       {counts.generating > 0 && <div className="text-xs text-[#6B6B72] mb-3 flex flex-wrap items-center gap-3"><span className="flex items-center gap-2"><Spinner /> {counts.generating} image(s) en cours de génération — tu peux rester sur cette page.</span><Btn size="sm" variant="danger" onClick={() => { if (confirm(`Annuler les ${counts.generating} générations en cours ?`)) cancelImages(images.filter((i) => i.state === "generating")); }}><X size={12} /> Tout annuler</Btn></div>}
@@ -288,13 +320,17 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
           const qc = img.qc;
           const mine = img.created_by === me.id;
           return (
-            <Card key={img.id} className="overflow-hidden flex flex-col">
+            <Card key={img.id} className={`overflow-hidden flex flex-col relative ${selectMode ? "cursor-pointer" : ""} ${selected.has(img.id) ? "ring-2 ring-[#2B6EE8]" : ""}`} onClick={selectMode ? () => toggleSel(img.id) : undefined}>
+              {selectMode && (
+                <span className={`absolute top-2 right-2 z-10 w-6 h-6 rounded-md border-2 flex items-center justify-center text-white text-sm font-bold ${selected.has(img.id) ? "bg-[#2B6EE8] border-[#2B6EE8]" : "bg-white/90 border-[#C0C0C8]"}`}>{selected.has(img.id) ? "✓" : ""}</span>
+              )}
               <div className="relative bg-[#F4F4F5]" style={{ aspectRatio: (img.aspect ?? shoot.aspect).replace(":", " / ") }}>
                 {img.state === "error" ? (
                   <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-4 text-center">
                     <p className="text-sm font-semibold text-[#E8444A]">Échec</p>
                     <p className="text-[11px] text-[#6B6B72]">{(errors[img.id] ?? img.error ?? "").slice(0, 160)}</p>
                     <Btn size="sm" variant="ghost" onClick={() => { sb.from("images").update({ state: "generating", error: null }).eq("id", img.id).then(() => { load(); run([img.id]); }); }}><RotateCcw size={12} /> Relancer</Btn>
+                    <Btn size="sm" variant="danger" onClick={() => deleteImages([img], false)}><Trash2 size={12} /> Supprimer</Btn>
                   </div>
                 ) : generating ? (
                   <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-[#6B6B72]">

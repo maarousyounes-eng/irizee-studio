@@ -28,8 +28,8 @@ export function Btn({ variant = "primary", size = "md", className, ...p }: BtnPr
   );
 }
 
-export function Card({ className, children }: { className?: string; children: React.ReactNode }) {
-  return <div className={cn("bg-white rounded-2xl border border-[#E4E4E7]", className)}>{children}</div>;
+export function Card({ className, children, ...rest }: React.HTMLAttributes<HTMLDivElement>) {
+  return <div {...rest} className={cn("bg-white rounded-2xl border border-[#E4E4E7]", className)}>{children}</div>;
 }
 
 export function PageHeader({ title, subtitle, actions }: { title: string; subtitle?: string; actions?: React.ReactNode }) {
