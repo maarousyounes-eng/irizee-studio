@@ -38,7 +38,7 @@ export function buildPrompt(a: {
   const people = a.noPeople
     ? "There is no person in the image."
     : a.hasModelRef
-      ? `The person in the photo MUST be exactly the same fictional person as in the MODEL REFERENCE image: reproduce that exact face (face shape, eyes, eyebrows, nose, lips, freckles and marks), the same skin tone, age impression and hair colour${a.modelDescription ? `. Description: ${a.modelDescription}` : ""}. Only the outfit, pose and expression come from the brief. Never use the person from the inspiration images.`
+      ? `The person in the photo MUST be exactly the same fictional person as in the MODEL REFERENCE image: reproduce that exact face (face shape, eyes, eyebrows, nose, lips, freckles and marks), the same skin tone, age impression and hair colour${a.modelDescription ? `. Description: ${a.modelDescription}` : ""}. Hair color, hairstyle and skin tone are those of the MODEL REFERENCE, not of the style reference. Only the outfit, pose and expression come from the brief. Never use the person from the style reference images: the face must be recognizably the MODEL REFERENCE person in every image of the series.`
       : a.variation;
   // Le nombre de produits suit l'inspiration (un produit héros, ou plusieurs copies), sauf consigne contraire du client.
   const copies =
@@ -48,7 +48,9 @@ export function buildPrompt(a: {
     "You are a world-class advertising photographer producing a photorealistic campaign photo for the cosmetics brand Irizée.",
     `The FIRST ${a.nProductImages} image(s) are the REAL product reference photos (packshots) of "${a.product.name}".` +
       (a.hasModelRef ? " The next image is the MODEL REFERENCE (face sheet of a fictional model)." : "") +
-      " The remaining image(s) are the STYLE REFERENCE: reproduce its pose, framing, lens, lighting, color grading, makeup and styling mood faithfully. Only the person's identity and the product are different (the person must be a different fictional person, the product is the real packshot).",
+      (a.hasModelRef
+        ? " The remaining image(s) are the STYLE REFERENCE: reproduce ONLY its pose, framing, lens, lighting, color grading and mood. The person shown in the style reference must NOT be reproduced in any way: NOT her face, NOT her hair color or hairstyle, NOT her skin tone. The person in your photo is the one from the MODEL REFERENCE, with her exact face, hair and skin tone."
+        : " The remaining image(s) are the STYLE REFERENCE: reproduce its pose, framing, lens, lighting, color grading, makeup and styling mood faithfully. Only the person's identity and the product are different (the person must be a different fictional person, the product is the real packshot)."),
     "",
     "NON-NEGOTIABLE RULES (apply to every image):",
     all,
