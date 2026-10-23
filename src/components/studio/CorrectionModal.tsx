@@ -6,6 +6,8 @@ import { Btn, INPUT, Label, Modal, Spinner } from "@/components/ui";
 import { uploadImage, useSupabase } from "@/lib/client";
 
 export interface Zone { x: number; y: number; w: number; h: number }
+export interface NoteZone extends Zone { note: string }
+const ZONE_COLORS = ["#2B6EE8", "#E8444A", "#16A249", "#F59E0B", "#8B5CF6"];
 
 // Corrections fréquentes : un clic pré-remplit une consigne claire, à compléter si besoin.
 const PRESETS: { label: string; text: string }[] = [
@@ -30,7 +32,7 @@ interface Props {
   aspect: string;
   isStaff: boolean;
   onClose: () => void;
-  onSubmit: (v: { feedback: string; zone: Zone | null; remember: boolean; refs: string[]; baseId: string }) => Promise<void> | void;
+  onSubmit: (v: { feedback: string; zones: NoteZone[]; remember: boolean; refs: string[]; baseId: string }) => Promise<void> | void;
 }
 
 export default function CorrectionModal({ bases, currentId, aspect, isStaff, onClose, onSubmit }: Props) {
@@ -39,7 +41,8 @@ export default function CorrectionModal({ bases, currentId, aspect, isStaff, onC
   const imageUrl = base.url;
   const box = useRef<HTMLDivElement>(null);
   const start = useRef<{ x: number; y: number } | null>(null);
-  const [zone, setZone] = useState<Zone | null>(null);
+  const [zones, setZones] = useState<NoteZone[]>([]);
+  const [draft, setDraft] = useState<Zone | null>(null);
   const [text, setText] = useState("");
   const [remember, setRemember] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -75,17 +78,22 @@ export default function CorrectionModal({ bases, currentId, aspect, isStaff, onC
     const r = box.current!.getBoundingClientRect();
     return { x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) };
   };
-  const down = (e: React.PointerEvent) => { box.current!.setPointerCapture(e.pointerId); start.current = pt(e); setZone(null); };
+  const down = (e: React.PointerEvent) => { if (zones.length >= 5) return; box.current!.setPointerCapture(e.pointerId); start.current = pt(e); setDraft(null); };
   const move = (e: React.PointerEvent) => {
     if (!start.current) return;
     const p = pt(e), s = start.current;
-    setZone({ x: Math.min(s.x, p.x), y: Math.min(s.y, p.y), w: Math.abs(p.x - s.x), h: Math.abs(p.y - s.y) });
+    setDraft({ x: Math.min(s.x, p.x), y: Math.min(s.y, p.y), w: Math.abs(p.x - s.x), h: Math.abs(p.y - s.y) });
   };
-  const up = () => { start.current = null; setZone((z) => (z && z.w > 0.03 && z.h > 0.03 ? z : null)); };
+  const up = () => {
+    start.current = null;
+    if (draft && draft.w > 0.03 && draft.h > 0.03 && zones.length < 5) setZones([...zones, { ...draft, note: "" }]);
+    setDraft(null);
+  };
+  const canSubmit = !!text.trim() || (zones.length > 0 && zones.every((z) => z.note.trim()));
 
   async function apply() {
     setBusy(true);
-    try { await onSubmit({ feedback: text.trim(), zone, remember, refs: refs.map((r) => r.path), baseId }); } finally { setBusy(false); }
+    try { await onSubmit({ feedback: text.trim(), zones, remember, refs: refs.map((r) => r.path), baseId }); } finally { setBusy(false); }
   }
 
   return (
@@ -97,7 +105,7 @@ export default function CorrectionModal({ bases, currentId, aspect, isStaff, onC
               <Label>Partir de quelle version ?</Label>
               <div className="flex gap-2 overflow-x-auto pb-1">
                 {bases.map((b) => (
-                  <button key={b.id} onClick={() => { setBaseId(b.id); setZone(null); }} className={`flex-shrink-0 w-16 text-left rounded-lg border-2 overflow-hidden ${b.id === baseId ? "border-[#2B6EE8]" : "border-[#E4E4E7] opacity-70 hover:opacity-100"}`}>
+                  <button key={b.id} onClick={() => { setBaseId(b.id); setZones([]); }} className={`flex-shrink-0 w-16 text-left rounded-lg border-2 overflow-hidden ${b.id === baseId ? "border-[#2B6EE8]" : "border-[#E4E4E7] opacity-70 hover:opacity-100"}`}>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={b.url} alt={b.label} className="w-full aspect-[4/5] object-cover" />
                     <span className="block text-[9px] font-semibold px-1 py-0.5 truncate">{b.label}</span>
@@ -107,17 +115,34 @@ export default function CorrectionModal({ bases, currentId, aspect, isStaff, onC
               {bases.length >= 4 && <p className="text-[11px] text-[#B45309] mt-1">Cette image a déjà {bases.length - 1} corrections successives : à chaque régénération la qualité peut se dégrader. Repars plutôt d&apos;une version précédente.</p>}
             </div>
           )}
-          <Label>1. Entoure la zone concernée <span className="normal-case tracking-normal font-normal">(facultatif)</span></Label>
+          <Label>1. Entoure les zones concernées <span className="normal-case tracking-normal font-normal">(facultatif, jusqu&apos;à 5)</span></Label>
           <div ref={box} onPointerDown={down} onPointerMove={move} onPointerUp={up}
             className="relative rounded-xl overflow-hidden border border-[#E4E4E7] cursor-crosshair touch-none select-none bg-[#F4F4F5]" style={{ aspectRatio: aspect.replace(":", " / ") }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={imageUrl} alt="" draggable={false} className="absolute inset-0 w-full h-full object-cover pointer-events-none" />
-            {zone && <div className="absolute border-2 border-[#2B6EE8] bg-[#2B6EE8]/15 rounded-md pointer-events-none" style={{ left: `${zone.x * 100}%`, top: `${zone.y * 100}%`, width: `${zone.w * 100}%`, height: `${zone.h * 100}%` }} />}
+            {zones.map((z, k) => (
+              <div key={k} className="absolute rounded-md pointer-events-none" style={{ left: `${z.x * 100}%`, top: `${z.y * 100}%`, width: `${z.w * 100}%`, height: `${z.h * 100}%`, border: `2px solid ${ZONE_COLORS[k]}`, background: `${ZONE_COLORS[k]}22` }}>
+                <span className="absolute -top-px -left-px px-1.5 text-[10px] font-bold text-white rounded-br-md" style={{ background: ZONE_COLORS[k] }}>{k + 1}</span>
+              </div>
+            ))}
+            {draft && <div className="absolute border-2 border-dashed border-[#0A0A0B] bg-white/20 rounded-md pointer-events-none" style={{ left: `${draft.x * 100}%`, top: `${draft.y * 100}%`, width: `${draft.w * 100}%`, height: `${draft.h * 100}%` }} />}
           </div>
           <div className="flex items-center justify-between mt-2 text-[11px] text-[#6B6B72]">
-            <span className="flex items-center gap-1"><Crosshair size={12} /> {zone ? "Zone sélectionnée : seule cette partie sera modifiée" : "Glisse sur l'image pour cibler une zone"}</span>
-            {zone && <button onClick={() => setZone(null)} className="flex items-center gap-0.5 text-[#E8444A] font-semibold"><X size={11} /> Effacer</button>}
+            <span className="flex items-center gap-1"><Crosshair size={12} /> {zones.length >= 5 ? "5 zones maximum" : zones.length ? `${zones.length} zone(s) : glisse encore pour en ajouter` : "Glisse sur l'image pour cibler une zone"}</span>
+            {zones.length > 0 && <button onClick={() => setZones([])} className="flex items-center gap-0.5 text-[#E8444A] font-semibold"><X size={11} /> Tout effacer</button>}
           </div>
+          {zones.length > 0 && (
+            <div className="mt-3 space-y-1.5">
+              {zones.map((z, k) => (
+                <div key={k} className="flex items-center gap-2">
+                  <span className="flex-shrink-0 w-5 h-5 rounded-md text-[10px] font-bold text-white flex items-center justify-center" style={{ background: ZONE_COLORS[k] }}>{k + 1}</span>
+                  <input className={INPUT + " !py-1.5 !text-[12px]"} value={z.note} onChange={(e) => setZones(zones.map((x, i) => (i === k ? { ...x, note: e.target.value } : x)))} placeholder="Que changer ici ? (facultatif)" />
+                  <button onClick={() => setZones(zones.filter((_, i) => i !== k))} className="flex-shrink-0 text-[#A0A0A8] hover:text-[#E8444A]" aria-label="Retirer la zone"><X size={14} /></button>
+                </div>
+              ))}
+              <p className="text-[11px] text-[#A0A0A8]">Chaque zone est retouchée séparément ; tout ce qui est hors zone reste identique.</p>
+            </div>
+          )}
         </div>
 
         <div className="space-y-4">
@@ -130,7 +155,7 @@ export default function CorrectionModal({ bases, currentId, aspect, isStaff, onC
             </div>
           </div>
           <div>
-            <Label>3. Dis ce que tu veux changer</Label>
+            <Label>3. Dis ce que tu veux changer {zones.length > 1 && <span className="normal-case tracking-normal font-normal">(valable pour toutes les zones sans note)</span>}</Label>
             <textarea className={INPUT + " min-h-[110px]"} value={text} onChange={(e) => setText(e.target.value)} autoFocus
               placeholder="Ex : la main de gauche a six doigts / le flacon est trop grand / enlève les lunettes. Tu peux écrire plusieurs demandes à la suite, une par ligne." />
             <p className="text-[11px] text-[#A0A0A8] mt-1">Écris comme tu parles. La plateforme génère 1 version et la vérifie (ta demande est-elle faite ? rien d&apos;autre n&apos;a-t-il changé ?). Si ce n&apos;est pas le cas, elle réessaie seule, jusqu&apos;à 2 fois. Le « Compris : … » sur la carte te montre comment ta demande a été interprétée.</p>
@@ -165,7 +190,7 @@ export default function CorrectionModal({ bases, currentId, aspect, isStaff, onC
             </label>
           )}
           <div className="flex gap-2 pt-1">
-            <Btn onClick={apply} disabled={busy || uploading > 0 || !text.trim()}>{busy || uploading > 0 ? "Envoi…" : "Appliquer la correction"}</Btn>
+            <Btn onClick={apply} disabled={busy || uploading > 0 || !canSubmit}>{busy || uploading > 0 ? "Envoi…" : "Appliquer la correction"}</Btn>
             <Btn variant="ghost" onClick={onClose}>Annuler</Btn>
           </div>
         </div>

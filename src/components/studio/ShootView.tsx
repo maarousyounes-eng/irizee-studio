@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { Archive, BookmarkPlus, Check, Download, LayoutTemplate, MessageSquare, Pencil, RotateCcw, Send, Trash2, Type, X } from "lucide-react";
 import { Badge, Btn, Card, INPUT, Label, Lightbox, Modal, Spinner } from "@/components/ui";
 import Comments from "./Comments";
-import CorrectionModal, { type Zone } from "./CorrectionModal";
+import CorrectionModal, { type NoteZone } from "./CorrectionModal";
 import { api, signUrls, useSignedUrls, usePipeline, useSupabase } from "@/lib/client";
 import { FORMATS, FORMAT_PACKS, type ImageRow, type Role } from "@/types";
 
@@ -125,7 +125,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
         i.qc!.comment ?? "",
       ].filter(Boolean).join("; ")))).slice(0, 2).join(" | ");
       Promise.all(list.map((i) => sb.from("images").update({ params: { ...i.params, archived: true } }).eq("id", i.id))).then(() =>
-        submitFix(parent, "edit", { feedback: String(list[0].params?.original ?? list[0].feedback ?? ""), zone: (list[0].params?.zone as Zone) ?? null, remember: false, refs: (list[0].params?.refs as string[]) ?? [] }, issues, round + 1));
+        submitFix(parent, "edit", { feedback: String(list[0].params?.original ?? list[0].feedback ?? ""), zones: ((list[0].params?.zones as NoteZone[]) ?? (list[0].params?.zone ? [{ ...(list[0].params.zone as object), note: "" } as NoteZone] : [])), remember: false, refs: (list[0].params?.refs as string[]) ?? [] }, issues, round + 1));
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [images, running]);
@@ -149,9 +149,9 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
     generating: images.filter((i) => i.state === "generating").length,
   }), [images]);
 
-  async function submitFix(img: ImageRow, mode: "edit" | "label", v?: { feedback: string; zone: Zone | null; remember: boolean; refs?: string[] }, avoid?: string, round = 0) {
+  async function submitFix(img: ImageRow, mode: "edit" | "label", v?: { feedback: string; zones: NoteZone[]; remember: boolean; refs?: string[] }, avoid?: string, round = 0) {
     try {
-      const r = await api<{ imageIds: string[] }>(`/api/images/${img.id}/correct`, { mode, feedback: v?.feedback ?? "", zone: v?.zone ?? null, remember: !!v?.remember, refs: v?.refs ?? [], avoid, round, candidates: 1 });
+      const r = await api<{ imageIds: string[] }>(`/api/images/${img.id}/correct`, { mode, feedback: v?.feedback ?? "", zones: v?.zones ?? [], remember: !!v?.remember, refs: v?.refs ?? [], avoid, round, candidates: 1 });
       setFix(null);
       await load(); run(r.imageIds);
       flash(mode === "label" ? "Réparation de l'étiquette lancée" : round > 0 ? `La correction n'a pas marché : je réessaie automatiquement (essai ${round + 1}/3) avec une consigne plus précise` : v?.remember ? "Correction lancée — consigne mémorisée pour ce produit" : "Correction lancée : je vérifie le résultat et je réessaie seul si besoin");
@@ -171,7 +171,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
     ].filter(Boolean).join("; ");
     // les anciennes propositions sont écartées pour ne pas encombrer la page
     await archiveGroup(img, null);
-    await submitFix(parent, "edit", { feedback: String(img.params?.original ?? img.feedback ?? ""), zone: (img.params?.zone as Zone) ?? null, remember: false, refs: (img.params?.refs as string[]) ?? [] }, issues || "the result did not match the request");
+    await submitFix(parent, "edit", { feedback: String(img.params?.original ?? img.feedback ?? ""), zones: ((img.params?.zones as NoteZone[]) ?? (img.params?.zone ? [{ ...(img.params.zone as object), note: "" } as NoteZone] : [])), remember: false, refs: (img.params?.refs as string[]) ?? [] }, issues || "the result did not match the request");
   }
 
   /** Garde cette proposition et écarte les autres essais du même groupe. */

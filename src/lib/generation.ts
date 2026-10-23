@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { MODELS, gemini, imgPart, firstImage, firstText, parseJson, type Part } from "./gemini";
 import sharp from "sharp";
 import { buildPrompt, correctionPrompt, formatPrompt, interpretPrompt, localEditPrompt, LOCATE_PRODUCT_PROMPT, qcPrompt, variationHint } from "./prompts";
-import { cropBoxFor, cropImage, pasteBack, unionZones, zoneFromBox, zonesFromBoxes, type Zone } from "./localedit";
+import { cropBoxFor, cropImage, pasteBack, unionZones, zoneFromBox, zonesFromBoxes, type CropBox, type Zone } from "./localedit";
 import type { ImageRow, Product, QC } from "@/types";
 
 const BUCKET = "studio";
@@ -46,6 +46,29 @@ export async function analyzeInspirations(sb: SupabaseClient, paths: string[], p
   return out.join("\n\n");
 }
 
+
+
+type Img = { buf: Buffer; mime: string };
+
+/** Retouche d'un recadrage autour d'une zone : renvoie l'image retouchée et le cadre utilisé. */
+async function localEditCrop(a: {
+  prev: Buffer; W: number; H: number; region: Zone; instruction: string; mode: "edit" | "label"; product: Product; rules: string[];
+  refs: Img[]; packshots: Img[]; original: Img | null; model: string; signal?: AbortSignal;
+}): Promise<{ edited: Buffer; box: CropBox } | null> {
+  const box = cropBoxFor(a.region, a.W, a.H);
+  if (!box) return null;
+  const crop = await cropImage(a.prev, box);
+  let originalCrop: Buffer | null = null;
+  if (a.original) {
+    try { const om = await sharp(a.original.buf).metadata(); if (om.width === a.W && om.height === a.H) originalCrop = await cropImage(a.original.buf, box); } catch { originalCrop = null; }
+  }
+  const lp = [{ text: localEditPrompt({ product: a.product, rules: a.rules, instruction: a.instruction, mode: a.mode, refCount: a.refs.length, hasOriginal: !!originalCrop }) }, imgPart(crop, "image/png"), ...(originalCrop ? [imgPart(originalCrop, "image/png")] : []), ...a.refs.map((r) => imgPart(r.buf, r.mime)), ...a.packshots.map((p) => imgPart(p.buf, p.mime))] as Part[];
+  let edited: Buffer | null = null;
+  for (let t = 0; t < 2 && !edited; t++) {
+    try { edited = firstImage(await gemini(a.model, lp, { image: true, aspect: box.ratio, size: t === 0 ? "2K" : undefined, signal: a.signal })); } catch { /* nouvelle tentative */ }
+  }
+  return edited ? { edited, box } : null;
+}
 
 export interface Interpretation { instruction: string; understood: string; region: Zone | null }
 
@@ -125,10 +148,31 @@ export async function generateImage(sb: SupabaseClient, image: ImageRow, userId:
     }
     let instruction: string = prm.instruction ?? image.feedback ?? "";
     let region: Zone | null = prm.region ?? null;
+    const zonesIn = ((prm.zones as (Zone & { note?: string })[] | undefined) ?? (prm.zone ? [prm.zone as Zone] : [])) as (Zone & { note?: string })[];
 
-    if (image.kind === "correction" && !prm.instruction) {
+    // Plusieurs zones : chacune est comprise et retouchée séparément (en parallèle), puis recollée sur l'image d'origine
+    if (image.kind === "correction" && zonesIn.length >= 2 && W && H) {
+      const outs = await Promise.all(zonesIn.slice(0, 5).map(async (z) => {
+        const it = await interpretCorrection(prev, (z.note ?? "").trim() || image.feedback || "", z, prm.avoid, refs, original);
+        const reg: Zone = it.region ?? z;
+        const r = await localEditCrop({ prev: prev.buf, W, H, region: reg, instruction: it.instruction, mode: "edit", product, rules, refs, packshots, original, model, signal });
+        return r ? { ...r, region: reg, understood: it.understood, instruction: it.instruction } : null;
+      }));
+      const okOuts = outs.map((o, k) => ({ o, k })).filter((x) => x.o) as { o: NonNullable<(typeof outs)[number]>; k: number }[];
+      if (okOuts.length) {
+        let acc: Buffer = prev.buf;
+        for (const { o } of okOuts) acc = await pasteBack(acc, o.edited, o.box, o.region, W, H);
+        buf = acc;
+        await sb.from("images").update({ params: { ...prm,
+          instruction: okOuts.map(({ o, k }) => `Zone ${k + 1}: ${o.instruction}`).join(" "),
+          understood: okOuts.map(({ o, k }) => `Zone ${k + 1} : ${o.understood}`).join(" · "),
+        } }).eq("id", image.id);
+      }
+    }
+
+    if (image.kind === "correction" && !prm.instruction && !buf) {
       // Filet de sécurité : demande non interprétée à la création
-      const it = await interpretCorrection(prev, image.feedback ?? "", prm.zone ?? null, prm.avoid, refs, original);
+      const it = await interpretCorrection(prev, image.feedback ?? "", zonesIn[0] ?? null, prm.avoid, refs, original);
       instruction = it.instruction; region = it.region;
       await sb.from("images").update({ params: { ...prm, instruction, understood: it.understood, region } }).eq("id", image.id);
     } else if (image.kind === "label") {
@@ -141,19 +185,9 @@ export async function generateImage(sb: SupabaseClient, image: ImageRow, userId:
     }
 
     // Retouche LOCALE : seule la zone est modifiée, le reste de l'image est strictement conservé.
-    const box = region && W && H && image.kind !== "format" ? cropBoxFor(region, W, H) : null;
-    if (region && box) {
-      const crop = await cropImage(prev.buf, box);
-      let originalCrop: Buffer | null = null;
-      if (original) {
-        try { const om = await sharp(original.buf).metadata(); if (om.width === W && om.height === H) originalCrop = await cropImage(original.buf, box); } catch { originalCrop = null; }
-      }
-      const lp = [{ text: localEditPrompt({ product, rules, instruction, mode: image.kind === "label" ? "label" : "edit", refCount: refs.length, hasOriginal: !!originalCrop }) }, imgPart(crop, "image/png"), ...(originalCrop ? [imgPart(originalCrop, "image/png")] : []), ...refs.map((r) => imgPart(r.buf, r.mime)), ...packshots.map((p) => imgPart(p.buf, p.mime))] as Part[];
-      let edited: Buffer | null = null;
-      for (let a = 0; a < 2 && !edited; a++) {
-        try { edited = firstImage(await gemini(model, lp, { image: true, aspect: box.ratio, size: a === 0 ? "2K" : undefined, signal })); } catch { /* nouvelle tentative */ }
-      }
-      if (edited) buf = await pasteBack(prev.buf, edited, box, region, W, H);
+    if (!buf && region && W && H && image.kind !== "format") {
+      const r = await localEditCrop({ prev: prev.buf, W, H, region, instruction, mode: image.kind === "label" ? "label" : "edit", product, rules, refs, packshots, original, model, signal });
+      if (r) buf = await pasteBack(prev.buf, r.edited, r.box, region, W, H);
     }
     if (!buf) {
       // Modification globale (lumière, fond entier…) ou repli : régénération complète de l'image
