@@ -20,12 +20,12 @@ export function variationHint(i: number, noPeople: boolean) {
   return `The human model: ${VARIATIONS[i % VARIATIONS.length]} (fictional person, clearly different from anyone in the inspiration).`;
 }
 
-/** Réalisme photo : évite le rendu « IA » (peau lisse, sourcils parfaits, brillance plastique). */
+/** Qualité peau & détails : rendu campagne beauté/mode glamour, mais peau réelle (pas de lissage « IA »). */
 export const REALISM =
-  "PHOTOGRAPHIC REALISM (critical): this must look like a real photograph shot by a professional photographer on a full-frame camera with an 85mm lens, NOT like an AI render and NOT like a retouched beauty filter. " +
-  "Natural skin with clearly visible pores, fine skin texture, subtle unevenness in tone, tiny natural imperfections (a few freckles or beauty marks, faint redness, fine lines, peach fuzz), realistic specular highlights (never plastic, waxy, oily or airbrushed). " +
-  "Eyebrows made of individual hairs, with natural asymmetry and a slightly irregular shape. Individual flyaway hairs, natural eyelashes, real lip texture. Slight natural film grain and subtle lens imperfections. " +
-  "No airbrushing, no skin smoothing, no glow filter, no doll-like perfection, no perfectly symmetrical face.";
+  "SKIN & DETAIL QUALITY: high-end beauty and fashion editorial photograph with professional retouching: polished, glamorous and luminous, BUT real skin: fine pores and natural skin texture stay visible, with dimensional highlights and soft shadows. " +
+  "Never plastic, waxy, blurred or over-smoothed (no beauty-filter look, no AI-smooth skin). Natural freckles and peach fuzz where described. " +
+  "Eyebrows groomed and sharply defined, built from individual hair strokes (visible hair direction, slightly feathered edges), never painted-on, flat or uniformly smooth. Lips with real texture and specular gloss. Crisp individual eyelashes and hair strands. " +
+  "Keep every styling detail exactly as described: makeup, hairstyle, jewelry, nails, eyewear, outfit.";
 
 const numbered = (rules: string[]) => rules.map((r, i) => `${i + 1}. ${r}`).join("\n");
 const textsBlock = (p: Product) => (p.texts ?? []).map((t) => `- ${t}`).join("\n");
@@ -78,7 +78,7 @@ export function correctionPrompt(a: { product: Product; rules: string[]; feedbac
   return [...head,
     `TASK: apply this correction requested by the client, and change nothing else: "${a.feedback}".`,
     "The product must remain identical to the packshot (shape, color, every printed text). Keep the composition and the person unless the correction says otherwise.",
-    "Keep the natural photographic skin texture (visible pores, freckles, individual eyebrow hairs): never smooth or airbrush the skin.",
+    "Keep the visible fine skin texture and individual eyebrow hair strokes: never smooth the skin.",
     texts].filter(Boolean).join("\n");
 }
 
@@ -88,16 +88,16 @@ export function formatPrompt(a: { product: Product; rules: string[]; aspect: str
     "Image 1 = the approved photo. The following image(s) = the REAL product packshot(s).",
     "NON-NEGOTIABLE RULES:", numbered([...a.rules, ...(a.product.rules ?? [])]), "",
     `TASK: recreate this exact same photo (same person, same product, same styling, same lighting, same color palette, same mood) in aspect ratio ${a.aspect}.`,
-    "Recompose and extend the scene naturally so that the whole product stays complete and fully visible, keeps the same relative scale to the person, and its label stays sharp and legible. Never crop the product. Do not add text or logos. Keep the natural photographic skin texture (visible pores, freckles, individual eyebrow hairs): never smooth or airbrush the skin.",
+    "Recompose and extend the scene naturally so that the whole product stays complete and fully visible, keeps the same relative scale to the person, and its label stays sharp and legible. Never crop the product. Do not add text or logos. Keep the visible fine skin texture and individual eyebrow hair strokes: never smooth the skin.",
     a.product.texts?.length ? `Texts that must appear exactly on the product:\n${textsBlock(a.product)}` : "",
   ].filter(Boolean).join("\n");
 }
 
 export function modelSheetPrompt(a: { name: string; description: string }) {
   return [
-    "Create a photorealistic studio portrait of a FICTIONAL person for a beauty brand casting sheet. This person must not resemble any real person or celebrity.",
-    `Appearance to follow: ${a.description || "natural, modern beauty"}.`,
-    "Head and shoulders, neutral confident expression, looking at the camera, soft even studio light, plain light-grey background, simple neutral clothing, no jewelry, no text, no watermark. Apply the makeup and styling only if the appearance description mentions it; otherwise bare natural skin.",
+    "Create a photorealistic high-end beauty editorial portrait of a FICTIONAL person for a brand casting sheet. This person must not resemble any real person or celebrity.",
+    `Follow this appearance description EXACTLY, including makeup, hairstyle, eyewear, jewelry, nails and expression:\n${a.description || "natural, modern beauty"}`,
+    "Head and shoulders (include the hands near the face if the description mentions nails or rings), soft studio light, plain light-grey background, no text, no watermark.",
     REALISM,
   ].join("\n");
 }
@@ -109,7 +109,7 @@ export function qcPrompt(p: Product) {
     `Expected printed texts on the product: ${JSON.stringify(p.texts ?? [])}.`,
     p.look ? `Expected look: ${p.look}` : "",
     "For each expected text, read what is actually printed on the product in image 2 and answer 'ok' (exactly right), 'wrong' (misspelled, garbled, mirrored or different) or 'unreadable' (too small, blurred or hidden).",
-    "Also judge: color/material/shape/cap versus the real packshot; any foreign brand logo; natural anatomy of hands/fingers/face; whether the skin looks like real photographed skin (visible pores, texture, natural brows) rather than airbrushed, plastic or AI-smooth skin; and composition (product height as % of the image height, product is a hero in the foreground, realistic scale versus hand/body, natural perspective).",
+    "Also judge: color/material/shape/cap versus the real packshot; any foreign brand logo; natural anatomy of hands/fingers/face; whether the skin looks like real photographed skin (fine pores and texture still visible, brows with individual hair strokes, even with glamorous makeup and polished retouching) rather than plastic, blurred or AI-smooth skin; and composition (product height as % of the image height, product is a hero in the foreground, realistic scale versus hand/body, natural perspective).",
     'Return JSON only: {"texts":[{"expected":str,"status":"ok|wrong|unreadable","read":str}],"color_ok":bool,"shape_ok":bool,"foreign_logo":bool,"anatomy_ok":bool,"skin_natural":bool,"product_height_pct":int,"hero_foreground":bool,"proportion_ok":bool,"angle_ok":bool,"realism_0_10":int,"comment":str (one short sentence in French)}',
   ].filter(Boolean).join("\n");
 }
