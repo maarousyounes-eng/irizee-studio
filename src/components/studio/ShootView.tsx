@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Archive, BookmarkPlus, Check, Download, LayoutTemplate, MessageSquare, Pencil, RotateCcw, Send, Trash2, Type, X } from "lucide-react";
 import { Badge, Btn, Card, INPUT, Label, Lightbox, Modal, Spinner } from "@/components/ui";
 import Comments from "./Comments";
+import CorrectionModal, { type Zone } from "./CorrectionModal";
 import { api, signUrls, useSignedUrls, usePipeline, useSupabase } from "@/lib/client";
 import { FORMATS, FORMAT_PACKS, type ImageRow, type Role } from "@/types";
 
@@ -38,8 +39,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
   const [hideRejected, setHideRejected] = useState(false);
   const [zoom, setZoom] = useState<string | null>(null);
   const [fix, setFix] = useState<string | null>(null);
-  const [fixText, setFixText] = useState("");
-  const [remember, setRemember] = useState(false);
+  const [compare, setCompare] = useState<string | null>(null);
   const [formatFor, setFormatFor] = useState<string | null>(null);
   const [formats, setFormats] = useState<string[]>([]);
   const [open, setOpen] = useState<Record<string, boolean>>({});
@@ -102,12 +102,12 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
     generating: images.filter((i) => i.state === "generating").length,
   }), [images]);
 
-  async function submitFix(img: ImageRow, mode: "edit" | "label") {
+  async function submitFix(img: ImageRow, mode: "edit" | "label", v?: { feedback: string; zone: Zone | null; remember: boolean }) {
     try {
-      const r = await api<{ imageId: string }>(`/api/images/${img.id}/correct`, { mode, feedback: fixText, remember });
-      setFix(null); setFixText(""); setRemember(false);
+      const r = await api<{ imageId: string }>(`/api/images/${img.id}/correct`, { mode, feedback: v?.feedback ?? "", zone: v?.zone ?? null, remember: !!v?.remember });
+      setFix(null);
       await load(); run([r.imageId]);
-      flash(remember ? "Correction lancée — consigne mémorisée pour ce produit" : "Correction lancée");
+      flash(v?.remember ? "Correction lancée — consigne mémorisée pour ce produit" : "Correction lancée");
     } catch (e) { flash(e instanceof Error ? e.message : "Erreur"); }
   }
 
@@ -215,7 +215,6 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
           const stuck = generating && !running.has(img.id) && Date.now() - new Date(img.created_at).getTime() > 180_000;
           const v = img.verdict ? VERDICT[img.verdict] : null;
           const qc = img.qc;
-          const isFix = fix === img.id;
           const mine = img.created_by === me.id;
           return (
             <Card key={img.id} className="overflow-hidden flex flex-col">
@@ -252,6 +251,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
                     <Badge tone={REVIEW[img.review_status].tone}>{REVIEW[img.review_status].label}</Badge>
                     {img.feedback && <span className="text-[11px] text-[#A0A0A8] truncate" title={img.feedback}>{img.feedback}</span>}
                   </div>
+                  {img.params?.understood && <p className="text-[#2B6EE8] bg-[#EBF2FF] rounded-lg px-2.5 py-1.5 leading-snug"><span className="font-semibold">Compris :</span> {String(img.params.understood)}</p>}
                   {qc?.comment && <p className="text-[#6B6B72] leading-snug">{qc.comment}</p>}
                   {qc && (
                     <details className="text-[#6B6B72]">
@@ -268,25 +268,15 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
                     </details>
                   )}
 
-                  {isFix ? (
-                    <div className="space-y-2">
-                      <textarea className={INPUT + " min-h-[64px] !text-[12px]"} value={fixText} onChange={(e) => setFixText(e.target.value)} placeholder="Ex : l'étiquette est mal écrite / le flacon est trop grand / lumière plus chaude" autoFocus />
-                      {isStaff && <label className="flex items-center gap-1.5 text-[11px] text-[#6B6B72]"><input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /> Retenir cette consigne pour ce produit</label>}
-                      <div className="flex gap-1.5">
-                        <Btn size="sm" onClick={() => submitFix(img, "edit")} disabled={!fixText.trim()}>Appliquer</Btn>
-                        <Btn size="sm" variant="ghost" onClick={() => setFix(null)}>Annuler</Btn>
-                      </div>
-                    </div>
-                  ) : (
                     <div className="flex flex-wrap gap-1.5 mt-auto">
-                      <Btn size="sm" variant="ghost" onClick={() => { setFix(img.id); setFixText(""); }}><Pencil size={12} /> Corriger</Btn>
+                      <Btn size="sm" variant="ghost" onClick={() => setFix(img.id)}><Pencil size={12} /> Corriger</Btn>
+                      {img.parent_id && img.kind !== "format" && <Btn size="sm" variant="ghost" onClick={() => setCompare(img.id)}>Avant / après</Btn>}
                       <Btn size="sm" variant="ghost" onClick={() => submitFix(img, "label")} title="Corrige uniquement le texte de l'étiquette"><Type size={12} /> Étiquette</Btn>
                       <Btn size="sm" variant="ghost" onClick={() => { setFormatFor(img.id); setFormats([]); }}><LayoutTemplate size={12} /> Décliner</Btn>
                       {url && <a href={url} download={fileName(img)} className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-xl border border-[#E4E4E7] hover:bg-[#F4F4F5]"><Download size={12} /></a>}
                       {(isStaff || mine) && <Btn size="sm" variant="ghost" onClick={() => setOpen({ ...open, [img.id]: !open[img.id] })}><MessageSquare size={12} /></Btn>}
                       {isStaff && <Btn size="sm" variant="danger" onClick={() => removeImage(img)}><Trash2 size={12} /></Btn>}
                     </div>
-                  )}
 
                   {/* Validation */}
                   <div className="flex flex-wrap gap-1.5 pt-2 border-t border-[#F0F0F1]">
@@ -306,6 +296,18 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
       {visible.length === 0 && <p className="text-sm text-[#6B6B72] text-center py-10">Aucune image dans ce filtre.</p>}
 
       <Lightbox src={zoom} onClose={() => setZoom(null)} />
+      {fix && (() => { const img = images.find((i) => i.id === fix); const url = img?.path ? urls[img.path] : undefined; return img && url ? (
+        <CorrectionModal imageUrl={url} aspect={img.aspect ?? shoot.aspect} isStaff={isStaff} onClose={() => setFix(null)} onSubmit={(v) => submitFix(img, "edit", v)} />
+      ) : null; })()}
+      {compare && (() => { const img = images.find((i) => i.id === compare); const par = images.find((i) => i.id === img?.parent_id); const a = par?.path ? urls[par.path] : undefined; const b = img?.path ? urls[img.path] : undefined; return img && a && b ? (
+        <Modal title="Avant / après" onClose={() => setCompare(null)} wide>
+          <div className="grid grid-cols-2 gap-3">
+            <div><p className="text-[11px] font-semibold text-[#A0A0A8] uppercase tracking-widest mb-1.5">Avant</p>{/* eslint-disable-next-line @next/next/no-img-element */}<img src={a} alt="Avant" className="w-full rounded-xl border border-[#E4E4E7]" /></div>
+            <div><p className="text-[11px] font-semibold text-[#2B6EE8] uppercase tracking-widest mb-1.5">Après</p>{/* eslint-disable-next-line @next/next/no-img-element */}<img src={b} alt="Après" className="w-full rounded-xl border border-[#2B6EE8]" /></div>
+          </div>
+          {img.feedback && <p className="text-sm text-[#6B6B72] mt-3">Demande : {img.feedback}</p>}
+        </Modal>
+      ) : null; })()}
       {formatFor && (
         <Modal title="Décliner en formats" onClose={() => setFormatFor(null)}>
           <p className="text-sm text-[#6B6B72] mb-3">La photo est recomposée dans chaque format en gardant le produit entier et la direction artistique. Chaque déclinaison est contrôlée.</p>

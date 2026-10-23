@@ -69,12 +69,17 @@ export function buildPrompt(a: {
   ].filter(Boolean).join("\n");
 }
 
-export function correctionPrompt(a: { product: Product; rules: string[]; feedback: string; mode: "edit" | "label" }) {
+export function correctionPrompt(a: { product: Product; rules: string[]; feedback: string; mode: "edit" | "label"; zone?: { x: number; y: number; w: number; h: number } | null }) {
   const head = [
     "You are retouching an advertising photo for the cosmetics brand Irizée.",
-    "Image 1 = the photo to correct. The following image(s) = the REAL product packshot(s).",
+    a.zone
+      ? "Image 1 = the photo to correct. Image 2 = a zoomed crop of the AREA TO MODIFY. The following image(s) = the REAL product packshot(s)."
+      : "Image 1 = the photo to correct. The following image(s) = the REAL product packshot(s).",
     "NON-NEGOTIABLE RULES:", numbered([...a.rules, ...(a.product.rules ?? [])]), "",
   ];
+  const zoneTxt = a.zone
+    ? `AREA: the client circled a rectangle located at ${Math.round(a.zone.x * 100)}% from the left and ${Math.round(a.zone.y * 100)}% from the top of the image, ${Math.round(a.zone.w * 100)}% wide and ${Math.round(a.zone.h * 100)}% tall (image 2 shows it zoomed). Apply the change ONLY inside this area and keep everything outside it pixel-identical.`
+    : "";
   const texts = a.product.texts?.length ? `Texts that must appear exactly:\n${textsBlock(a.product)}` : "";
   if (a.mode === "label") {
     return [...head,
@@ -83,6 +88,7 @@ export function correctionPrompt(a: { product: Product; rules: string[]; feedbac
   }
   return [...head,
     `TASK: apply this correction requested by the client, and change nothing else: "${a.feedback}".`,
+    zoneTxt,
     "The product must remain identical to the packshot (shape, color, every printed text). Keep the composition and the person unless the correction says otherwise.",
     "Keep the visible fine skin texture and individual eyebrow hair strokes: never smooth the skin.",
     texts].filter(Boolean).join("\n");
@@ -127,3 +133,14 @@ export const ANALYZE_PROMPT =
   "Describe this advertising photo in about 120 words, in English, as a brief for a photographer: camera angle and lens, composition, lighting, color palette, background and graphic elements, styling and mood. " +
   "Say how the product(s) are arranged (a single hero product or several copies, their relative scale, whether they float or are held), but refer to them only as \"the product\": do NOT describe the product's type, shape or packaging. " +
   "Do NOT describe the identity of any person and do NOT mention any brand names or text printed in the image.";
+
+export function interpretPrompt(a: { feedback: string; hasZone: boolean }) {
+  return [
+    "You help a photo retoucher understand a client's correction request on an advertising photo of a cosmetics product. The client writes casually in French.",
+    "Image 1 = the photo." + (a.hasZone ? " Image 2 = a zoomed crop of the area the client circled." : ""),
+    `Client request: "${a.feedback}"`,
+    'Return JSON only: {"instruction": str, "understood": str}.',
+    "instruction = a precise English instruction for the retoucher: what exactly to change, in which element (hand, product, outfit, background, light, skin...), the target result, and an explicit list of what must stay unchanged. Never ask to change the product's shape, label text or logo unless the client explicitly asks to fix them to match the packshot.",
+    "understood = one short French sentence (max 20 words) restating what will be changed, in simple words, so the client can check it was understood.",
+  ].join("\n");
+}

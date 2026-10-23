@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { MODELS, gemini, imgPart, firstImage, firstText, parseJson, type Part } from "./gemini";
-import { buildPrompt, correctionPrompt, formatPrompt, qcPrompt, variationHint } from "./prompts";
+import sharp from "sharp";
+import { buildPrompt, correctionPrompt, formatPrompt, interpretPrompt, qcPrompt, variationHint } from "./prompts";
 import type { ImageRow, Product, QC } from "@/types";
 
 const BUCKET = "studio";
@@ -76,10 +77,34 @@ export async function generateImage(sb: SupabaseClient, image: ImageRow, userId:
     if (!parent?.path) throw new Error("Image parente introuvable");
     const prev = await download(sb, parent.path);
     model = MODELS.pro;
+    let crop: Buffer | null = null;
+    let instruction = image.feedback ?? "";
+    const zone = (image.params as any)?.zone as { x: number; y: number; w: number; h: number } | undefined;
+    if (image.kind === "correction") {
+      if (zone) {
+        try {
+          const meta = await sharp(prev.buf).metadata();
+          const W = meta.width ?? 0, H = meta.height ?? 0;
+          if (W && H) {
+            const pad = 0.04;
+            const left = Math.max(0, Math.round((zone.x - pad) * W)), top = Math.max(0, Math.round((zone.y - pad) * H));
+            const width = Math.min(W - left, Math.round((zone.w + 2 * pad) * W)), height = Math.min(H - top, Math.round((zone.h + 2 * pad) * H));
+            crop = await sharp(prev.buf).extract({ left, top, width, height }).png().toBuffer();
+          }
+        } catch { crop = null; }
+      }
+      // Compréhension de la demande : reformulation précise + phrase « Compris : … » affichée à l'utilisateur
+      try {
+        const r = await gemini(MODELS.text, [{ text: interpretPrompt({ feedback: image.feedback ?? "", hasZone: !!crop }) }, imgPart(prev.buf, prev.mime), ...(crop ? [imgPart(crop, "image/png")] : [])], { json: true });
+        const it = parseJson<{ instruction?: string; understood?: string }>(firstText(r));
+        if (it.instruction) instruction = it.instruction;
+        if (it.understood) await sb.from("images").update({ params: { ...(image.params ?? {}), understood: it.understood } }).eq("id", image.id);
+      } catch { /* on garde la demande telle quelle */ }
+    }
     const prompt = image.kind === "format"
       ? formatPrompt({ product, rules, aspect })
-      : correctionPrompt({ product, rules, feedback: image.feedback ?? "", mode: image.kind === "label" ? "label" : "edit" });
-    parts = [{ text: prompt }, imgPart(prev.buf, prev.mime), ...packshots.map((p) => imgPart(p.buf, p.mime))];
+      : correctionPrompt({ product, rules, feedback: instruction, mode: image.kind === "label" ? "label" : "edit", zone: crop ? zone : null });
+    parts = [{ text: prompt }, imgPart(prev.buf, prev.mime), ...(crop ? [imgPart(crop, "image/png")] : []), ...packshots.map((p) => imgPart(p.buf, p.mime))];
   }
 
   let buf: Buffer | null = null;
