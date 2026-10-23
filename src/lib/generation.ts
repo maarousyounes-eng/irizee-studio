@@ -67,7 +67,7 @@ export async function generateImage(sb: SupabaseClient, image: ImageRow, userId:
     const prompt = buildPrompt({
       product, rules, userPrompt: shoot.prompt, aspect, analysis: shoot.analysis ?? "",
       variation: variationHint(image.variant_index, shoot.no_people), nProductImages: packshots.length,
-      hasModelRef: !!modelRef, modelDescription, noPeople: shoot.no_people,
+      hasModelRef: !!modelRef, modelDescription, noPeople: shoot.no_people, copies: shoot.product_copies === "inspiration" ? "inspiration" : "single",
     });
     parts = [{ text: prompt }, ...packshots.map((p) => imgPart(p.buf, p.mime)), ...(modelRef ? [imgPart(modelRef.buf, modelRef.mime)] : []), ...inspirations.map((p) => imgPart(p.buf, p.mime))];
   } else {
@@ -100,11 +100,11 @@ export async function generateImage(sb: SupabaseClient, image: ImageRow, userId:
 function verdict(qc: QC) {
   const wrong = qc.texts.filter((t) => t.status === "wrong").length;
   const unread = qc.texts.filter((t) => t.status === "unreadable").length;
-  const hard = wrong > 0 || !qc.color_ok || !qc.shape_ok || qc.foreign_logo || !qc.anatomy_ok;
+  const hard = wrong > 0 || qc.all_copies_exact === false || qc.label_orientation_ok === false || !qc.color_ok || !qc.shape_ok || qc.foreign_logo || !qc.anatomy_ok;
   const soft = qc.skin_natural === false || unread > 1 || !qc.hero_foreground || !qc.proportion_ok || !qc.angle_ok || (qc.product_height_pct ?? 100) < 20 || qc.realism_0_10 < 6;
   const score = Math.max(0, Math.min(100, Math.round(
     qc.realism_0_10 * 6 - wrong * 12 - unread * 3 - (qc.color_ok ? 0 : 20) - (qc.shape_ok ? 0 : 15) - (qc.foreign_logo ? 20 : 0)
-    - (qc.anatomy_ok ? 0 : 10) - (qc.skin_natural === false ? 15 : 0) - (qc.hero_foreground ? 0 : 8) - (qc.proportion_ok ? 0 : 8) - (qc.angle_ok ? 0 : 5) + 40)));
+    - (qc.anatomy_ok ? 0 : 10) - (qc.skin_natural === false ? 15 : 0) - (qc.all_copies_exact === false ? 20 : 0) - (qc.label_orientation_ok === false ? 15 : 0) - (qc.hero_foreground ? 0 : 8) - (qc.proportion_ok ? 0 : 8) - (qc.angle_ok ? 0 : 5) + 40)));
   return { verdict: (hard ? "rejected" : soft ? "review" : "valid") as ImageRow["verdict"], score };
 }
 

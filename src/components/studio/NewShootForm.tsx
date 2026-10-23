@@ -37,6 +37,7 @@ export default function NewShootForm(p: Props) {
   const [aspect, setAspect] = useState(p.initial.aspect && FORMATS[p.initial.aspect] ? p.initial.aspect : "4:5");
   const [variants, setVariants] = useState(6);
   const [engine, setEngine] = useState("pro");
+  const [copies, setCopies] = useState<"single" | "inspiration">("single");
   const [size, setSize] = useState("2K");
   const [inspirations, setInspirations] = useState<string[]>(p.initial.inspirationPaths);
   const [uploading, setUploading] = useState(0);
@@ -107,7 +108,7 @@ export default function NewShootForm(p: Props) {
     try {
       const r = await api<{ shootId: string; imageIds: string[] }>("/api/shoots", {
         productId, projectId: projectId || null, modelIds: peopleMode === "models" ? modelIds : [],
-        conceptId: conceptId || null, prompt, aspect, size, engine, variants, noPeople, inspirationPaths: inspirations,
+        conceptId: conceptId || null, prompt, aspect, size, engine, variants, noPeople, productCopies: copies, inspirationPaths: inspirations,
       });
       sessionStorage.setItem(`run:${r.shootId}`, JSON.stringify(r.imageIds));
       router.push(`/shoots/${r.shootId}`);
@@ -184,7 +185,7 @@ export default function NewShootForm(p: Props) {
         <div>
           <Label>Personnes sur les photos</Label>
           <div className="grid grid-cols-3 gap-1.5 mb-2">
-            {([["models", "Mes mannequins"], ["random", "Varié (IA)"], ["none", "Produit seul"]] as const).map(([k, l]) => (
+            {([["models", "Mes mannequins"], ["random", "Visages IA"], ["none", "Produit seul"]] as const).map(([k, l]) => (
               <button key={k} type="button" onClick={() => setPeopleMode(k)} disabled={k === "models" && !p.models.length}
                 className={`px-2 py-2 rounded-xl text-[11px] font-semibold border transition disabled:opacity-40 ${peopleMode === k ? "bg-[#EBF2FF] border-[#2B6EE8] text-[#2B6EE8]" : "bg-white border-[#E4E4E7] text-[#6B6B72] hover:bg-[#F4F4F5]"}`}>{l}</button>
             ))}
@@ -211,7 +212,15 @@ export default function NewShootForm(p: Props) {
               </p>
             </>
           )}
-          {peopleMode === "random" && <p className="text-[11px] text-[#A0A0A8]">L&apos;IA invente un visage différent à chaque image (ils ne seront pas ceux de ta page Mannequins).</p>}
+          {peopleMode === "random" && <p className="text-[11px] text-[#A0A0A8]">L&apos;IA invente un nouveau visage à chaque image : ce ne sont pas tes mannequins. Choisis « Mes mannequins » pour garder tes visages.</p>}
+        </div>
+        <div>
+          <Label>Produit dans l&apos;image</Label>
+          <select className={INPUT} value={copies} onChange={(e) => setCopies(e.target.value as "single" | "inspiration")}>
+            <option value="single">Une seule fois (recommandé)</option>
+            <option value="inspiration">Plusieurs, comme l&apos;inspiration</option>
+          </select>
+          {copies === "inspiration" && <p className="text-[11px] text-[#A0A0A8] mt-1">Chaque copie du produit doit rester identique au packshot ; le contrôle qualité les vérifie toutes.</p>}
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>

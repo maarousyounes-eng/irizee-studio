@@ -32,7 +32,7 @@ const textsBlock = (p: Product) => (p.texts ?? []).map((t) => `- ${t}`).join("\n
 
 export function buildPrompt(a: {
   product: Product; rules: string[]; userPrompt: string; aspect: string; analysis: string;
-  variation: string; nProductImages: number; hasModelRef: boolean; modelDescription?: string; noPeople: boolean;
+  variation: string; nProductImages: number; hasModelRef: boolean; modelDescription?: string; noPeople: boolean; copies: "single" | "inspiration";
 }) {
   const all = numbered([...a.rules, ...(a.product.rules ?? [])]);
   const people = a.noPeople
@@ -40,6 +40,9 @@ export function buildPrompt(a: {
     : a.hasModelRef
       ? `The person in the photo MUST be exactly the same fictional person as in the MODEL REFERENCE image: reproduce that exact face (face shape, eyes, eyebrows, nose, lips, freckles and marks), the same skin tone, age impression and hair colour${a.modelDescription ? `. Description: ${a.modelDescription}` : ""}. Only the outfit, pose and expression come from the brief. Never use the person from the inspiration images.`
       : a.variation;
+  const copies = a.copies === "inspiration"
+    ? "PRODUCT COUNT: you may repeat the product several times as in the inspiration (floating, scattered, different scales), but EVERY copy, even small or blurred, must be an exact replica of the real packshot: same proportions, same label layout, same text direction along the product, same cap and colors. Never invent a different product shape."
+    : "PRODUCT COUNT: show the product EXACTLY ONCE, as the single hero. The inspiration may contain several repeated or floating products: do NOT copy that. Do not add any other bottle, tube, jar or stick anywhere in the image (no duplicates, no floating copies, no look-alike props).";
   return [
     "You are a world-class advertising photographer producing a photorealistic campaign photo for the cosmetics brand Irizée.",
     `The FIRST ${a.nProductImages} image(s) are the REAL product reference photos (packshots) of "${a.product.name}".` +
@@ -55,6 +58,8 @@ export function buildPrompt(a: {
     "",
     a.analysis ? `Analysis of the inspiration photo (reproduce the concept, not the identity):\n${a.analysis}` : "",
     "",
+    copies,
+    "PRODUCT FIDELITY: the product must be a pixel-faithful copy of the packshot: same silhouette and proportions, same cap, same finish and colors, same label layout, and the same direction of the printed text (if the text runs along the length of the product, it must keep running along the length, never rotated across it). Never redesign, restyle or reinterpret the product.",
     `Client brief: ${a.userPrompt}`,
     people,
     "",
@@ -109,13 +114,14 @@ export function qcPrompt(p: Product) {
     `Expected printed texts on the product: ${JSON.stringify(p.texts ?? [])}.`,
     p.look ? `Expected look: ${p.look}` : "",
     "For each expected text, read what is actually printed on the product in image 2 and answer 'ok' (exactly right), 'wrong' (misspelled, garbled, mirrored or different) or 'unreadable' (too small, blurred or hidden).",
-    "Also judge: color/material/shape/cap versus the real packshot; any foreign brand logo; natural anatomy of hands/fingers/face; whether the skin looks like real photographed skin (fine pores and texture still visible, brows with individual hair strokes, even with glamorous makeup and polished retouching) rather than plastic, blurred or AI-smooth skin; and composition (product height as % of the image height, product is a hero in the foreground, realistic scale versus hand/body, natural perspective).",
-    'Return JSON only: {"texts":[{"expected":str,"status":"ok|wrong|unreadable","read":str}],"color_ok":bool,"shape_ok":bool,"foreign_logo":bool,"anatomy_ok":bool,"skin_natural":bool,"product_height_pct":int,"hero_foreground":bool,"proportion_ok":bool,"angle_ok":bool,"realism_0_10":int,"comment":str (one short sentence in French)}',
+    "Also judge: color/material/shape/cap versus the real packshot; count how many product instances (bottles/tubes) are visible in total, and whether EVERY instance (including small, blurred or background ones) is an exact replica of the real packshot, with the same proportions and label layout; whether the printed text direction on the product matches the packshot (not rotated or restyled); any foreign brand logo; natural anatomy of hands/fingers/face; whether the skin looks like real photographed skin (fine pores and texture still visible, brows with individual hair strokes, even with glamorous makeup and polished retouching) rather than plastic, blurred or AI-smooth skin; and composition (product height as % of the image height, product is a hero in the foreground, realistic scale versus hand/body, natural perspective).",
+    'Return JSON only: {"texts":[{"expected":str,"status":"ok|wrong|unreadable","read":str}],"color_ok":bool,"shape_ok":bool,"foreign_logo":bool,"anatomy_ok":bool,"skin_natural":bool,"product_count":int,"all_copies_exact":bool,"label_orientation_ok":bool,"product_height_pct":int,"hero_foreground":bool,"proportion_ok":bool,"angle_ok":bool,"realism_0_10":int,"comment":str (one short sentence in French)}',
   ].filter(Boolean).join("\n");
 }
 
 export const EXTRACT_PROMPT =
-  'This is a packshot of a cosmetics product. Return JSON only: {"name":str (product name as printed, short),"texts":[every distinct printed text on the product, exactly as printed, accents included. Join the lines that belong to the same sentence or title into ONE string. Include the volume line and the brand logo word],"look":str (one sentence in English describing shape, material, colors, cap),"realSize":str (estimated real-world size in English from the volume and shape, e.g. "about 9 cm tall, fits in the palm of one hand")}';
+  'This is a packshot of a cosmetics product. Return JSON only: {"name":str (product name as printed, short),"texts":[every distinct printed text on the product, exactly as printed, accents included. Join the lines that belong to the same sentence or title into ONE string. Include the volume line and the brand logo word],"look":str (2 sentences in English: shape, material, colors, cap; and the layout of the printed text, including its direction relative to the product axis: horizontal, or vertical along the length, and the reading direction of the large logo),"realSize":str (estimated real-world size in English from the volume and shape, e.g. "about 9 cm tall, fits in the palm of one hand")}';
 
 export const ANALYZE_PROMPT =
-  "Describe this advertising photo in about 120 words, in English, as a brief for a photographer: camera angle and lens, composition, product placement and scale, lighting, color palette, props, background and graphic elements, styling and mood. Do NOT describe the identity of any person and do NOT mention any brand names or text printed in the image.";
+  "Describe this advertising photo in about 120 words, in English, as a brief for a photographer: camera angle and lens, composition, lighting, color palette, background and graphic elements, styling and mood, and where the hero product sits relative to the person (foreground/hand). " +
+  "Refer to any product only as \"the product\": do NOT describe the product's type, shape or packaging, and do NOT say how many products appear or that they float or repeat. Do NOT describe the identity of any person and do NOT mention any brand names or text printed in the image.";
