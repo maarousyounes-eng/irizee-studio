@@ -48,7 +48,7 @@ export function buildPrompt(a: {
     "You are a world-class advertising photographer producing a photorealistic campaign photo for the cosmetics brand Irizée.",
     `The FIRST ${a.nProductImages} image(s) are the REAL product reference photos (packshots) of "${a.product.name}".` +
       (a.hasModelRef ? " The next image is the MODEL REFERENCE (face sheet of a fictional model)." : "") +
-      " The remaining image(s) are INSPIRATION references (mood only).",
+      " The remaining image(s) are the STYLE REFERENCE: reproduce its pose, framing, lens, lighting, color grading, makeup and styling mood faithfully. Only the person's identity and the product are different (the person must be a different fictional person, the product is the real packshot).",
     "",
     "NON-NEGOTIABLE RULES (apply to every image):",
     all,
@@ -57,7 +57,8 @@ export function buildPrompt(a: {
     a.product.real_size ? `Real-world size: ${a.product.real_size}. Keep this exact scale versus hands and body: a hand-held product of this size is only about as long as the model's hand (palm and fingers), never oversized, never giant.` : "",
     a.product.texts?.length ? `Exact printed texts on the product (must be legible and spelled exactly like this):\n${textsBlock(a.product)}` : "",
     "",
-    a.analysis ? `Analysis of the inspiration photo (reproduce the concept, not the identity):\n${a.analysis}` : "",
+    a.analysis ? `Analysis of the style reference photo (reproduce this concept, composition and style, not the identity):\n${a.analysis}` : "",
+    "PRODUCT SCALE: it is a small cosmetic tube. It must look exactly as big as the object held in the style reference relative to the person (never bigger), and never exceed its real size: when held near the face it stays about a hand's length and must not cover the lower face or dominate the frame. The person remains the main subject; the product is a precise, discreet accessory unless the client brief asks otherwise.",
     "",
     copies,
     "PRODUCT FIDELITY: the product must be a pixel-faithful copy of the packshot: same silhouette and proportions, same cap, same finish and colors, same label layout, and the same direction of the printed text (if the text runs along the length of the product, it must keep running along the length, never rotated across it). Never redesign, restyle or reinterpret the product.",
@@ -136,7 +137,7 @@ export const EXTRACT_PROMPT =
 
 export const ANALYZE_PROMPT =
   "Describe this advertising photo in about 120 words, in English, as a brief for a photographer: camera angle and lens, composition, lighting, color palette, background and graphic elements, styling and mood. " +
-  "Say how the product(s) are arranged (a single hero product or several copies, their relative scale, whether they float or are held), but refer to them only as \"the product\": do NOT describe the product's type, shape or packaging. " +
+  "Say how the product(s) are arranged (a single hero product or several copies, whether they float or are held) and how big the object appears relative to the person (for example \"about a third of the face height\", \"fits in the palm\", \"covers the chin\"), but refer to them only as \"the product\": do NOT describe the product's type, shape or packaging. " +
   "Do NOT describe the identity of any person and do NOT mention any brand names or text printed in the image.";
 
 const RECIPES = [

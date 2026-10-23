@@ -38,12 +38,14 @@ export async function checkQuota(sb: SupabaseClient, userId: string, needed = 1)
   if (used + needed > profile.monthly_quota) throw new Error(`Quota mensuel atteint (${used}/${profile.monthly_quota} images). Demande à un administrateur de l'augmenter.`);
 }
 
+export const ANALYSIS_SEP = "\n\n---\n\n";
+
 export async function analyzeInspirations(sb: SupabaseClient, paths: string[], prompt: string) {
   const out = await Promise.all(paths.map(async (p) => {
     const f = await download(sb, p);
     return firstText(await gemini(MODELS.text, [{ text: prompt }, imgPart(f.buf, f.mime)], { purpose: "analyse inspiration" })).trim();
   }));
-  return out.join("\n\n");
+  return out.join(ANALYSIS_SEP);
 }
 
 
@@ -148,7 +150,12 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
 
   if (image.kind === "generated") {
     model = shoot.engine === "pro" ? MODELS.pro : shoot.engine === "flash" ? MODELS.flash : (image.variant_index % 2 === 0 ? MODELS.flash : MODELS.pro);
-    const inspirations = await Promise.all((shoot.inspiration_paths as string[]).map((p) => download(sb, p)));
+    // Une inspiration par variante : l'image i suit SON inspiration (pose, cadrage, lumière, style) ; elles tournent s'il y a plus de variantes que d'inspirations.
+    const allInsp = shoot.inspiration_paths as string[];
+    const pick = allInsp.length > 1 ? image.variant_index % allInsp.length : 0;
+    const inspirations = await Promise.all((allInsp.length > 1 ? [allInsp[pick]] : allInsp).map((p) => download(sb, p)));
+    const perAnalysis = String(shoot.analysis ?? "").split(ANALYSIS_SEP);
+    const analysisFor = allInsp.length > 1 && perAnalysis.length === allInsp.length ? perAnalysis[pick] : (shoot.analysis ?? "");
     let modelRef: { buf: Buffer; mime: string } | null = null;
     let modelDescription = "";
     const modelId = (image as any).model_id ?? shoot.model_id;
@@ -157,7 +164,7 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
       if (m?.path) { modelRef = await download(sb, m.path); modelDescription = m.description; }
     }
     const prompt = buildPrompt({
-      product, rules, userPrompt: shoot.prompt, aspect, analysis: shoot.analysis ?? "",
+      product, rules, userPrompt: shoot.prompt, aspect, analysis: analysisFor,
       variation: variationHint(image.variant_index, shoot.no_people), nProductImages: packshots.length,
       hasModelRef: !!modelRef, modelDescription, noPeople: shoot.no_people,
     });
@@ -355,12 +362,12 @@ function verdict(qc: QC, correction = false) {
     ? qc.instruction_followed === false || qc.ghost_or_duplicate === true || qc.foreign_logo || qc.matches_reference === false || (qc.edit_quality_0_10 ?? 10) < 5
     : wrong > 0 || qc.instruction_followed === false || qc.ghost_or_duplicate === true || qc.all_copies_exact === false || qc.label_orientation_ok === false || !qc.color_ok || !qc.shape_ok || qc.foreign_logo || !qc.anatomy_ok;
   const soft = unwanted || (correction && ((qc.edit_quality_0_10 ?? 10) < 8 || wrong > 0 || qc.all_copies_exact === false || !qc.anatomy_ok || !qc.color_ok || !qc.shape_ok || qc.label_orientation_ok === false))
-    || qc.skin_natural === false || unread > 1 || !qc.hero_foreground || !qc.proportion_ok || !qc.angle_ok || (qc.product_height_pct ?? 100) < 20 || qc.realism_0_10 < 6;
+    || qc.skin_natural === false || unread > 1 || !qc.proportion_ok || !qc.angle_ok || (qc.product_height_pct ?? 100) < 8 || qc.realism_0_10 < 6;
   const w = correction ? 0.25 : 1; // poids des défauts hérités dans le score d'une correction
   const score = Math.max(0, Math.min(100, Math.round(
     qc.realism_0_10 * 6 - wrong * 12 * w - unread * 3 * w - (qc.color_ok ? 0 : 20 * w) - (qc.shape_ok ? 0 : 15 * w) - (qc.foreign_logo ? 20 : 0)
     - (qc.anatomy_ok ? 0 : 10 * w) - (correction ? Math.max(0, 8 - (qc.edit_quality_0_10 ?? 8)) * 6 : 0) - (qc.matches_reference === false ? 30 : 0) - (qc.instruction_followed === false ? 40 : 0) - (qc.ghost_or_duplicate ? 20 : 0) - (unwanted ? 10 : 0) - (qc.skin_natural === false ? 15 : 0)
-    - (qc.all_copies_exact === false ? 20 * w : 0) - (qc.label_orientation_ok === false ? 15 * w : 0) - (qc.hero_foreground ? 0 : 8) - (qc.proportion_ok ? 0 : 8) - (qc.angle_ok ? 0 : 5) + 40)));
+    - (qc.all_copies_exact === false ? 20 * w : 0) - (qc.label_orientation_ok === false ? 15 * w : 0) - (qc.proportion_ok ? 0 : 8) - (qc.angle_ok ? 0 : 5) + 40)));
   return { verdict: (hard ? "rejected" : soft ? "review" : "valid") as ImageRow["verdict"], score };
 }
 export const qualityCheck = async (sb: SupabaseClient, image: ImageRow) => {
