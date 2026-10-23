@@ -7,7 +7,7 @@ import { Archive, BookmarkPlus, Check, Download, LayoutTemplate, MessageSquare, 
 import { Badge, Btn, Card, INPUT, Label, Lightbox, Modal, Spinner } from "@/components/ui";
 import Comments from "./Comments";
 import { api, signUrls, useSignedUrls, usePipeline, useSupabase } from "@/lib/client";
-import { FORMATS, type ImageRow, type Role } from "@/types";
+import { FORMATS, FORMAT_PACKS, type ImageRow, type Role } from "@/types";
 
 interface Props {
   shoot: { id: string; prompt: string; aspect: string; product_id: string; created_by: string; created_at: string; analysis: string | null; inspiration_paths: string[]; engine: string; size: string };
@@ -309,13 +309,22 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
       {formatFor && (
         <Modal title="Décliner en formats" onClose={() => setFormatFor(null)}>
           <p className="text-sm text-[#6B6B72] mb-3">La photo est recomposée dans chaque format en gardant le produit entier et la direction artistique. Chaque déclinaison est contrôlée.</p>
+          <div className="flex flex-wrap gap-2 mb-3">
+            {FORMAT_PACKS.map((pk) => {
+              const cur = images.find((i) => i.id === formatFor)?.aspect;
+              return (
+                <Btn key={pk.label} size="sm" variant="soft" onClick={() => setFormats(pk.aspects.filter((a) => a !== cur))} title={pk.hint}>{pk.label}</Btn>
+              );
+            })}
+            <Btn size="sm" variant="ghost" onClick={() => setFormats([])}>Tout décocher</Btn>
+          </div>
           <div className="space-y-1.5 mb-4">
             {Object.entries(FORMATS).map(([k, f]) => {
               const cur = images.find((i) => i.id === formatFor)?.aspect === k;
               return (
                 <label key={k} className={`flex items-center gap-3 px-3 py-2.5 rounded-xl border text-sm cursor-pointer ${cur ? "opacity-40" : "hover:bg-[#F4F4F5]"} ${formats.includes(k) ? "border-[#2B6EE8] bg-[#EBF2FF]" : "border-[#E4E4E7]"}`}>
                   <input type="checkbox" disabled={cur} checked={formats.includes(k)} onChange={(e) => setFormats(e.target.checked ? [...formats, k] : formats.filter((x) => x !== k))} />
-                  <span className="font-semibold">{f.label}</span><span className="text-xs text-[#6B6B72] ml-auto">{cur ? "format actuel" : f.usage}</span>
+                  <span className="font-semibold whitespace-nowrap">{f.label}</span><span className="text-xs text-[#6B6B72] ml-auto text-right">{cur ? "format actuel" : f.usage}</span>
                 </label>
               );
             })}

@@ -41,10 +41,16 @@ export interface ImageRow {
 }
 
 export const FORMATS: Record<string, { label: string; short: string; usage: string }> = {
-  "4:5": { label: "Post Instagram (4:5)", short: "Post 4:5", usage: "Feed Instagram / TikTok" },
-  "9:16": { label: "Story / Reel (9:16)", short: "Story 9:16", usage: "Stories, Reels, TikTok" },
-  "1:1": { label: "Carré (1:1)", short: "Carré 1:1", usage: "Fiche produit, pub carrée" },
-  "16:9": { label: "Bannière site (16:9)", short: "Bannière 16:9", usage: "Site web, en-têtes, YouTube" },
-  "3:4": { label: "Portrait (3:4)", short: "Portrait 3:4", usage: "Pinterest, print" },
+  "16:9": { label: "Bannière / hero (16:9)", short: "Hero 16:9", usage: "Site : hero d'accueil, newsletter, diagnostic peau · YouTube" },
+  "4:5": { label: "Portrait (4:5)", short: "Portrait 4:5", usage: "Site : cartes produits, blocs image · Post Instagram / TikTok" },
+  "1:1": { label: "Carré (1:1)", short: "Carré 1:1", usage: "Site : newsletter, diagnostic peau · fiche produit · pub carrée" },
+  "3:4": { label: "Portrait allongé (3:4)", short: "Portrait 3:4", usage: "Site : diagnostic peau · Pinterest, print" },
+  "9:16": { label: "Story / Reel (9:16)", short: "Story 9:16", usage: "Stories, Reels, TikTok · hero mobile" },
   "4:3": { label: "Paysage (4:3)", short: "Paysage 4:3", usage: "Diaporama, présentation" },
 };
+
+/** Packs prêts à cocher dans « Décliner ». */
+export const FORMAT_PACKS: { label: string; hint: string; aspects: string[] }[] = [
+  { label: "Pack site Irizée", hint: "hero, cartes produits, blocs image", aspects: ["16:9", "4:5", "1:1", "3:4"] },
+  { label: "Pack réseaux", hint: "post, story, carré", aspects: ["4:5", "9:16", "1:1"] },
+];
