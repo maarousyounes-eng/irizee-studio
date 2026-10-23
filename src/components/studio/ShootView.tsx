@@ -361,6 +361,15 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
                       {qc.unwanted_changes && !/^(none|aucun|-)?$/i.test(qc.unwanted_changes.trim()) && <span className="block font-normal text-[#B45309]">Autres changements : {qc.unwanted_changes}</span>}
                     </p>
                   )}
+                  {img.params?.not_applied?.length > 0 && (
+                    <p className="text-[#E8444A] bg-red-50 rounded-lg px-2.5 py-1.5 leading-snug"><span className="font-semibold">Non appliqué :</span> {(img.params.not_applied as string[]).join(" · ")}</p>
+                  )}
+                  {img.kind === "correction" && qc?.edit_quality_0_10 !== undefined && qc.edit_quality_0_10 < 8 && (
+                    <p className="text-[#B45309] bg-amber-50 rounded-lg px-2.5 py-1.5 leading-snug"><span className="font-semibold">Qualité de la retouche : {qc.edit_quality_0_10}/10.</span> {qc.edit_defects || "À vérifier à l'œil."}</p>
+                  )}
+                  {img.kind === "correction" && qc?.instruction_followed && qc.texts.some((t) => t.status === "wrong") && (
+                    <p className="text-[#B45309] bg-amber-50 rounded-lg px-2.5 py-1.5 leading-snug">Le texte du produit est faux (ce n&apos;est pas dû à cette correction). Clique sur <b>Étiquette</b> pour le réparer.</p>
+                  )}
                   {qc?.comment && <p className="text-[#6B6B72] leading-snug">{qc.comment}</p>}
                   {qc && (
                     <details className="text-[#6B6B72]">

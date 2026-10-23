@@ -53,7 +53,7 @@ type Img = { buf: Buffer; mime: string };
 /** Retouche d'un recadrage autour d'une zone : renvoie l'image retouchée et le cadre utilisé. */
 async function localEditCrop(a: {
   prev: Buffer; W: number; H: number; region: Zone; instruction: string; mode: "edit" | "label"; product: Product; rules: string[];
-  refs: Img[]; packshots: Img[]; original: Img | null; model: string; signal?: AbortSignal;
+  refs: Img[]; packshots: Img[]; original: Img | null; model: string; signal?: AbortSignal; timeoutMs?: number;
 }): Promise<{ edited: Buffer; box: CropBox } | null> {
   const box = cropBoxFor(a.region, a.W, a.H);
   if (!box) return null;
@@ -65,25 +65,40 @@ async function localEditCrop(a: {
   const lp = [{ text: localEditPrompt({ product: a.product, rules: a.rules, instruction: a.instruction, mode: a.mode, hasOriginal: !!originalCrop }) }, imgPart(crop, "image/png"), ...(originalCrop ? [imgPart(originalCrop, "image/png")] : []), ...a.packshots.map((p) => imgPart(p.buf, p.mime))] as Part[];
   let edited: Buffer | null = null;
   for (let t = 0; t < 2 && !edited; t++) {
-    try { edited = firstImage(await gemini(a.model, lp, { image: true, aspect: box.ratio, size: t === 0 ? "2K" : undefined, signal: a.signal })); } catch { /* nouvelle tentative */ }
+    try { edited = firstImage(await gemini(a.model, lp, { image: true, aspect: box.ratio, size: t === 0 ? (Math.max(box.width, box.height) > 1100 ? "2K" : "1K") : undefined, signal: a.signal, timeoutMs: a.timeoutMs })); } catch { /* nouvelle tentative */ }
   }
   return edited ? { edited, box } : null;
 }
 
-export interface Interpretation { instruction: string; understood: string; region: Zone | null }
+/** Boîte du produit principal (pour réparer son étiquette sans toucher au reste). */
+async function locateProduct(img: { buf: Buffer; mime: string }): Promise<Zone | null> {
+  try {
+    const r = await gemini(MODELS.text, [{ text: LOCATE_PRODUCT_PROMPT }, imgPart(img.buf, img.mime)], { json: true, timeoutMs: 40_000 });
+    const z = zoneFromBox(parseJson<{ box?: unknown }>(firstText(r)).box, 0.01);
+    return z && z.w * z.h < 0.85 ? z : null;
+  } catch { return null; }
+}
+
+/** Découpe une demande en plusieurs tâches : une par ligne ou par puce. */
+function splitTasks(text: string): string[] {
+  return text.split(/\n+/).map((l) => l.replace(/^\s*(?:[-–•*]|\d+[.)])\s*/, "").trim()).filter((l) => l.length > 2).slice(0, 5);
+}
+
+export interface Interpretation { instruction: string; understood: string; region: Zone | null; intent: "edit" | "label" }
 
 /** Comprend la demande : instruction précise, phrase « Compris », zone à retoucher (zone entourée + éléments concernés). */
 export async function interpretCorrection(prev: { buf: Buffer; mime: string }, feedback: string, userZone: Zone | null, avoid?: string, refs: { buf: Buffer; mime: string }[] = [], original: { buf: Buffer; mime: string } | null = null): Promise<Interpretation> {
   const meta = await sharp(prev.buf).metadata();
   const W = meta.width ?? 0, H = meta.height ?? 0;
-  let instruction = feedback, understood = "", region: Zone | null = userZone;
+  let instruction = feedback, understood = "", region: Zone | null = userZone, intent: "edit" | "label" = "edit";
   try {
     const zoneCrop = userZone && W && H ? await sharp(prev.buf).extract({
       left: Math.round(Math.max(0, userZone.x * W)), top: Math.round(Math.max(0, userZone.y * H)),
       width: Math.max(1, Math.min(W - Math.round(userZone.x * W), Math.round(userZone.w * W))), height: Math.max(1, Math.min(H - Math.round(userZone.y * H), Math.round(userZone.h * H))),
     }).png().toBuffer() : null;
     const r = await gemini(MODELS.text, [{ text: interpretPrompt({ feedback, hasZone: !!zoneCrop, avoid, refCount: refs.length, hasOriginal: !!original }) }, imgPart(prev.buf, prev.mime), ...(original ? [imgPart(original.buf, original.mime)] : []), ...(zoneCrop ? [imgPart(zoneCrop, "image/png")] : []), ...refs.map((r) => imgPart(r.buf, r.mime))], { json: true, timeoutMs: 40_000 });
-    const it = parseJson<{ instruction?: string; understood?: string; scope?: string; boxes?: unknown; box?: unknown }>(firstText(r));
+    const it = parseJson<{ instruction?: string; understood?: string; scope?: string; intent?: string; boxes?: unknown; box?: unknown }>(firstText(r));
+    if (it.intent === "label") intent = "label";
     if (it.instruction) instruction = it.instruction;
     if (it.understood) understood = it.understood;
     if (it.scope === "local") {
@@ -93,10 +108,12 @@ export async function interpretCorrection(prev: { buf: Buffer; mime: string }, f
       region = u && u.w * u.h <= 0.45 ? u : null;
     } else region = null;
   } catch { /* on garde la demande telle quelle */ }
-  return { instruction, understood, region };
+  return { instruction, understood, region, intent };
 }
 
 export async function generateImage(sb: SupabaseClient, image: ImageRow, userId: string, signal?: AbortSignal) {
+  const t0 = Date.now();
+  const left = () => Math.max(25_000, Math.min(200_000, 240_000 - (Date.now() - t0))); // Vercel coupe à 300 s : budget de 240 s
   const { data: shoot } = await sb.from("shoots").select("*").eq("id", image.shoot_id).single();
   if (!shoot) throw new Error("Shooting introuvable");
   const { product, imagePaths } = await loadProduct(sb, shoot.product_id);
@@ -148,10 +165,57 @@ export async function generateImage(sb: SupabaseClient, image: ImageRow, userId:
     }
     let instruction: string = prm.instruction ?? image.feedback ?? "";
     let region: Zone | null = prm.region ?? null;
+    let editMode: "edit" | "label" = image.kind === "label" ? "label" : "edit";
     const zonesIn = ((prm.zones as (Zone & { note?: string })[] | undefined) ?? (prm.zone ? [prm.zone as Zone] : [])) as (Zone & { note?: string })[];
 
     // Plusieurs zones : chacune est comprise et retouchée séparément (en parallèle), puis recollée sur l'image d'origine
-    if (image.kind === "correction" && zonesIn.length >= 2 && W && H) {
+    // Plusieurs demandes (une par ligne) : chacune est traitée à sa manière, puis recollées sur la même image
+    const tasks = image.kind === "correction" && zonesIn.length === 0 ? splitTasks(image.feedback ?? "") : [];
+    if (tasks.length >= 2 && W && H) {
+      const its = await Promise.all(tasks.map((t) => interpretCorrection(prev, t, null, prm.avoid, refs, original)));
+      const items = its.map((it, k) => ({ it, k }));
+      const labelTasks = items.filter(({ it }) => it.intent === "label");
+      const localTasks = items.filter(({ it }) => it.intent !== "label" && it.region);
+      const globalTasks = items.filter(({ it }) => it.intent !== "label" && !it.region);
+      // 1) retouches locales ET réparation d'étiquette en parallèle (le total dépend de la plus lente, pas de la somme)
+      const labelJob = labelTasks.length ? (async () => {
+        const z = await locateProduct(prev);
+        if (!z) return null;
+        const r = await localEditCrop({ prev: prev.buf, W, H, region: z, instruction: "", mode: "label", product, rules, refs: [], packshots, original: null, model, signal, timeoutMs: left() });
+        return r ? { ...r, region: z } : null;
+      })() : Promise.resolve(null);
+      const [edits, labelRes] = await Promise.all([
+        Promise.all(localTasks.map(async ({ it, k }) => {
+          const r = await localEditCrop({ prev: prev.buf, W, H, region: it.region!, instruction: it.instruction, mode: "edit", product, rules, refs: [], packshots, original, model, signal, timeoutMs: left() });
+          return r ? { ...r, region: it.region!, k } : null;
+        })),
+        labelJob,
+      ]);
+      let acc: Buffer = prev.buf;
+      for (const e of edits) if (e) acc = await pasteBack(acc, e.edited, e.box, e.region, W, H);
+      if (labelRes) acc = await pasteBack(acc, labelRes.edited, labelRes.box, labelRes.region, W, H); // l'étiquette en dernier
+      // 2) changements globaux (lumière, fond entier…) : seulement s'il reste du temps
+      if (globalTasks.length && left() > 120_000) {
+        const gp: Part[] = [{ text: correctionPrompt({ product, rules, feedback: globalTasks.map(({ it }) => it.instruction).join(" Also: "), mode: "edit", hasOriginal: !!original }) }, imgPart(acc, "image/png"), ...(original ? [imgPart(original.buf, original.mime)] : []), ...packshots.map((p) => imgPart(p.buf, p.mime))];
+        try { const gb = firstImage(await gemini(model, gp, { image: true, aspect, size: shoot.size, signal, timeoutMs: left() })); if (gb) acc = gb; } catch { /* on garde les retouches locales */ }
+      }
+      // Tâches qui n'ont pas pu être appliquées : on le dit
+      const notDone = [
+        ...localTasks.filter(({ k }, n) => !edits[n]).map(({ k }) => tasks[k]),
+        ...(labelTasks.length && !labelRes ? [tasks[labelTasks[0].k]] : []),
+        ...(globalTasks.length && left() <= 120_000 ? globalTasks.map(({ k }) => tasks[k]) : []),
+      ];
+      if (acc !== prev.buf) {
+        buf = acc;
+        await sb.from("images").update({ params: { ...prm,
+          instruction: its.map((it, k) => `${k + 1}. ${it.instruction}`).join(" "),
+          understood: its.map((it, k) => `${k + 1}. ${it.understood}`).join(" · "),
+          ...(notDone.length ? { not_applied: notDone } : {}),
+        } }).eq("id", image.id);
+      }
+    }
+
+    if (image.kind === "correction" && zonesIn.length >= 2 && W && H && !buf) {
       const outs = await Promise.all(zonesIn.slice(0, 5).map(async (z) => {
         const it = await interpretCorrection(prev, (z.note ?? "").trim() || image.feedback || "", z, prm.avoid, refs, original);
         const reg: Zone = it.region ?? z;
@@ -174,6 +238,7 @@ export async function generateImage(sb: SupabaseClient, image: ImageRow, userId:
       // Filet de sécurité : demande non interprétée à la création
       const it = await interpretCorrection(prev, image.feedback ?? "", zonesIn[0] ?? null, prm.avoid, refs, original);
       instruction = it.instruction; region = it.region;
+      if (it.intent === "label") { editMode = "label"; const z = await locateProduct(prev); region = z; }
       await sb.from("images").update({ params: { ...prm, instruction, understood: it.understood, region } }).eq("id", image.id);
     } else if (image.kind === "label") {
       // Réparation d'étiquette : on repère le produit et on ne retouche que lui
@@ -186,14 +251,14 @@ export async function generateImage(sb: SupabaseClient, image: ImageRow, userId:
 
     // Retouche LOCALE : seule la zone est modifiée, le reste de l'image est strictement conservé.
     if (!buf && region && W && H && image.kind !== "format") {
-      const r = await localEditCrop({ prev: prev.buf, W, H, region, instruction, mode: image.kind === "label" ? "label" : "edit", product, rules, refs, packshots, original, model, signal });
+      const r = await localEditCrop({ prev: prev.buf, W, H, region, instruction, mode: editMode, product, rules, refs: [], packshots, original, model, signal });
       if (r) buf = await pasteBack(prev.buf, r.edited, r.box, region, W, H);
     }
     if (!buf) {
       // Modification globale (lumière, fond entier…) ou repli : régénération complète de l'image
       const prompt = image.kind === "format"
         ? formatPrompt({ product, rules, aspect })
-        : correctionPrompt({ product, rules, feedback: instruction, mode: image.kind === "label" ? "label" : "edit", hasOriginal: !!original });
+        : correctionPrompt({ product, rules, feedback: instruction, mode: editMode, hasOriginal: !!original });
       parts = [{ text: prompt }, imgPart(prev.buf, prev.mime), ...(original ? [imgPart(original.buf, original.mime)] : []), ...packshots.map((p) => imgPart(p.buf, p.mime))];
     }
   }
@@ -223,18 +288,24 @@ export async function generateImage(sb: SupabaseClient, image: ImageRow, userId:
   await sb.from("usage_events").insert({ user_id: userId, kind: image.kind, units: 1, model });
 }
 
-function verdict(qc: QC) {
+function verdict(qc: QC, correction = false) {
   const wrong = qc.texts.filter((t) => t.status === "wrong").length;
   const unread = qc.texts.filter((t) => t.status === "unreadable").length;
-  const hard = wrong > 0 || qc.instruction_followed === false || qc.ghost_or_duplicate === true || qc.all_copies_exact === false || qc.label_orientation_ok === false || !qc.color_ok || !qc.shape_ok || qc.foreign_logo || !qc.anatomy_ok;
   const unwanted = !!qc.unwanted_changes && !/^(none|aucun|n\/a|-)?$/i.test(qc.unwanted_changes.trim());
-  const soft = unwanted || qc.skin_natural === false || unread > 1 || !qc.hero_foreground || !qc.proportion_ok || !qc.angle_ok || (qc.product_height_pct ?? 100) < 20 || qc.realism_0_10 < 6;
+  // Une correction est jugée sur sa demande et sur les dégâts qu'elle cause, pas sur les défauts déjà présents avant :
+  // texte du produit faux, main déformée ailleurs, etc. passent en « à vérifier » (le bouton Étiquette sert à les réparer).
+  const hard = correction
+    ? qc.instruction_followed === false || qc.ghost_or_duplicate === true || qc.foreign_logo || qc.matches_reference === false || (qc.edit_quality_0_10 ?? 10) < 5
+    : wrong > 0 || qc.instruction_followed === false || qc.ghost_or_duplicate === true || qc.all_copies_exact === false || qc.label_orientation_ok === false || !qc.color_ok || !qc.shape_ok || qc.foreign_logo || !qc.anatomy_ok;
+  const soft = unwanted || (correction && ((qc.edit_quality_0_10 ?? 10) < 8 || wrong > 0 || qc.all_copies_exact === false || !qc.anatomy_ok || !qc.color_ok || !qc.shape_ok || qc.label_orientation_ok === false))
+    || qc.skin_natural === false || unread > 1 || !qc.hero_foreground || !qc.proportion_ok || !qc.angle_ok || (qc.product_height_pct ?? 100) < 20 || qc.realism_0_10 < 6;
+  const w = correction ? 0.25 : 1; // poids des défauts hérités dans le score d'une correction
   const score = Math.max(0, Math.min(100, Math.round(
-    qc.realism_0_10 * 6 - wrong * 12 - unread * 3 - (qc.color_ok ? 0 : 20) - (qc.shape_ok ? 0 : 15) - (qc.foreign_logo ? 20 : 0)
-    - (qc.anatomy_ok ? 0 : 10) - (qc.instruction_followed === false ? 40 : 0) - (qc.ghost_or_duplicate ? 20 : 0) - (unwanted ? 10 : 0) - (qc.skin_natural === false ? 15 : 0) - (qc.all_copies_exact === false ? 20 : 0) - (qc.label_orientation_ok === false ? 15 : 0) - (qc.hero_foreground ? 0 : 8) - (qc.proportion_ok ? 0 : 8) - (qc.angle_ok ? 0 : 5) + 40)));
+    qc.realism_0_10 * 6 - wrong * 12 * w - unread * 3 * w - (qc.color_ok ? 0 : 20 * w) - (qc.shape_ok ? 0 : 15 * w) - (qc.foreign_logo ? 20 : 0)
+    - (qc.anatomy_ok ? 0 : 10 * w) - (correction ? Math.max(0, 8 - (qc.edit_quality_0_10 ?? 8)) * 6 : 0) - (qc.matches_reference === false ? 30 : 0) - (qc.instruction_followed === false ? 40 : 0) - (qc.ghost_or_duplicate ? 20 : 0) - (unwanted ? 10 : 0) - (qc.skin_natural === false ? 15 : 0)
+    - (qc.all_copies_exact === false ? 20 * w : 0) - (qc.label_orientation_ok === false ? 15 * w : 0) - (qc.hero_foreground ? 0 : 8) - (qc.proportion_ok ? 0 : 8) - (qc.angle_ok ? 0 : 5) + 40)));
   return { verdict: (hard ? "rejected" : soft ? "review" : "valid") as ImageRow["verdict"], score };
 }
-
 export async function qualityCheck(sb: SupabaseClient, image: ImageRow) {
   if (!image.path) throw new Error("Pas d'image à contrôler");
   const { data: shoot } = await sb.from("shoots").select("product_id").eq("id", image.shoot_id).single();
@@ -247,13 +318,14 @@ export async function qualityCheck(sb: SupabaseClient, image: ImageRow) {
     const { data: par } = await sb.from("images").select("path").eq("id", image.parent_id).single();
     if (par?.path) before = await download(sb, par.path);
   }
-  const qcParts = [{ text: qcPrompt(product, before ? { instruction: instr! } : undefined) }, imgPart(pack.buf, pack.mime), imgPart(gen.buf, gen.mime), ...(before ? [imgPart(before.buf, before.mime)] : [])];
+  const qcRefs = before ? (await Promise.all((((image.params as any)?.refs as string[] | undefined) ?? []).slice(0, 3).map((p) => download(sb, p).catch(() => null)))).filter(Boolean) as { buf: Buffer; mime: string }[] : [];
+  const qcParts = [{ text: qcPrompt(product, before ? { instruction: instr!, refCount: qcRefs.length } : undefined) }, imgPart(pack.buf, pack.mime), imgPart(gen.buf, gen.mime), ...(before ? [imgPart(before.buf, before.mime)] : []), ...qcRefs.map((r) => imgPart(r.buf, r.mime))];
   let r: any;
   try { r = await gemini(MODELS.vision, qcParts, { json: true, timeoutMs: 70_000 }); }
   catch { r = await gemini(MODELS.text, qcParts, { json: true, timeoutMs: 35_000 }); } // modèle plus rapide si le premier est trop lent
   const qc = parseJson<QC>(firstText(r));
   qc.texts = qc.texts ?? [];
-  const v = verdict(qc);
+  const v = verdict(qc, !!before);
   await sb.from("images").update({ qc, verdict: v.verdict, score: v.score }).eq("id", image.id);
   return v;
 }
