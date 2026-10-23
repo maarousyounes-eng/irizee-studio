@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { MODELS, gemini, imgPart, firstImage, firstText, noImageReason, parseJson, withAiCtx, type Part } from "./gemini";
 import sharp from "sharp";
-import { buildPrompt, correctionPrompt, sizeLine, formatPrompt, interpretPrompt, localEditPrompt, LOCATE_PRODUCT_PROMPT, qcPrompt, variationHint } from "./prompts";
+import { buildPrompt, correctionPrompt, sizeLine, formatPrompt, interpretPrompt, localEditPrompt, LOCATE_PRODUCT_PROMPT, READ_LABEL_PROMPT, qcPrompt, variationHint } from "./prompts";
 import { cropBoxFor, cropImage, pasteBack, unionZones, zoneFromBox, zonesFromBoxes, type CropBox, type Zone } from "./localedit";
 import type { ImageRow, Product, QC } from "@/types";
 
@@ -67,7 +67,7 @@ async function localEditCrop(a: {
   const lp = [{ text: localEditPrompt({ product: a.product, rules: a.rules, instruction: a.instruction, mode: a.mode, hasOriginal: !!originalCrop }) }, imgPart(crop, "image/png"), ...(originalCrop ? [imgPart(originalCrop, "image/png")] : []), ...a.packshots.map((p) => imgPart(p.buf, p.mime))] as Part[];
   let edited: Buffer | null = null;
   for (let t = 0; t < 2 && !edited; t++) {
-    try { edited = firstImage(await gemini(a.model, lp, { purpose: a.mode === "label" ? "réparation étiquette" : "retouche locale", image: true, aspect: box.ratio, size: t === 0 ? (Math.max(box.width, box.height) > 1100 ? "2K" : "1K") : undefined, signal: a.signal, timeoutMs: a.timeoutMs })); } catch { /* nouvelle tentative */ }
+    try { edited = firstImage(await gemini(a.model, lp, { purpose: a.mode === "label" ? "réparation étiquette" : "retouche locale", image: true, aspect: box.ratio, size: t === 0 ? (a.mode === "label" || Math.max(box.width, box.height) > 1100 ? "2K" : "1K") : undefined, signal: a.signal, timeoutMs: a.timeoutMs })); } catch { /* nouvelle tentative */ }
   }
   return edited ? { edited, box } : null;
 }
@@ -87,6 +87,44 @@ const UNCHANGED_QC = {
   product_height_pct: 0, hero_foreground: true, proportion_ok: true, angle_ok: true, realism_0_10: 0,
   comment: "Aucun changement visible : contrôle qualité non lancé (pas de dépense inutile).",
 } as unknown as QC;
+
+const norm = (t: string) => t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9% ]+/g, " ").split(/\s+/).filter(Boolean);
+
+/** Compare les textes lus sur l'étiquette à ceux attendus : mots attendus manquants + mots lus qui n'existent pas (fautes). */
+function labelErrors(expected: string[], read: string[]) {
+  const exp = new Set(expected.flatMap(norm));
+  const got = new Set(read.flatMap(norm));
+  const missing = Array.from(exp).filter((w) => w.length >= 4 && !got.has(w));
+  const invented = Array.from(got).filter((w) => w.length >= 4 && !exp.has(w) && !/^\d/.test(w));
+  return { missing, invented, n: missing.length + invented.length };
+}
+
+/** Réparation d'étiquette avec vérification : retouche (2K), lecture bon marché du résultat, une 2e tentative ciblée sur les mots faux. */
+async function repairLabel(a: Parameters<typeof localEditCrop>[0]): Promise<{ edited: Buffer; box: CropBox; errors: string[] } | null> {
+  const expected = a.product.texts ?? [];
+  const attempt = async (instruction: string) => {
+    const r = await localEditCrop({ ...a, mode: "label", instruction });
+    if (!r) return null;
+    let errs = { missing: [] as string[], invented: [] as string[], n: 0 };
+    try {
+      const png = await sharp(r.edited).png().toBuffer();
+      const rd = parseJson<{ lines?: string[] }>(firstText(await gemini(MODELS.text, [{ text: READ_LABEL_PROMPT }, imgPart(png, "image/png")], { purpose: "lecture étiquette", json: true, timeoutMs: 40_000, signal: a.signal })));
+      errs = labelErrors(expected, rd.lines ?? []);
+    } catch { /* lecture indisponible : on garde le résultat sans vérifier */ }
+    return { ...r, errs };
+  };
+  const first = await attempt("");
+  if (!first) return null;
+  if (first.errs.n === 0 || !expected.length) return { edited: first.edited, box: first.box, errors: [] };
+  const fb = [
+    first.errs.invented.length ? `The previous attempt contained misspelled or invented words: ${first.errs.invented.join(", ")}.` : "",
+    first.errs.missing.length ? `These required words were missing or wrong: ${first.errs.missing.join(", ")}.` : "",
+    "Write every word exactly as in the required list, letter by letter, from the packshot.",
+  ].filter(Boolean).join(" ");
+  const second = await attempt(fb);
+  const best = second && second.errs.n < first.errs.n ? second : first;
+  return { edited: best.edited, box: best.box, errors: [...best.errs.invented, ...best.errs.missing].slice(0, 6) };
+}
 
 /** Boîte du produit principal (pour réparer son étiquette sans toucher au reste). */
 async function locateProduct(img: { buf: Buffer; mime: string }): Promise<Zone | null> {
@@ -212,7 +250,7 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
       const labelJob = labelTasks.length ? (async () => {
         const z = await locateProduct(prev);
         if (!z) return null;
-        const r = await localEditCrop({ prev: prev.buf, W, H, region: z, instruction: "", mode: "label", product, rules, refs: [], packshots, original: null, model, signal, timeoutMs: left() });
+        const r = await repairLabel({ prev: prev.buf, W, H, region: z, instruction: "", mode: "label", product, rules, refs: [], packshots, original: null, model, signal, timeoutMs: left() });
         return r ? { ...r, region: z } : null;
       })() : Promise.resolve(null);
       const [edits, labelRes] = await Promise.all([
@@ -234,6 +272,7 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
       const notDone = [
         ...localTasks.filter(({ k }, n) => !edits[n]).map(({ k }) => tasks[k]),
         ...(labelTasks.length && !labelRes ? [tasks[labelTasks[0].k]] : []),
+        ...(labelRes?.errors.length ? [`Étiquette : mots encore douteux (${labelRes.errors.join(", ")})`] : []),
         ...(globalTasks.length && left() <= 120_000 ? globalTasks.map(({ k }) => tasks[k]) : []),
       ];
       if (acc !== prev.buf) {
@@ -282,8 +321,12 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
 
     // Retouche LOCALE : seule la zone est modifiée, le reste de l'image est strictement conservé.
     if (!buf && region && W && H && image.kind !== "format") {
-      const r = await localEditCrop({ prev: prev.buf, W, H, region, instruction, mode: editMode, product, rules, refs: [], packshots, original, model, signal });
-      if (r) buf = await pasteBack(prev.buf, r.edited, r.box, region, W, H);
+      const lr = { prev: prev.buf, W, H, region, instruction, mode: editMode, product, rules, refs: [], packshots, original, model, signal } as Parameters<typeof localEditCrop>[0];
+      const r = editMode === "label" ? await repairLabel(lr) : await localEditCrop(lr);
+      if (r) {
+        buf = await pasteBack(prev.buf, r.edited, r.box, region, W, H);
+        if ((r as { errors?: string[] }).errors?.length) await sb.from("images").update({ params: { ...prm, not_applied: [`Étiquette : mots encore douteux (${(r as unknown as { errors: string[] }).errors.join(", ")})`] } }).eq("id", image.id);
+      }
     }
     if (!buf) {
       // Modification globale (lumière, fond entier…) ou repli : régénération complète de l'image

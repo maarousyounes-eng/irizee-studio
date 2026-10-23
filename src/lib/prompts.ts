@@ -177,7 +177,7 @@ export function localEditPrompt(a: { product: Product; rules: string[]; instruct
     "Image 1 = the crop to edit." + (a.hasOriginal ? " The next image is the same crop taken from the ORIGINAL version of the photo before earlier corrections: use it to restore any element that disappeared or changed by mistake." : "") + (a.refCount ? ` ${refNote(a.refCount)}` : "") + " The following image(s) = the REAL product packshot(s).",
     "NON-NEGOTIABLE RULES:", numbered([...a.rules, ...(a.product.rules ?? [])]), "",
     a.mode === "label"
-      ? "TASK: fix ONLY the printed label of the product visible in the crop so that every word, logo and number matches the real packshot exactly, sharp and legible, with the same layout, text direction and colors."
+      ? "TASK: fix ONLY the printed label of the product visible in the crop so that every word, logo and number matches the real packshot exactly, sharp and legible, with the same layout, text direction and colors." + (a.instruction ? ` ${a.instruction}` : "")
       : `TASK: ${a.instruction}`,
     "If the task moves, resizes or re-positions an object, you must COMPLETELY erase it from its previous position and rebuild the background and body parts that were behind it, so that no ghost, duplicate or leftover of the old object remains.",
     "HARD CONSTRAINTS: keep the exact same framing, camera angle, scale and position of every element, the same lighting, colors and background. Change ONLY what the task asks for. Everything that is not mentioned must stay pixel-identical to Image 1 (same person, same face, same outfit, same product, same text). Do not zoom, shift, crop or re-compose. Output the same crop with the same framing.",
@@ -188,5 +188,9 @@ export function localEditPrompt(a: { product: Product; rules: string[]; instruct
 }
 
 /** Repérage du produit principal pour la réparation d'étiquette. */
+/** Lecture des textes imprimés sur le produit (contrôle bon marché de la réparation d'étiquette). */
+export const READ_LABEL_PROMPT =
+  'Read ALL the printed text visible on the cosmetic tube/product in this image, exactly letter by letter as printed, including small text. Do not correct spelling, do not guess: write what you actually see. Return JSON only: {"lines": [str, ...]}.';
+
 export const LOCATE_PRODUCT_PROMPT =
   'Find the largest, most prominent cosmetic product (tube, bottle) in this advertising photo. Return JSON only: {"box": [ymin, xmin, ymax, xmax]} with integer coordinates from 0 to 1000 relative to the image, covering the whole product including its cap.';
