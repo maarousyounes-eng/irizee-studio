@@ -1,5 +1,6 @@
 import { requireUser, handle, HttpError } from "@/lib/api";
 import { analyzeInspirations, checkQuota } from "@/lib/generation";
+import { withAiCtx } from "@/lib/gemini";
 import { ANALYZE_PROMPT } from "@/lib/prompts";
 import { FORMATS } from "@/types";
 
@@ -25,7 +26,7 @@ export async function POST(req: Request) {
     const modelIds: string[] = Array.isArray(b.modelIds) ? b.modelIds.filter((x: unknown) => typeof x === "string").slice(0, 12) : [];
     const paths: string[] = Array.isArray(b.inspirationPaths) ? b.inspirationPaths : [];
     if (!analysis && paths.length) {
-      try { analysis = await analyzeInspirations(sb, paths, ANALYZE_PROMPT); } catch { analysis = null; }
+      try { analysis = await withAiCtx({ sb, userId: user.id }, () => analyzeInspirations(sb, paths, ANALYZE_PROMPT)); } catch { analysis = null; }
     }
 
     const { data: shoot, error } = await sb.from("shoots").insert({

@@ -6,7 +6,7 @@ import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
-import { Sparkles, Images, CheckCircle2, BookMarked, Trash2, Package, UserRound, FolderKanban, Users, ListChecks, LogOut, Menu, X } from "lucide-react";
+import { Sparkles, Images, CheckCircle2, BookMarked, Trash2, Package, UserRound, FolderKanban, Users, ListChecks, Coins, LogOut, Menu, X } from "lucide-react";
 import type { Role } from "@/types";
 
 type Item = { label: string; href: string; icon: React.ElementType; roles: Role[] };
@@ -25,10 +25,11 @@ const ADMIN: Item[] = [
   { label: "Projets", href: "/settings/projects", icon: FolderKanban, roles: ["admin"] },
   { label: "Équipe & quotas", href: "/settings/team", icon: Users, roles: ["admin"] },
   { label: "Règles de marque", href: "/settings/rules", icon: ListChecks, roles: ["admin"] },
+  { label: "Coûts IA", href: "/settings/costs", icon: Coins, roles: ["admin"] },
 ];
 const ROLE_LABEL: Record<Role, string> = { admin: "Administrateur", employee: "Équipe Irizée", creator: "Créateur / agence" };
 
-export default function Sidebar({ role, name, pending }: { role: Role; name: string; pending: number }) {
+export default function Sidebar({ role, name, pending, todayCost }: { role: Role; name: string; pending: number; todayCost?: number | null }) {
   const pathname = usePathname();
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -54,6 +55,9 @@ export default function Sidebar({ role, name, pending }: { role: Role; name: str
                   active ? "bg-[#EBF2FF] text-[#2B6EE8]" : "text-[#6B6B72] hover:bg-[#F4F4F5] hover:text-[#0A0A0B]")}>
                 <Icon size={15} strokeWidth={1.75} className="flex-shrink-0" />
                 <span className="flex-1">{l}</span>
+                {href === "/settings/costs" && todayCost != null && (
+                  <span className="text-[10px] font-semibold text-[#6B6B72] tabular-nums">{todayCost.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</span>
+                )}
                 {href === "/review" && pending > 0 && (
                   <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-[#2B6EE8] text-white text-[10px] font-bold flex items-center justify-center">{pending}</span>
                 )}

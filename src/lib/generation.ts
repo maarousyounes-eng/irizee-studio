@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { MODELS, gemini, imgPart, firstImage, firstText, parseJson, type Part } from "./gemini";
+import { MODELS, gemini, imgPart, firstImage, firstText, parseJson, withAiCtx, type Part } from "./gemini";
 import sharp from "sharp";
 import { buildPrompt, correctionPrompt, formatPrompt, interpretPrompt, localEditPrompt, LOCATE_PRODUCT_PROMPT, qcPrompt, variationHint } from "./prompts";
 import { cropBoxFor, cropImage, pasteBack, unionZones, zoneFromBox, zonesFromBoxes, type CropBox, type Zone } from "./localedit";
@@ -41,7 +41,7 @@ export async function checkQuota(sb: SupabaseClient, userId: string, needed = 1)
 export async function analyzeInspirations(sb: SupabaseClient, paths: string[], prompt: string) {
   const out = await Promise.all(paths.map(async (p) => {
     const f = await download(sb, p);
-    return firstText(await gemini(MODELS.text, [{ text: prompt }, imgPart(f.buf, f.mime)])).trim();
+    return firstText(await gemini(MODELS.text, [{ text: prompt }, imgPart(f.buf, f.mime)], { purpose: "analyse inspiration" })).trim();
   }));
   return out.join("\n\n");
 }
@@ -65,7 +65,7 @@ async function localEditCrop(a: {
   const lp = [{ text: localEditPrompt({ product: a.product, rules: a.rules, instruction: a.instruction, mode: a.mode, hasOriginal: !!originalCrop }) }, imgPart(crop, "image/png"), ...(originalCrop ? [imgPart(originalCrop, "image/png")] : []), ...a.packshots.map((p) => imgPart(p.buf, p.mime))] as Part[];
   let edited: Buffer | null = null;
   for (let t = 0; t < 2 && !edited; t++) {
-    try { edited = firstImage(await gemini(a.model, lp, { image: true, aspect: box.ratio, size: t === 0 ? (Math.max(box.width, box.height) > 1100 ? "2K" : "1K") : undefined, signal: a.signal, timeoutMs: a.timeoutMs })); } catch { /* nouvelle tentative */ }
+    try { edited = firstImage(await gemini(a.model, lp, { purpose: a.mode === "label" ? "réparation étiquette" : "retouche locale", image: true, aspect: box.ratio, size: t === 0 ? (Math.max(box.width, box.height) > 1100 ? "2K" : "1K") : undefined, signal: a.signal, timeoutMs: a.timeoutMs })); } catch { /* nouvelle tentative */ }
   }
   return edited ? { edited, box } : null;
 }
@@ -73,7 +73,7 @@ async function localEditCrop(a: {
 /** Boîte du produit principal (pour réparer son étiquette sans toucher au reste). */
 async function locateProduct(img: { buf: Buffer; mime: string }): Promise<Zone | null> {
   try {
-    const r = await gemini(MODELS.text, [{ text: LOCATE_PRODUCT_PROMPT }, imgPart(img.buf, img.mime)], { json: true, timeoutMs: 40_000 });
+    const r = await gemini(MODELS.text, [{ text: LOCATE_PRODUCT_PROMPT }, imgPart(img.buf, img.mime)], { purpose: "localisation produit", json: true, timeoutMs: 40_000 });
     const z = zoneFromBox(parseJson<{ box?: unknown }>(firstText(r)).box, 0.01);
     return z && z.w * z.h < 0.85 ? z : null;
   } catch { return null; }
@@ -96,7 +96,7 @@ export async function interpretCorrection(prev: { buf: Buffer; mime: string }, f
       left: Math.round(Math.max(0, userZone.x * W)), top: Math.round(Math.max(0, userZone.y * H)),
       width: Math.max(1, Math.min(W - Math.round(userZone.x * W), Math.round(userZone.w * W))), height: Math.max(1, Math.min(H - Math.round(userZone.y * H), Math.round(userZone.h * H))),
     }).png().toBuffer() : null;
-    const r = await gemini(MODELS.text, [{ text: interpretPrompt({ feedback, hasZone: !!zoneCrop, avoid, refCount: refs.length, hasOriginal: !!original }) }, imgPart(prev.buf, prev.mime), ...(original ? [imgPart(original.buf, original.mime)] : []), ...(zoneCrop ? [imgPart(zoneCrop, "image/png")] : []), ...refs.map((r) => imgPart(r.buf, r.mime))], { json: true, timeoutMs: 40_000 });
+    const r = await gemini(MODELS.text, [{ text: interpretPrompt({ feedback, hasZone: !!zoneCrop, avoid, refCount: refs.length, hasOriginal: !!original }) }, imgPart(prev.buf, prev.mime), ...(original ? [imgPart(original.buf, original.mime)] : []), ...(zoneCrop ? [imgPart(zoneCrop, "image/png")] : []), ...refs.map((r) => imgPart(r.buf, r.mime))], { purpose: "localisation produit", json: true, timeoutMs: 40_000 });
     const it = parseJson<{ instruction?: string; understood?: string; scope?: string; intent?: string; boxes?: unknown; box?: unknown }>(firstText(r));
     if (it.intent === "label") intent = "label";
     if (it.instruction) instruction = it.instruction;
@@ -111,7 +111,10 @@ export async function interpretCorrection(prev: { buf: Buffer; mime: string }, f
   return { instruction, understood, region, intent };
 }
 
-export async function generateImage(sb: SupabaseClient, image: ImageRow, userId: string, signal?: AbortSignal) {
+export const generateImage = (sb: SupabaseClient, image: ImageRow, userId: string, signal?: AbortSignal) =>
+  withAiCtx({ sb, userId, shootId: image.shoot_id, imageId: image.id }, () => generateImageInner(sb, image, userId, signal));
+
+async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: string, signal?: AbortSignal) {
   const t0 = Date.now();
   const left = () => Math.max(25_000, Math.min(200_000, 240_000 - (Date.now() - t0))); // Vercel coupe à 300 s : budget de 240 s
   const { data: shoot } = await sb.from("shoots").select("*").eq("id", image.shoot_id).single();
@@ -197,7 +200,7 @@ export async function generateImage(sb: SupabaseClient, image: ImageRow, userId:
       // 2) changements globaux (lumière, fond entier…) : seulement s'il reste du temps
       if (globalTasks.length && left() > 120_000) {
         const gp: Part[] = [{ text: correctionPrompt({ product, rules, feedback: globalTasks.map(({ it }) => it.instruction).join(" Also: "), mode: "edit", hasOriginal: !!original }) }, imgPart(acc, "image/png"), ...(original ? [imgPart(original.buf, original.mime)] : []), ...packshots.map((p) => imgPart(p.buf, p.mime))];
-        try { const gb = firstImage(await gemini(model, gp, { image: true, aspect, size: shoot.size, signal, timeoutMs: left() })); if (gb) acc = gb; } catch { /* on garde les retouches locales */ }
+        try { const gb = firstImage(await gemini(model, gp, { purpose: "retouche globale", image: true, aspect, size: shoot.size, signal, timeoutMs: left() })); if (gb) acc = gb; } catch { /* on garde les retouches locales */ }
       }
       // Tâches qui n'ont pas pu être appliquées : on le dit
       const notDone = [
@@ -243,7 +246,7 @@ export async function generateImage(sb: SupabaseClient, image: ImageRow, userId:
     } else if (image.kind === "label") {
       // Réparation d'étiquette : on repère le produit et on ne retouche que lui
       try {
-        const r = await gemini(MODELS.text, [{ text: LOCATE_PRODUCT_PROMPT }, imgPart(prev.buf, prev.mime)], { json: true, timeoutMs: 40_000 });
+        const r = await gemini(MODELS.text, [{ text: LOCATE_PRODUCT_PROMPT }, imgPart(prev.buf, prev.mime)], { purpose: "localisation produit", json: true, timeoutMs: 40_000 });
         const z = zoneFromBox(parseJson<{ box?: unknown }>(firstText(r)).box, 0.01);
         if (z && z.w * z.h < 0.85) region = z;
       } catch { region = null; }
@@ -265,7 +268,7 @@ export async function generateImage(sb: SupabaseClient, image: ImageRow, userId:
 
   let lastErr: unknown;
   for (let a = 0; a < 2 && !buf; a++) {
-    try { buf = firstImage(await gemini(model, parts, { image: true, aspect, size: a === 0 ? shoot.size : undefined, signal })); }
+    try { buf = firstImage(await gemini(model, parts, { purpose: image.kind === "generated" ? "génération" : image.kind === "format" ? "déclinaison format" : "retouche globale", image: true, aspect, size: a === 0 ? shoot.size : undefined, signal })); }
     catch (e) { lastErr = e; }
   }
   if (!buf) throw lastErr instanceof Error ? lastErr : new Error("Aucune image renvoyée par le modèle");
@@ -306,7 +309,12 @@ function verdict(qc: QC, correction = false) {
     - (qc.all_copies_exact === false ? 20 * w : 0) - (qc.label_orientation_ok === false ? 15 * w : 0) - (qc.hero_foreground ? 0 : 8) - (qc.proportion_ok ? 0 : 8) - (qc.angle_ok ? 0 : 5) + 40)));
   return { verdict: (hard ? "rejected" : soft ? "review" : "valid") as ImageRow["verdict"], score };
 }
-export async function qualityCheck(sb: SupabaseClient, image: ImageRow) {
+export const qualityCheck = async (sb: SupabaseClient, image: ImageRow) => {
+  const { data: { user } } = await sb.auth.getUser();
+  return withAiCtx({ sb, userId: user?.id ?? "", shootId: image.shoot_id, imageId: image.id }, () => qualityCheckInner(sb, image));
+};
+
+async function qualityCheckInner(sb: SupabaseClient, image: ImageRow) {
   if (!image.path) throw new Error("Pas d'image à contrôler");
   const { data: shoot } = await sb.from("shoots").select("product_id").eq("id", image.shoot_id).single();
   const { product, imagePaths } = await loadProduct(sb, shoot!.product_id);
@@ -321,8 +329,8 @@ export async function qualityCheck(sb: SupabaseClient, image: ImageRow) {
   const qcRefs = before ? (await Promise.all((((image.params as any)?.refs as string[] | undefined) ?? []).slice(0, 3).map((p) => download(sb, p).catch(() => null)))).filter(Boolean) as { buf: Buffer; mime: string }[] : [];
   const qcParts = [{ text: qcPrompt(product, before ? { instruction: instr!, refCount: qcRefs.length } : undefined) }, imgPart(pack.buf, pack.mime), imgPart(gen.buf, gen.mime), ...(before ? [imgPart(before.buf, before.mime)] : []), ...qcRefs.map((r) => imgPart(r.buf, r.mime))];
   let r: any;
-  try { r = await gemini(MODELS.vision, qcParts, { json: true, timeoutMs: 70_000 }); }
-  catch { r = await gemini(MODELS.text, qcParts, { json: true, timeoutMs: 35_000 }); } // modèle plus rapide si le premier est trop lent
+  try { r = await gemini(MODELS.vision, qcParts, { purpose: "contrôle qualité", json: true, timeoutMs: 70_000 }); }
+  catch { r = await gemini(MODELS.text, qcParts, { purpose: "contrôle qualité (secours)", json: true, timeoutMs: 35_000 }); } // modèle plus rapide si le premier est trop lent
   const qc = parseJson<QC>(firstText(r));
   qc.texts = qc.texts ?? [];
   const v = verdict(qc, !!before);
