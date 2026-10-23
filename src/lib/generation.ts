@@ -1,7 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { MODELS, gemini, imgPart, firstImage, firstText, parseJson, type Part } from "./gemini";
 import sharp from "sharp";
-import { buildPrompt, correctionPrompt, formatPrompt, interpretPrompt, qcPrompt, variationHint } from "./prompts";
+import { buildPrompt, correctionPrompt, formatPrompt, interpretPrompt, localEditPrompt, LOCATE_PRODUCT_PROMPT, qcPrompt, variationHint } from "./prompts";
+import { cropBoxFor, cropImage, pasteBack, zoneFromBox, type Zone } from "./localedit";
 import type { ImageRow, Product, QC } from "@/types";
 
 const BUCKET = "studio";
@@ -52,8 +53,9 @@ export async function generateImage(sb: SupabaseClient, image: ImageRow, userId:
   const rules = await brandRules(sb);
   const packshots = await Promise.all(imagePaths.map((p) => download(sb, p)));
   const aspect = image.aspect || shoot.aspect;
-  let parts: Part[];
+  let parts: Part[] = [];
   let model: string;
+  let buf: Buffer | null = null;
 
   if (image.kind === "generated") {
     model = shoot.engine === "pro" ? MODELS.pro : shoot.engine === "flash" ? MODELS.flash : (image.variant_index % 2 === 0 ? MODELS.flash : MODELS.pro);
@@ -77,37 +79,58 @@ export async function generateImage(sb: SupabaseClient, image: ImageRow, userId:
     if (!parent?.path) throw new Error("Image parente introuvable");
     const prev = await download(sb, parent.path);
     model = MODELS.pro;
-    let crop: Buffer | null = null;
+    const meta = await sharp(prev.buf).metadata();
+    const W = meta.width ?? 0, H = meta.height ?? 0;
     let instruction = image.feedback ?? "";
-    const zone = (image.params as any)?.zone as { x: number; y: number; w: number; h: number } | undefined;
+    const userZone = (image.params as any)?.zone as Zone | undefined;
+    let region: Zone | null = userZone ?? null;
+
     if (image.kind === "correction") {
-      if (zone) {
-        try {
-          const meta = await sharp(prev.buf).metadata();
-          const W = meta.width ?? 0, H = meta.height ?? 0;
-          if (W && H) {
-            const pad = 0.04;
-            const left = Math.max(0, Math.round((zone.x - pad) * W)), top = Math.max(0, Math.round((zone.y - pad) * H));
-            const width = Math.min(W - left, Math.round((zone.w + 2 * pad) * W)), height = Math.min(H - top, Math.round((zone.h + 2 * pad) * H));
-            crop = await sharp(prev.buf).extract({ left, top, width, height }).png().toBuffer();
-          }
-        } catch { crop = null; }
-      }
-      // Compréhension de la demande : reformulation précise + phrase « Compris : … » affichée à l'utilisateur
+      // Compréhension de la demande : instruction précise, « Compris : … » pour l'utilisateur, et repérage de la zone à modifier
       try {
-        const r = await gemini(MODELS.text, [{ text: interpretPrompt({ feedback: image.feedback ?? "", hasZone: !!crop }) }, imgPart(prev.buf, prev.mime), ...(crop ? [imgPart(crop, "image/png")] : [])], { json: true });
-        const it = parseJson<{ instruction?: string; understood?: string }>(firstText(r));
+        const zoneCrop = userZone && W && H ? await sharp(prev.buf).extract({
+          left: Math.round(Math.max(0, userZone.x * W)), top: Math.round(Math.max(0, userZone.y * H)),
+          width: Math.max(1, Math.min(W - Math.round(userZone.x * W), Math.round(userZone.w * W))), height: Math.max(1, Math.min(H - Math.round(userZone.y * H), Math.round(userZone.h * H))),
+        }).png().toBuffer() : null;
+        const r = await gemini(MODELS.text, [{ text: interpretPrompt({ feedback: image.feedback ?? "", hasZone: !!zoneCrop }) }, imgPart(prev.buf, prev.mime), ...(zoneCrop ? [imgPart(zoneCrop, "image/png")] : [])], { json: true });
+        const it = parseJson<{ instruction?: string; understood?: string; scope?: string; box?: unknown }>(firstText(r));
         if (it.instruction) instruction = it.instruction;
-        if (it.understood) await sb.from("images").update({ params: { ...(image.params ?? {}), understood: it.understood } }).eq("id", image.id);
+        if (!region && it.scope === "local") {
+          const z = zoneFromBox(it.box);
+          if (z && z.w * z.h < 0.7) region = z;
+        }
+        const understood = it.understood ? { understood: it.understood } : {};
+        await sb.from("images").update({ params: { ...(image.params ?? {}), ...understood, localised: !!region } }).eq("id", image.id);
       } catch { /* on garde la demande telle quelle */ }
+    } else if (image.kind === "label") {
+      // Réparation d'étiquette : on repère le produit et on ne retouche que lui
+      try {
+        const r = await gemini(MODELS.text, [{ text: LOCATE_PRODUCT_PROMPT }, imgPart(prev.buf, prev.mime)], { json: true });
+        const z = zoneFromBox(parseJson<{ box?: unknown }>(firstText(r)).box, 0.01);
+        if (z && z.w * z.h < 0.85) region = z;
+      } catch { region = null; }
     }
-    const prompt = image.kind === "format"
-      ? formatPrompt({ product, rules, aspect })
-      : correctionPrompt({ product, rules, feedback: instruction, mode: image.kind === "label" ? "label" : "edit", zone: crop ? zone : null });
-    parts = [{ text: prompt }, imgPart(prev.buf, prev.mime), ...(crop ? [imgPart(crop, "image/png")] : []), ...packshots.map((p) => imgPart(p.buf, p.mime))];
+
+    // Retouche LOCALE : seule la zone est modifiée, le reste de l'image est strictement conservé.
+    const box = region && W && H && image.kind !== "format" ? cropBoxFor(region, W, H) : null;
+    if (region && box) {
+      const crop = await cropImage(prev.buf, box);
+      const lp = [{ text: localEditPrompt({ product, rules, instruction, mode: image.kind === "label" ? "label" : "edit" }) }, imgPart(crop, "image/png"), ...packshots.map((p) => imgPart(p.buf, p.mime))] as Part[];
+      let edited: Buffer | null = null;
+      for (let a = 0; a < 2 && !edited; a++) {
+        try { edited = firstImage(await gemini(model, lp, { image: true, aspect: box.ratio, size: a === 0 ? "2K" : undefined })); } catch { /* nouvelle tentative */ }
+      }
+      if (edited) buf = await pasteBack(prev.buf, edited, box, region, W, H);
+    }
+    if (!buf) {
+      // Modification globale (lumière, fond entier…) ou repli : régénération complète de l'image
+      const prompt = image.kind === "format"
+        ? formatPrompt({ product, rules, aspect })
+        : correctionPrompt({ product, rules, feedback: instruction, mode: image.kind === "label" ? "label" : "edit" });
+      parts = [{ text: prompt }, imgPart(prev.buf, prev.mime), ...packshots.map((p) => imgPart(p.buf, p.mime))];
+    }
   }
 
-  let buf: Buffer | null = null;
   let lastErr: unknown;
   for (let a = 0; a < 2 && !buf; a++) {
     try { buf = firstImage(await gemini(model, parts, { image: true, aspect, size: a === 0 ? shoot.size : undefined })); }
