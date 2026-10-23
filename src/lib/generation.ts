@@ -289,14 +289,26 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
 
   let lastErr: unknown;
   let noImage = "";
-  for (let a = 0; a < 2 && !buf; a++) {
-    // 2e essai après un refus : sans les photos d'inspiration (déjà résumées en texte dans l'analyse), qui déclenchent souvent le filtre de sécurité
-    const tryParts = a === 1 && noImage && image.kind === "generated" && nInsp > 0 ? parts.slice(0, parts.length - nInsp) : parts;
+  const purposeOf = (suffix = "") => (image.kind === "generated" ? "génération" : image.kind === "format" ? "déclinaison format" : "retouche globale") + suffix;
+  const base = nInsp > 0 ? parts.slice(0, parts.length - nInsp) : parts;
+  const insps = nInsp > 0 ? parts.slice(parts.length - nInsp) : [];
+  // Essai normal ; si Google bloque (filtre de sécurité), on retire UNE photo d'inspiration à la fois pour trouver celle qui bloque
+  // (un appel bloqué coûte ~0,01 €), en gardant toutes les autres et la même résolution. En dernier recours, sans aucune inspiration.
+  const run = async (p: Part[], label: string) => {
     try {
-      const resp = await gemini(model, tryParts, { purpose: image.kind === "generated" ? (a === 1 ? "génération (sans inspirations)" : "génération") : image.kind === "format" ? "déclinaison format" : "retouche globale", image: true, aspect, size: a === 0 ? shoot.size : undefined, signal });
+      const resp = await gemini(model, p, { purpose: purposeOf(label), image: true, aspect, size: shoot.size, signal });
       buf = firstImage(resp);
       if (!buf) noImage = noImageReason(resp);
     } catch (e) { lastErr = e; }
+  };
+  await run(parts, "");
+  if (!buf && image.kind !== "generated") await run(parts, "");
+  if (!buf && noImage && image.kind === "generated" && nInsp > 0) {
+    for (let k = 0; k < nInsp && !buf; k++) {
+      if (nInsp < 2) break;
+      await run([...base, ...insps.filter((_, j) => j !== k)], ` (sans inspiration ${k + 1})`);
+    }
+    if (!buf) await run(base, " (sans inspirations)");
   }
   if (!buf) throw lastErr instanceof Error ? lastErr : new Error(`Google n'a renvoyé aucune image (${noImage || "raison inconnue"})`);
 
