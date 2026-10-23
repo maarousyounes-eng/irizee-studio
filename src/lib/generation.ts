@@ -50,7 +50,7 @@ export async function analyzeInspirations(sb: SupabaseClient, paths: string[], p
 export interface Interpretation { instruction: string; understood: string; region: Zone | null }
 
 /** Comprend la demande : instruction précise, phrase « Compris », zone à retoucher (zone entourée + éléments concernés). */
-export async function interpretCorrection(prev: { buf: Buffer; mime: string }, feedback: string, userZone: Zone | null, avoid?: string): Promise<Interpretation> {
+export async function interpretCorrection(prev: { buf: Buffer; mime: string }, feedback: string, userZone: Zone | null, avoid?: string, refs: { buf: Buffer; mime: string }[] = []): Promise<Interpretation> {
   const meta = await sharp(prev.buf).metadata();
   const W = meta.width ?? 0, H = meta.height ?? 0;
   let instruction = feedback, understood = "", region: Zone | null = userZone;
@@ -59,7 +59,7 @@ export async function interpretCorrection(prev: { buf: Buffer; mime: string }, f
       left: Math.round(Math.max(0, userZone.x * W)), top: Math.round(Math.max(0, userZone.y * H)),
       width: Math.max(1, Math.min(W - Math.round(userZone.x * W), Math.round(userZone.w * W))), height: Math.max(1, Math.min(H - Math.round(userZone.y * H), Math.round(userZone.h * H))),
     }).png().toBuffer() : null;
-    const r = await gemini(MODELS.text, [{ text: interpretPrompt({ feedback, hasZone: !!zoneCrop, avoid }) }, imgPart(prev.buf, prev.mime), ...(zoneCrop ? [imgPart(zoneCrop, "image/png")] : [])], { json: true, timeoutMs: 40_000 });
+    const r = await gemini(MODELS.text, [{ text: interpretPrompt({ feedback, hasZone: !!zoneCrop, avoid, refCount: refs.length }) }, imgPart(prev.buf, prev.mime), ...(zoneCrop ? [imgPart(zoneCrop, "image/png")] : []), ...refs.map((r) => imgPart(r.buf, r.mime))], { json: true, timeoutMs: 40_000 });
     const it = parseJson<{ instruction?: string; understood?: string; scope?: string; boxes?: unknown; box?: unknown }>(firstText(r));
     if (it.instruction) instruction = it.instruction;
     if (it.understood) understood = it.understood;
@@ -109,12 +109,15 @@ export async function generateImage(sb: SupabaseClient, image: ImageRow, userId:
     const meta = await sharp(prev.buf).metadata();
     const W = meta.width ?? 0, H = meta.height ?? 0;
     const prm = (image.params ?? {}) as Record<string, any>;
+    // Images de référence fournies par l'utilisateur (capture, photo d'exemple)
+    const refImgs = await Promise.all(((prm.refs as string[] | undefined) ?? []).slice(0, 3).map((p) => download(sb, p).catch(() => null)));
+    const refs = refImgs.filter(Boolean) as { buf: Buffer; mime: string }[];
     let instruction: string = prm.instruction ?? image.feedback ?? "";
     let region: Zone | null = prm.region ?? null;
 
     if (image.kind === "correction" && !prm.instruction) {
       // Filet de sécurité : demande non interprétée à la création
-      const it = await interpretCorrection(prev, image.feedback ?? "", prm.zone ?? null, prm.avoid);
+      const it = await interpretCorrection(prev, image.feedback ?? "", prm.zone ?? null, prm.avoid, refs);
       instruction = it.instruction; region = it.region;
       await sb.from("images").update({ params: { ...prm, instruction, understood: it.understood, region } }).eq("id", image.id);
     } else if (image.kind === "label") {
@@ -130,7 +133,7 @@ export async function generateImage(sb: SupabaseClient, image: ImageRow, userId:
     const box = region && W && H && image.kind !== "format" ? cropBoxFor(region, W, H) : null;
     if (region && box) {
       const crop = await cropImage(prev.buf, box);
-      const lp = [{ text: localEditPrompt({ product, rules, instruction, mode: image.kind === "label" ? "label" : "edit" }) }, imgPart(crop, "image/png"), ...packshots.map((p) => imgPart(p.buf, p.mime))] as Part[];
+      const lp = [{ text: localEditPrompt({ product, rules, instruction, mode: image.kind === "label" ? "label" : "edit", refCount: refs.length }) }, imgPart(crop, "image/png"), ...refs.map((r) => imgPart(r.buf, r.mime)), ...packshots.map((p) => imgPart(p.buf, p.mime))] as Part[];
       let edited: Buffer | null = null;
       for (let a = 0; a < 2 && !edited; a++) {
         try { edited = firstImage(await gemini(model, lp, { image: true, aspect: box.ratio, size: a === 0 ? "2K" : undefined, signal })); } catch { /* nouvelle tentative */ }
@@ -141,8 +144,8 @@ export async function generateImage(sb: SupabaseClient, image: ImageRow, userId:
       // Modification globale (lumière, fond entier…) ou repli : régénération complète de l'image
       const prompt = image.kind === "format"
         ? formatPrompt({ product, rules, aspect })
-        : correctionPrompt({ product, rules, feedback: instruction, mode: image.kind === "label" ? "label" : "edit" });
-      parts = [{ text: prompt }, imgPart(prev.buf, prev.mime), ...packshots.map((p) => imgPart(p.buf, p.mime))];
+        : correctionPrompt({ product, rules, feedback: instruction, mode: image.kind === "label" ? "label" : "edit", refCount: refs.length });
+      parts = [{ text: prompt }, imgPart(prev.buf, prev.mime), ...refs.map((r) => imgPart(r.buf, r.mime)), ...packshots.map((p) => imgPart(p.buf, p.mime))];
     }
   }
 

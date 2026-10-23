@@ -69,17 +69,15 @@ export function buildPrompt(a: {
   ].filter(Boolean).join("\n");
 }
 
-export function correctionPrompt(a: { product: Product; rules: string[]; feedback: string; mode: "edit" | "label"; zone?: { x: number; y: number; w: number; h: number } | null }) {
+const refNote = (n: number) =>
+  `The next ${n} image(s) are REFERENCE image(s) supplied by the client to show what they want (a pose, a grip, an arrangement, a style, an element). Reproduce the IDEA they show (pose, arrangement, shape) in the requested change, but never copy any person, face, brand, logo or text from them: the person, the product and everything else stay as in Image 1.`;
+
+export function correctionPrompt(a: { product: Product; rules: string[]; feedback: string; mode: "edit" | "label"; refCount?: number }) {
   const head = [
     "You are retouching an advertising photo for the cosmetics brand Irizée.",
-    a.zone
-      ? "Image 1 = the photo to correct. Image 2 = a zoomed crop of the AREA TO MODIFY. The following image(s) = the REAL product packshot(s)."
-      : "Image 1 = the photo to correct. The following image(s) = the REAL product packshot(s).",
+    "Image 1 = the photo to correct." + (a.refCount ? ` ${refNote(a.refCount)}` : "") + " The following image(s) = the REAL product packshot(s).",
     "NON-NEGOTIABLE RULES:", numbered([...a.rules, ...(a.product.rules ?? [])]), "",
   ];
-  const zoneTxt = a.zone
-    ? `AREA: the client circled a rectangle located at ${Math.round(a.zone.x * 100)}% from the left and ${Math.round(a.zone.y * 100)}% from the top of the image, ${Math.round(a.zone.w * 100)}% wide and ${Math.round(a.zone.h * 100)}% tall (image 2 shows it zoomed). Apply the change ONLY inside this area and keep everything outside it pixel-identical.`
-    : "";
   const texts = a.product.texts?.length ? `Texts that must appear exactly:\n${textsBlock(a.product)}` : "";
   if (a.mode === "label") {
     return [...head,
@@ -88,7 +86,6 @@ export function correctionPrompt(a: { product: Product; rules: string[]; feedbac
   }
   return [...head,
     `TASK: apply this correction requested by the client, and change nothing else: "${a.feedback}".`,
-    zoneTxt,
     "ANATOMY: the person has exactly two arms and two hands. Never add an extra hand, arm, finger or limb, and never leave the old hand pose behind: modify the EXISTING hand and fingers only.",
     "THE REQUESTED CHANGE MUST BE CLEARLY VISIBLE in the result: never return an unchanged copy of Image 1. If the request is a pose change (a hand holding an object, a different gesture), actually redraw the hand and fingers in the new pose and move the object accordingly, while everything else stays as it is.",
     "The product must remain identical to the packshot (shape, color, every printed text). Keep the SAME person (same face, hair, eyewear, jewelry, outfit), the SAME background, the SAME camera framing and the SAME lighting: change only what the correction asks for, and keep every other element exactly as it is. If an object moves or is re-held, completely erase it from its old position (no ghost or duplicate).",
@@ -147,10 +144,11 @@ const RECIPES = [
   "- Skin too smooth: restore visible fine pores and natural texture while keeping the glamorous makeup.",
 ].join("\n");
 
-export function interpretPrompt(a: { feedback: string; hasZone: boolean; avoid?: string }) {
+export function interpretPrompt(a: { feedback: string; hasZone: boolean; avoid?: string; refCount?: number }) {
   return [
     "You help a photo retoucher understand a client's correction request on an advertising photo of a cosmetics product. The client writes casually in French and is not a technician: infer what they obviously mean.",
     "Image 1 = the photo." + (a.hasZone ? " Image 2 = a zoomed crop of the area the client circled." : ""),
+    a.refCount ? `The LAST ${a.refCount} image(s) are REFERENCE image(s) supplied by the client to show what they want (a pose, a grip, an arrangement, a style, an element). In the instruction, describe concretely what to reproduce from them (pose, hand grip, arrangement, shape, style), never their person identity or brand.` : "",
     `Client request: "${a.feedback}"`,
     a.avoid ? `A previous attempt FAILED because: ${a.avoid}. Write the instruction so that this mistake does not happen again, with more explicit and concrete details.` : "",
     'Return JSON only: {"instruction": str, "understood": str, "scope": "local"|"global", "boxes": [[ymin, xmin, ymax, xmax], ...]}.',
@@ -163,11 +161,11 @@ export function interpretPrompt(a: { feedback: string; hasZone: boolean; avoid?:
 }
 
 /** Retouche locale : le modèle ne voit qu'un recadrage et ne doit rien changer d'autre. */
-export function localEditPrompt(a: { product: Product; rules: string[]; instruction: string; mode: "edit" | "label" }) {
+export function localEditPrompt(a: { product: Product; rules: string[]; instruction: string; mode: "edit" | "label"; refCount?: number }) {
   const texts = a.product.texts?.length ? `Texts that must appear exactly on the product:\n${textsBlock(a.product)}` : "";
   return [
     "You are retouching a CROPPED region of an advertising photo for the cosmetics brand Irizée.",
-    "Image 1 = the crop to edit. The following image(s) = the REAL product packshot(s).",
+    "Image 1 = the crop to edit." + (a.refCount ? ` ${refNote(a.refCount)}` : "") + " The following image(s) = the REAL product packshot(s).",
     "NON-NEGOTIABLE RULES:", numbered([...a.rules, ...(a.product.rules ?? [])]), "",
     a.mode === "label"
       ? "TASK: fix ONLY the printed label of the product visible in the crop so that every word, logo and number matches the real packshot exactly, sharp and legible, with the same layout, text direction and colors."

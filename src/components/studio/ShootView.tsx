@@ -103,7 +103,8 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
     groups.forEach((list, g) => {
       if (retried.current.has(g) || list[0].created_by !== me.id) return;
       if (list.some((i) => i.state === "generating" || (i.state === "done" && !i.qc) || running.has(i.id))) return;
-      if (Number(list[0].params?.round ?? 0) >= 1) return;
+      const round = Number(list[0].params?.round ?? 0);
+      if (round >= 2) return;
       const judged = list.filter((i) => i.state === "done" && i.qc);
       if (!judged.length || judged.some((i) => i.qc!.instruction_followed !== false && !i.qc!.ghost_or_duplicate)) return;
       retried.current.add(g);
@@ -115,7 +116,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
         i.qc!.comment ?? "",
       ].filter(Boolean).join("; ")))).slice(0, 2).join(" | ");
       Promise.all(list.map((i) => sb.from("images").update({ params: { ...i.params, archived: true } }).eq("id", i.id))).then(() =>
-        submitFix(parent, "edit", { feedback: String(list[0].params?.original ?? list[0].feedback ?? ""), zone: (list[0].params?.zone as Zone) ?? null, remember: false }, issues, 1));
+        submitFix(parent, "edit", { feedback: String(list[0].params?.original ?? list[0].feedback ?? ""), zone: (list[0].params?.zone as Zone) ?? null, remember: false, refs: (list[0].params?.refs as string[]) ?? [] }, issues, round + 1));
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [images, running]);
@@ -139,12 +140,12 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
     generating: images.filter((i) => i.state === "generating").length,
   }), [images]);
 
-  async function submitFix(img: ImageRow, mode: "edit" | "label", v?: { feedback: string; zone: Zone | null; remember: boolean }, avoid?: string, round = 0) {
+  async function submitFix(img: ImageRow, mode: "edit" | "label", v?: { feedback: string; zone: Zone | null; remember: boolean; refs?: string[] }, avoid?: string, round = 0) {
     try {
-      const r = await api<{ imageIds: string[] }>(`/api/images/${img.id}/correct`, { mode, feedback: v?.feedback ?? "", zone: v?.zone ?? null, remember: !!v?.remember, avoid, round, candidates: 3 });
+      const r = await api<{ imageIds: string[] }>(`/api/images/${img.id}/correct`, { mode, feedback: v?.feedback ?? "", zone: v?.zone ?? null, remember: !!v?.remember, refs: v?.refs ?? [], avoid, round, candidates: 1 });
       setFix(null);
       await load(); run(r.imageIds);
-      flash(mode === "label" ? "Réparation de l'étiquette lancée" : round > 0 ? "Aucune proposition ne convenait : je réessaie automatiquement avec une consigne plus précise" : `${r.imageIds.length} propositions lancées — la meilleure sera mise en avant`);
+      flash(mode === "label" ? "Réparation de l'étiquette lancée" : round > 0 ? `La correction n'a pas marché : je réessaie automatiquement (essai ${round + 1}/3) avec une consigne plus précise` : v?.remember ? "Correction lancée — consigne mémorisée pour ce produit" : "Correction lancée : je vérifie le résultat et je réessaie seul si besoin");
     } catch (e) { flash(e instanceof Error ? e.message : "Erreur"); }
   }
 
@@ -161,7 +162,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
     ].filter(Boolean).join("; ");
     // les anciennes propositions sont écartées pour ne pas encombrer la page
     await archiveGroup(img, null);
-    await submitFix(parent, "edit", { feedback: String(img.params?.original ?? img.feedback ?? ""), zone: (img.params?.zone as Zone) ?? null, remember: false }, issues || "the result did not match the request");
+    await submitFix(parent, "edit", { feedback: String(img.params?.original ?? img.feedback ?? ""), zone: (img.params?.zone as Zone) ?? null, remember: false, refs: (img.params?.refs as string[]) ?? [] }, issues || "the result did not match the request");
   }
 
   /** Garde cette proposition et écarte les autres essais du même groupe. */
@@ -342,7 +343,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
                     <div className="flex flex-wrap gap-1.5 mt-auto">
                       <Btn size="sm" variant="ghost" onClick={() => setFix(img.id)}><Pencil size={12} /> Corriger</Btn>
                       {img.kind === "correction" && img.params?.n > 1 && !img.params?.archived && <Btn size="sm" onClick={() => { archiveGroup(img); flash("Proposition gardée, les autres sont écartées"); }}><Check size={12} /> Garder celle-ci</Btn>}
-                      {img.kind === "correction" && !img.params?.archived && <Btn size="sm" variant="ghost" onClick={() => retryFix(img)} title="Relance 3 nouvelles propositions en tenant compte de ce qui n'a pas marché"><RotateCcw size={12} /> Réessayer</Btn>}
+                      {img.kind === "correction" && !img.params?.archived && <Btn size="sm" variant="ghost" onClick={() => retryFix(img)} title="Relance en tenant compte de ce qui n'a pas marché"><RotateCcw size={12} /> Réessayer</Btn>}
                       {img.parent_id && img.kind !== "format" && <Btn size="sm" variant="ghost" onClick={() => setCompare(img.id)}>Avant / après</Btn>}
                       <Btn size="sm" variant="ghost" onClick={() => submitFix(img, "label")} title="Corrige uniquement le texte de l'étiquette"><Type size={12} /> Étiquette</Btn>
                       <Btn size="sm" variant="ghost" onClick={() => { setFormatFor(img.id); setFormats([]); }}><LayoutTemplate size={12} /> Décliner</Btn>

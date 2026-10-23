@@ -1,8 +1,9 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { Crosshair, X } from "lucide-react";
-import { Btn, INPUT, Label, Modal } from "@/components/ui";
+import { useEffect, useRef, useState } from "react";
+import { Crosshair, ImagePlus, X } from "lucide-react";
+import { Btn, INPUT, Label, Modal, Spinner } from "@/components/ui";
+import { uploadImage, useSupabase } from "@/lib/client";
 
 export interface Zone { x: number; y: number; w: number; h: number }
 
@@ -26,7 +27,7 @@ interface Props {
   aspect: string;
   isStaff: boolean;
   onClose: () => void;
-  onSubmit: (v: { feedback: string; zone: Zone | null; remember: boolean }) => Promise<void> | void;
+  onSubmit: (v: { feedback: string; zone: Zone | null; remember: boolean; refs: string[] }) => Promise<void> | void;
 }
 
 export default function CorrectionModal({ imageUrl, aspect, isStaff, onClose, onSubmit }: Props) {
@@ -36,6 +37,33 @@ export default function CorrectionModal({ imageUrl, aspect, isStaff, onClose, on
   const [text, setText] = useState("");
   const [remember, setRemember] = useState(false);
   const [busy, setBusy] = useState(false);
+  const sb = useSupabase();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [refs, setRefs] = useState<{ path: string; preview: string }[]>([]);
+  const [uploading, setUploading] = useState(0);
+  const [refError, setRefError] = useState<string | null>(null);
+
+  async function addRefs(files: File[]) {
+    const list = files.filter((f) => f.type.startsWith("image/")).slice(0, 3 - refs.length);
+    if (!list.length) return;
+    setRefError(null); setUploading((n) => n + list.length);
+    try {
+      const { data: { user } } = await sb.auth.getUser();
+      for (const f of list) {
+        const path = await uploadImage(sb, `corrections/${user!.id}`, f, 1400);
+        setRefs((r) => [...r, { path, preview: URL.createObjectURL(f) }]);
+        setUploading((n) => n - 1);
+      }
+    } catch (e) { setRefError(e instanceof Error ? e.message : "Envoi impossible"); setUploading(0); }
+  }
+
+  // Ctrl+V : coller directement une capture d'écran
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => { const fs = Array.from(e.clipboardData?.files ?? []); if (fs.length) { e.preventDefault(); addRefs(fs); } };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refs.length]);
 
   const pt = (e: React.PointerEvent) => {
     const r = box.current!.getBoundingClientRect();
@@ -51,7 +79,7 @@ export default function CorrectionModal({ imageUrl, aspect, isStaff, onClose, on
 
   async function apply() {
     setBusy(true);
-    try { await onSubmit({ feedback: text.trim(), zone, remember }); } finally { setBusy(false); }
+    try { await onSubmit({ feedback: text.trim(), zone, remember, refs: refs.map((r) => r.path) }); } finally { setBusy(false); }
   }
 
   return (
@@ -84,7 +112,30 @@ export default function CorrectionModal({ imageUrl, aspect, isStaff, onClose, on
             <Label>3. Dis ce que tu veux changer</Label>
             <textarea className={INPUT + " min-h-[110px]"} value={text} onChange={(e) => setText(e.target.value)} autoFocus
               placeholder="Ex : la main de gauche a six doigts / le flacon est trop grand / enlève les lunettes" />
-            <p className="text-[11px] text-[#A0A0A8] mt-1">Écris comme tu parles. La plateforme te propose 3 versions, vérifie chacune (ta demande est-elle faite ? rien d&apos;autre n&apos;a-t-il changé ?) et met la meilleure en avant. Le « Compris : … » sur chaque carte te montre comment ta demande a été interprétée.</p>
+            <p className="text-[11px] text-[#A0A0A8] mt-1">Écris comme tu parles. La plateforme génère 1 version et la vérifie (ta demande est-elle faite ? rien d&apos;autre n&apos;a-t-il changé ?). Si ce n&apos;est pas le cas, elle réessaie seule, jusqu&apos;à 2 fois. Le « Compris : … » sur la carte te montre comment ta demande a été interprétée.</p>
+          </div>
+          <div>
+            <Label>4. Montre une référence <span className="normal-case tracking-normal font-normal">(facultatif)</span></Label>
+            <div onClick={() => refs.length < 3 && fileRef.current?.click()} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); addRefs(Array.from(e.dataTransfer.files)); }}
+              className="border-2 border-dashed border-[#E4E4E7] rounded-xl p-3 text-center text-[12px] text-[#6B6B72] cursor-pointer hover:border-[#2B6EE8] hover:bg-[#EBF2FF]/40 transition">
+              <ImagePlus className="inline mr-1.5 text-[#A0A0A8]" size={14} />
+              Colle une capture (Ctrl+V), glisse une image ou clique : la pose, la main ou l&apos;élément que tu veux
+            </div>
+            <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={(e) => { addRefs(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
+            {(refs.length > 0 || uploading > 0) && (
+              <div className="flex gap-2 mt-2">
+                {refs.map((r, i) => (
+                  <div key={r.path} className="relative w-16 h-20 rounded-lg overflow-hidden border border-[#E4E4E7] bg-[#F4F4F5]">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={r.preview} alt="Référence" className="w-full h-full object-cover" />
+                    <button onClick={() => setRefs(refs.filter((_, k) => k !== i))} className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/60 text-white flex items-center justify-center" aria-label="Retirer"><X size={10} /></button>
+                  </div>
+                ))}
+                {uploading > 0 && <div className="w-16 h-20 rounded-lg border border-dashed border-[#E4E4E7] flex items-center justify-center"><Spinner /></div>}
+              </div>
+            )}
+            {refError && <p className="text-[11px] text-[#E8444A] mt-1">{refError}</p>}
+            <p className="text-[11px] text-[#A0A0A8] mt-1">Elle sert d&apos;exemple de ce que tu veux (pose, geste, disposition). Le visage, la marque et le texte de la référence ne sont jamais copiés.</p>
           </div>
           {isStaff && (
             <label className="flex items-start gap-2 text-[12px] text-[#6B6B72]">
@@ -93,7 +144,7 @@ export default function CorrectionModal({ imageUrl, aspect, isStaff, onClose, on
             </label>
           )}
           <div className="flex gap-2 pt-1">
-            <Btn onClick={apply} disabled={busy || !text.trim()}>{busy ? "Envoi…" : "Proposer 3 corrections"}</Btn>
+            <Btn onClick={apply} disabled={busy || uploading > 0 || !text.trim()}>{busy || uploading > 0 ? "Envoi…" : "Appliquer la correction"}</Btn>
             <Btn variant="ghost" onClick={onClose}>Annuler</Btn>
           </div>
         </div>
