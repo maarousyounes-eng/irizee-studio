@@ -6,7 +6,7 @@ import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
-import { Sparkles, Images, CheckCircle2, BookMarked, Package, UserRound, FolderKanban, Users, ListChecks, LogOut, Menu, X } from "lucide-react";
+import { Sparkles, Images, CheckCircle2, BookMarked, Trash2, Package, UserRound, FolderKanban, Users, ListChecks, LogOut, Menu, X } from "lucide-react";
 import type { Role } from "@/types";
 
 type Item = { label: string; href: string; icon: React.ElementType; roles: Role[] };
@@ -15,6 +15,7 @@ const MAIN: Item[] = [
   { label: "Shootings", href: "/shoots", icon: Images, roles: ["admin", "employee", "creator"] },
   { label: "À valider", href: "/review", icon: CheckCircle2, roles: ["admin", "employee"] },
   { label: "Bibliothèque", href: "/library", icon: BookMarked, roles: ["admin", "employee", "creator"] },
+  { label: "Corbeille", href: "/trash", icon: Trash2, roles: ["admin", "employee", "creator"] },
 ];
 const CATALOG: Item[] = [
   { label: "Produits", href: "/products", icon: Package, roles: ["admin", "employee"] },

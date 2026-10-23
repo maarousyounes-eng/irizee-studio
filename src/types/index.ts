@@ -33,7 +33,7 @@ export interface QC {
 export interface ImageRow {
   id: string; shoot_id: string; parent_id: string | null;
   kind: "generated" | "correction" | "label" | "format";
-  version: number; variant_index: number; aspect: string | null; path: string | null; thumb_path?: string | null;
+  version: number; variant_index: number; aspect: string | null; path: string | null; thumb_path?: string | null; deleted_at?: string | null;
   state: "generating" | "done" | "error"; model_used: string | null; params: Record<string, any>;
   qc: QC | null; verdict: "valid" | "review" | "rejected" | null; score: number | null;
   review_status: "draft" | "pending" | "approved" | "rejected";

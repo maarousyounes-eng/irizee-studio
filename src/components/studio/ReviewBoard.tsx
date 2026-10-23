@@ -22,7 +22,7 @@ export default function ReviewBoard({ me }: { me: { id: string; name: string; ro
   const load = useCallback(async () => {
     const { data } = await sb.from("images")
       .select("id, path, thumb_path, aspect, kind, version, score, verdict, review_status, created_by, created_at, qc, shoot_id, shoots(prompt, products(name))")
-      .eq("review_status", tab).not("path", "is", null).order("created_at", { ascending: false }).limit(100);
+      .eq("review_status", tab).is("deleted_at", null).not("path", "is", null).order("created_at", { ascending: false }).limit(100);
     setRows(data ?? []);
   }, [sb, tab]);
   useEffect(() => { setRows(null); load(); }, [load]);

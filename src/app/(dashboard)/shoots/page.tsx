@@ -9,14 +9,15 @@ export default async function ShootsPage() {
   const sb = createClient();
   const { data: shoots } = await sb
     .from("shoots")
-    .select("id, prompt, aspect, created_at, products(name), images(path, thumb_path, state, verdict, review_status, score)")
+    .select("id, prompt, aspect, created_at, products(name), images(path, thumb_path, state, verdict, review_status, score, deleted_at, params)")
+    .is("deleted_at", null)
     .order("created_at", { ascending: false })
     .limit(60);
 
   // Miniature = meilleure image du shooting (vignette légère, servie avec cache navigateur)
   const thumbs: Record<string, string> = {};
   (shoots ?? []).forEach((s: any) => {
-    const done = (s.images ?? []).filter((i: any) => i.path && i.state === "done" && !i.params?.archived).sort((a: any, b: any) => (b.score ?? -1) - (a.score ?? -1));
+    const done = (s.images ?? []).filter((i: any) => i.path && i.state === "done" && !i.params?.archived && !i.deleted_at).sort((a: any, b: any) => (b.score ?? -1) - (a.score ?? -1));
     const best = done[0];
     if (best) thumbs[s.id] = `/api/img?p=${encodeURIComponent(best.thumb_path ?? best.path)}`;
   });
@@ -29,7 +30,7 @@ export default async function ShootsPage() {
       ) : (
         <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {shoots.map((s: any) => {
-            const imgs = s.images ?? [];
+            const imgs = (s.images ?? []).filter((i: any) => !i.deleted_at && !i.params?.archived);
             const gen = imgs.filter((i: any) => i.state === "generating").length;
             const valid = imgs.filter((i: any) => i.verdict === "valid").length;
             const pending = imgs.filter((i: any) => i.review_status === "pending").length;

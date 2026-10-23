@@ -53,7 +53,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
   const autoQc = useRef<Set<string>>(new Set());
 
   const load = useCallback(async () => {
-    const { data } = await sb.from("images").select("*").eq("shoot_id", shoot.id).order("created_at");
+    const { data } = await sb.from("images").select("*").eq("shoot_id", shoot.id).is("deleted_at", null).order("created_at");
     if (data) setImages(data as ImageRow[]);
   }, [sb, shoot.id]);
 
@@ -201,21 +201,15 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
     load(); router.refresh();
   }
 
-  /** Supprime des images. L'équipe les supprime définitivement ; un créateur les masque (il n'a pas le droit de supprimer). */
+  /** Met des images à la corbeille (restaurables pendant 30 jours). */
   async function deleteImages(list: ImageRow[], ask = true) {
     if (!list.length) return;
-    if (ask && !confirm(list.length === 1 ? "Supprimer cette image ?" : `Supprimer ces ${list.length} images ?`)) return;
+    if (ask && !confirm(list.length === 1 ? "Mettre cette image à la corbeille ?" : `Mettre ces ${list.length} images à la corbeille ?`)) return;
     cancel(list.filter((i) => i.state === "generating").map((i) => i.id));
-    if (isStaff) {
-      const paths = list.flatMap((i) => [i.path, i.thumb_path]).filter(Boolean) as string[];
-      if (paths.length) await sb.storage.from("studio").remove(paths);
-      await sb.from("images").delete().in("id", list.map((i) => i.id));
-    } else {
-      await Promise.all(list.map((i) => sb.from("images").update({ params: { ...i.params, archived: true } }).eq("id", i.id)));
-    }
+    await sb.from("images").update({ deleted_at: new Date().toISOString() }).in("id", list.map((i) => i.id));
     setSelected(new Set());
     await load();
-    flash(list.length === 1 ? "Image supprimée" : `${list.length} images supprimées`);
+    flash(list.length === 1 ? "Image mise à la corbeille" : `${list.length} images mises à la corbeille`);
   }
   const removeImage = (img: ImageRow) => deleteImages([img]);
   const toggleSel = (id: string) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
@@ -244,9 +238,9 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
   }
 
   async function deleteShoot() {
-    if (!confirm("Supprimer ce shooting et toutes ses images ?")) return;
-    await sb.from("shoots").delete().eq("id", shoot.id);
-    router.push("/shoots"); router.refresh();
+    if (!confirm("Mettre ce shooting à la corbeille ? Tu pourras le restaurer pendant 30 jours.")) return;
+    await sb.from("shoots").update({ deleted_at: new Date().toISOString() }).eq("id", shoot.id);
+    router.push("/trash"); router.refresh();
   }
 
   const approved = images.filter((i) => i.review_status === "approved" && i.path);
@@ -294,14 +288,14 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
         <div className="ml-auto flex flex-wrap items-center gap-2">
           {!selectMode ? (
             <>
-              {failed.length > 0 && <Btn size="sm" variant="danger" onClick={() => deleteImages(failed)}><Trash2 size={12} /> Supprimer les échecs ({failed.length})</Btn>}
+              {failed.length > 0 && <Btn size="sm" variant="danger" onClick={() => deleteImages(failed)}><Trash2 size={12} /> Corbeille : les échecs ({failed.length})</Btn>}
               <Btn size="sm" variant="ghost" onClick={() => setSelectMode(true)}><Check size={12} /> Sélectionner</Btn>
             </>
           ) : (
             <>
               <span className="text-xs text-[#6B6B72]">{selected.size} sélectionnée(s)</span>
               <Btn size="sm" variant="ghost" onClick={() => setSelected(selected.size === visible.length ? new Set() : new Set(visible.map((i) => i.id)))}>{selected.size === visible.length ? "Tout désélectionner" : "Tout sélectionner"}</Btn>
-              <Btn size="sm" variant="danger" disabled={!selected.size} onClick={() => deleteImages(images.filter((i) => selected.has(i.id)))}><Trash2 size={12} /> Supprimer ({selected.size})</Btn>
+              <Btn size="sm" variant="danger" disabled={!selected.size} onClick={() => deleteImages(images.filter((i) => selected.has(i.id)))}><Trash2 size={12} /> Corbeille ({selected.size})</Btn>
               <Btn size="sm" variant="ghost" onClick={() => { setSelectMode(false); setSelected(new Set()); }}>Terminer</Btn>
             </>
           )}

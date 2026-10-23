@@ -13,7 +13,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const role = (profile?.role ?? "creator") as Role;
   let pending = 0;
   if (role !== "creator") {
-    const { count } = await sb.from("images").select("id", { count: "exact", head: true }).eq("review_status", "pending");
+    const { count } = await sb.from("images").select("id", { count: "exact", head: true }).eq("review_status", "pending").is("deleted_at", null);
     pending = count ?? 0;
   }
   return (
