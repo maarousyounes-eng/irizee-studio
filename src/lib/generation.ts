@@ -50,7 +50,7 @@ export async function analyzeInspirations(sb: SupabaseClient, paths: string[], p
 export interface Interpretation { instruction: string; understood: string; region: Zone | null }
 
 /** Comprend la demande : instruction précise, phrase « Compris », zone à retoucher (zone entourée + éléments concernés). */
-export async function interpretCorrection(prev: { buf: Buffer; mime: string }, feedback: string, userZone: Zone | null, avoid?: string, refs: { buf: Buffer; mime: string }[] = []): Promise<Interpretation> {
+export async function interpretCorrection(prev: { buf: Buffer; mime: string }, feedback: string, userZone: Zone | null, avoid?: string, refs: { buf: Buffer; mime: string }[] = [], original: { buf: Buffer; mime: string } | null = null): Promise<Interpretation> {
   const meta = await sharp(prev.buf).metadata();
   const W = meta.width ?? 0, H = meta.height ?? 0;
   let instruction = feedback, understood = "", region: Zone | null = userZone;
@@ -59,7 +59,7 @@ export async function interpretCorrection(prev: { buf: Buffer; mime: string }, f
       left: Math.round(Math.max(0, userZone.x * W)), top: Math.round(Math.max(0, userZone.y * H)),
       width: Math.max(1, Math.min(W - Math.round(userZone.x * W), Math.round(userZone.w * W))), height: Math.max(1, Math.min(H - Math.round(userZone.y * H), Math.round(userZone.h * H))),
     }).png().toBuffer() : null;
-    const r = await gemini(MODELS.text, [{ text: interpretPrompt({ feedback, hasZone: !!zoneCrop, avoid, refCount: refs.length }) }, imgPart(prev.buf, prev.mime), ...(zoneCrop ? [imgPart(zoneCrop, "image/png")] : []), ...refs.map((r) => imgPart(r.buf, r.mime))], { json: true, timeoutMs: 40_000 });
+    const r = await gemini(MODELS.text, [{ text: interpretPrompt({ feedback, hasZone: !!zoneCrop, avoid, refCount: refs.length, hasOriginal: !!original }) }, imgPart(prev.buf, prev.mime), ...(original ? [imgPart(original.buf, original.mime)] : []), ...(zoneCrop ? [imgPart(zoneCrop, "image/png")] : []), ...refs.map((r) => imgPart(r.buf, r.mime))], { json: true, timeoutMs: 40_000 });
     const it = parseJson<{ instruction?: string; understood?: string; scope?: string; boxes?: unknown; box?: unknown }>(firstText(r));
     if (it.instruction) instruction = it.instruction;
     if (it.understood) understood = it.understood;
@@ -112,12 +112,23 @@ export async function generateImage(sb: SupabaseClient, image: ImageRow, userId:
     // Images de référence fournies par l'utilisateur (capture, photo d'exemple)
     const refImgs = await Promise.all(((prm.refs as string[] | undefined) ?? []).slice(0, 3).map((p) => download(sb, p).catch(() => null)));
     const refs = refImgs.filter(Boolean) as { buf: Buffer; mime: string }[];
+    // Photo d'origine (avant toutes les corrections) : sert à restaurer un élément qui a disparu
+    let original: { buf: Buffer; mime: string } | null = null;
+    if (image.kind === "correction") {
+      let pid: string | null = image.parent_id, rootPath: string | null = null;
+      for (let k = 0; k < 6 && pid; k++) {
+        const res: { data: { path: string | null; parent_id: string | null } | null } = await sb.from("images").select("path, parent_id").eq("id", pid).single();
+        if (!res.data) break;
+        rootPath = res.data.path; pid = res.data.parent_id;
+      }
+      if (rootPath && rootPath !== parent.path) original = await download(sb, rootPath).catch(() => null);
+    }
     let instruction: string = prm.instruction ?? image.feedback ?? "";
     let region: Zone | null = prm.region ?? null;
 
     if (image.kind === "correction" && !prm.instruction) {
       // Filet de sécurité : demande non interprétée à la création
-      const it = await interpretCorrection(prev, image.feedback ?? "", prm.zone ?? null, prm.avoid, refs);
+      const it = await interpretCorrection(prev, image.feedback ?? "", prm.zone ?? null, prm.avoid, refs, original);
       instruction = it.instruction; region = it.region;
       await sb.from("images").update({ params: { ...prm, instruction, understood: it.understood, region } }).eq("id", image.id);
     } else if (image.kind === "label") {
@@ -133,7 +144,11 @@ export async function generateImage(sb: SupabaseClient, image: ImageRow, userId:
     const box = region && W && H && image.kind !== "format" ? cropBoxFor(region, W, H) : null;
     if (region && box) {
       const crop = await cropImage(prev.buf, box);
-      const lp = [{ text: localEditPrompt({ product, rules, instruction, mode: image.kind === "label" ? "label" : "edit", refCount: refs.length }) }, imgPart(crop, "image/png"), ...refs.map((r) => imgPart(r.buf, r.mime)), ...packshots.map((p) => imgPart(p.buf, p.mime))] as Part[];
+      let originalCrop: Buffer | null = null;
+      if (original) {
+        try { const om = await sharp(original.buf).metadata(); if (om.width === W && om.height === H) originalCrop = await cropImage(original.buf, box); } catch { originalCrop = null; }
+      }
+      const lp = [{ text: localEditPrompt({ product, rules, instruction, mode: image.kind === "label" ? "label" : "edit", refCount: refs.length, hasOriginal: !!originalCrop }) }, imgPart(crop, "image/png"), ...(originalCrop ? [imgPart(originalCrop, "image/png")] : []), ...refs.map((r) => imgPart(r.buf, r.mime)), ...packshots.map((p) => imgPart(p.buf, p.mime))] as Part[];
       let edited: Buffer | null = null;
       for (let a = 0; a < 2 && !edited; a++) {
         try { edited = firstImage(await gemini(model, lp, { image: true, aspect: box.ratio, size: a === 0 ? "2K" : undefined, signal })); } catch { /* nouvelle tentative */ }
@@ -144,8 +159,8 @@ export async function generateImage(sb: SupabaseClient, image: ImageRow, userId:
       // Modification globale (lumière, fond entier…) ou repli : régénération complète de l'image
       const prompt = image.kind === "format"
         ? formatPrompt({ product, rules, aspect })
-        : correctionPrompt({ product, rules, feedback: instruction, mode: image.kind === "label" ? "label" : "edit", refCount: refs.length });
-      parts = [{ text: prompt }, imgPart(prev.buf, prev.mime), ...refs.map((r) => imgPart(r.buf, r.mime)), ...packshots.map((p) => imgPart(p.buf, p.mime))];
+        : correctionPrompt({ product, rules, feedback: instruction, mode: image.kind === "label" ? "label" : "edit", refCount: refs.length, hasOriginal: !!original });
+      parts = [{ text: prompt }, imgPart(prev.buf, prev.mime), ...(original ? [imgPart(original.buf, original.mime)] : []), ...refs.map((r) => imgPart(r.buf, r.mime)), ...packshots.map((p) => imgPart(p.buf, p.mime))];
     }
   }
 
@@ -160,10 +175,17 @@ export async function generateImage(sb: SupabaseClient, image: ImageRow, userId:
   const { data: cur } = await sb.from("images").select("state, params").eq("id", image.id).single();
   if (!cur || cur.state !== "generating" || (cur.params as any)?.cancelled) return;
 
-  const path = `generated/${shoot.id}/${image.id}.png`;
-  const up = await sb.storage.from(BUCKET).upload(path, buf, { contentType: "image/png", upsert: true });
+  // Image finale en JPEG haute qualité (≈ 1 Mo au lieu de 3-7 Mo en PNG) + miniature WebP pour les grilles
+  const full = await sharp(buf).jpeg({ quality: 94, chromaSubsampling: "4:4:4", mozjpeg: true }).toBuffer();
+  const thumb = await sharp(buf).resize({ width: 640, withoutEnlargement: true }).webp({ quality: 78 }).toBuffer();
+  const path = `generated/${shoot.id}/${image.id}.jpg`;
+  const thumbPath = `generated/${shoot.id}/${image.id}_t.webp`;
+  const [up, upT] = await Promise.all([
+    sb.storage.from(BUCKET).upload(path, full, { contentType: "image/jpeg", upsert: true }),
+    sb.storage.from(BUCKET).upload(thumbPath, thumb, { contentType: "image/webp", upsert: true }),
+  ]);
   if (up.error) throw new Error("Enregistrement de l'image impossible : " + up.error.message);
-  await sb.from("images").update({ path, state: "done", model_used: model, error: null, aspect }).eq("id", image.id);
+  await sb.from("images").update({ path, thumb_path: upT.error ? null : thumbPath, state: "done", model_used: model, error: null, aspect }).eq("id", image.id);
   await sb.from("usage_events").insert({ user_id: userId, kind: image.kind, units: 1, model });
 }
 

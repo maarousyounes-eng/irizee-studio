@@ -1,5 +1,6 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useMemo, useRef } from "react";
+import { useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 
@@ -32,17 +33,12 @@ export async function uploadImage(sb: SupabaseClient, prefix: string, file: Blob
   return path;
 }
 
-/** URLs signées (valables 1 h) avec cache mémoire. */
-const cache = new Map<string, { url: string; exp: number }>();
-export async function signUrls(sb: SupabaseClient, paths: string[]): Promise<Record<string, string>> {
-  const now = Date.now();
-  const need = Array.from(new Set(paths.filter(Boolean))).filter((p) => !(cache.get(p) && cache.get(p)!.exp > now));
-  if (need.length) {
-    const { data } = await sb.storage.from("studio").createSignedUrls(need, 3600);
-    (data ?? []).forEach((d) => { if (d.path && d.signedUrl) cache.set(d.path, { url: d.signedUrl, exp: now + 3300_000 }); });
-  }
+/** URL d'une image du stockage privé, servie avec un cache navigateur long (voir /api/img). */
+export const imgUrl = (path: string) => `/api/img?p=${encodeURIComponent(path)}`;
+
+export async function signUrls(_sb: SupabaseClient, paths: string[]): Promise<Record<string, string>> {
   const out: Record<string, string> = {};
-  paths.forEach((p) => { const c = cache.get(p); if (c) out[p] = c.url; });
+  paths.forEach((p) => { if (p) out[p] = imgUrl(p); });
   return out;
 }
 
@@ -53,18 +49,14 @@ export function useSupabase() {
 }
 
 export function useSignedUrls(paths: (string | null | undefined)[]) {
-  const sb = useSupabase();
-  const [urls, setUrls] = useState<Record<string, string>>({});
   const key = paths.filter(Boolean).join("|");
-  useEffect(() => {
-    const list = paths.filter(Boolean) as string[];
-    if (!list.length) return;
-    let alive = true;
-    signUrls(sb, list).then((u) => alive && setUrls((prev) => ({ ...prev, ...u })));
-    return () => { alive = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, sb]);
-  return urls;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return useMemo(() => signSync(paths), [key]);
+}
+function signSync(paths: (string | null | undefined)[]) {
+  const out: Record<string, string> = {};
+  paths.forEach((p) => { if (p) out[p] = imgUrl(p); });
+  return out;
 }
 
 /** File d'attente côté navigateur : génère puis contrôle chaque image (3 en parallèle). */

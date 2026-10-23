@@ -69,13 +69,14 @@ export function buildPrompt(a: {
   ].filter(Boolean).join("\n");
 }
 
+const originalNote = "The image after Image 1 is the ORIGINAL version of this photo before earlier corrections: use it to restore any element the client says has disappeared or changed by mistake, copying it exactly as it was.";
 const refNote = (n: number) =>
   `The next ${n} image(s) are REFERENCE image(s) supplied by the client to show what they want (a pose, a grip, an arrangement, a style, an element). Reproduce the IDEA they show (pose, arrangement, shape) in the requested change, but never copy any person, face, brand, logo or text from them: the person, the product and everything else stay as in Image 1.`;
 
-export function correctionPrompt(a: { product: Product; rules: string[]; feedback: string; mode: "edit" | "label"; refCount?: number }) {
+export function correctionPrompt(a: { product: Product; rules: string[]; feedback: string; mode: "edit" | "label"; refCount?: number; hasOriginal?: boolean }) {
   const head = [
     "You are retouching an advertising photo for the cosmetics brand Irizée.",
-    "Image 1 = the photo to correct." + (a.refCount ? ` ${refNote(a.refCount)}` : "") + " The following image(s) = the REAL product packshot(s).",
+    "Image 1 = the photo to correct." + (a.hasOriginal ? ` ${originalNote}` : "") + (a.refCount ? ` ${refNote(a.refCount)}` : "") + " The following image(s) = the REAL product packshot(s).",
     "NON-NEGOTIABLE RULES:", numbered([...a.rules, ...(a.product.rules ?? [])]), "",
   ];
   const texts = a.product.texts?.length ? `Texts that must appear exactly:\n${textsBlock(a.product)}` : "";
@@ -144,10 +145,11 @@ const RECIPES = [
   "- Skin too smooth: restore visible fine pores and natural texture while keeping the glamorous makeup.",
 ].join("\n");
 
-export function interpretPrompt(a: { feedback: string; hasZone: boolean; avoid?: string; refCount?: number }) {
+export function interpretPrompt(a: { feedback: string; hasZone: boolean; avoid?: string; refCount?: number; hasOriginal?: boolean }) {
   return [
     "You help a photo retoucher understand a client's correction request on an advertising photo of a cosmetics product. The client writes casually in French and is not a technician: infer what they obviously mean.",
-    "Image 1 = the photo." + (a.hasZone ? " Image 2 = a zoomed crop of the area the client circled." : ""),
+    "Image 1 = the photo to correct." + (a.hasOriginal ? " The next image is the ORIGINAL version of this photo, before any earlier correction." : "") + (a.hasZone ? " The next image is a zoomed crop of the area the client circled." : ""),
+    "STRICT FIDELITY TO THE REQUEST: the instruction must contain ONLY what the client asked for, interpreted generously but never extended. Do NOT add any other change: no new clothes, shoes or accessories, no spelling fixes, no retouching or improvement that the client did not mention. If the client says that something disappeared, changed, or is missing compared to the main/original photo, the task is to RESTORE ONLY that named element exactly as it was in the ORIGINAL image. Every other difference between the current photo and the original is an intentional earlier correction and MUST be kept as it is.",
     a.refCount ? `The LAST ${a.refCount} image(s) are REFERENCE image(s) supplied by the client to show what they want (a pose, a grip, an arrangement, a style, an element). In the instruction, describe concretely what to reproduce from them (pose, hand grip, arrangement, shape, style), never their person identity or brand.` : "",
     `Client request: "${a.feedback}"`,
     a.avoid ? `A previous attempt FAILED because: ${a.avoid}. Write the instruction so that this mistake does not happen again, with more explicit and concrete details.` : "",
@@ -161,11 +163,11 @@ export function interpretPrompt(a: { feedback: string; hasZone: boolean; avoid?:
 }
 
 /** Retouche locale : le modèle ne voit qu'un recadrage et ne doit rien changer d'autre. */
-export function localEditPrompt(a: { product: Product; rules: string[]; instruction: string; mode: "edit" | "label"; refCount?: number }) {
+export function localEditPrompt(a: { product: Product; rules: string[]; instruction: string; mode: "edit" | "label"; refCount?: number; hasOriginal?: boolean }) {
   const texts = a.product.texts?.length ? `Texts that must appear exactly on the product:\n${textsBlock(a.product)}` : "";
   return [
     "You are retouching a CROPPED region of an advertising photo for the cosmetics brand Irizée.",
-    "Image 1 = the crop to edit." + (a.refCount ? ` ${refNote(a.refCount)}` : "") + " The following image(s) = the REAL product packshot(s).",
+    "Image 1 = the crop to edit." + (a.hasOriginal ? " The next image is the same crop taken from the ORIGINAL version of the photo before earlier corrections: use it to restore any element that disappeared or changed by mistake." : "") + (a.refCount ? ` ${refNote(a.refCount)}` : "") + " The following image(s) = the REAL product packshot(s).",
     "NON-NEGOTIABLE RULES:", numbered([...a.rules, ...(a.product.rules ?? [])]), "",
     a.mode === "label"
       ? "TASK: fix ONLY the printed label of the product visible in the crop so that every word, logo and number matches the real packshot exactly, sharp and legible, with the same layout, text direction and colors."

@@ -2,7 +2,7 @@ import { requireUser, handle, HttpError } from "@/lib/api";
 import { qualityCheck } from "@/lib/generation";
 import type { ImageRow } from "@/types";
 
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 export async function POST(_: Request, { params }: { params: { id: string } }) {
   return handle(async () => {

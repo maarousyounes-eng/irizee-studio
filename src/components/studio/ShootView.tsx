@@ -73,6 +73,13 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
     if (todo.length) { todo.forEach((i) => autoQc.current.add(i.id)); run(todo.map((i) => i.id), true); }
   }, [images, running, run]);
 
+  // Anciennes images (avant les miniatures) : on crée leur miniature en arrière-plan, quelques-unes à la fois
+  const thumbTried = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const todo = images.filter((i) => i.state === "done" && i.path && !i.thumb_path && !thumbTried.current.has(i.id)).slice(0, 4);
+    todo.forEach((i) => { thumbTried.current.add(i.id); api(`/api/images/${i.id}/thumb`).then(load).catch(() => {}); });
+  }, [images, load]);
+
   // Rafraîchissement tant que quelque chose est en cours
   const busy = images.some((i) => i.state === "generating" || (i.state === "done" && !i.qc));
   useEffect(() => {
@@ -81,7 +88,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
     return () => clearInterval(t);
   }, [busy, load]);
 
-  const urls = useSignedUrls(images.map((i) => i.path));
+  const urls = useSignedUrls(images.flatMap((i) => [i.path, i.thumb_path]));
   const inspUrls = useSignedUrls(shoot.inspiration_paths);
 
   const visible = useMemo(() => {
@@ -198,7 +205,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
     load();
   }
 
-  const fileName = (img: ImageRow) => `irizee_${productName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}_${(img.aspect ?? shoot.aspect).replace(":", "x")}_${img.id.slice(0, 6)}.png`;
+  const fileName = (img: ImageRow) => `irizee_${productName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}_${(img.aspect ?? shoot.aspect).replace(":", "x")}_${img.id.slice(0, 6)}.${img.path?.split(".").pop() ?? "jpg"}`;
 
   async function downloadZip(list: ImageRow[]) {
     setZipping(true);
@@ -297,7 +304,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
                   </div>
                 ) : url ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={url} alt="" onClick={() => setZoom(url)} className="w-full h-full object-cover cursor-zoom-in" />
+                  <img src={img.thumb_path && urls[img.thumb_path] ? urls[img.thumb_path] : url} alt="" loading="lazy" decoding="async" onClick={() => setZoom(url)} className="w-full h-full object-cover cursor-zoom-in" />
                 ) : <div className="absolute inset-0 flex items-center justify-center"><Spinner /></div>}
                 {img.state === "done" && (
                   <div className="absolute top-2 left-2 right-2 flex justify-between items-start gap-1">
@@ -370,7 +377,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
       {visible.length === 0 && <p className="text-sm text-[#6B6B72] text-center py-10">Aucune image dans ce filtre.</p>}
 
       <Lightbox src={zoom} onClose={() => setZoom(null)} />
-      {fix && (() => { const img = images.find((i) => i.id === fix); const url = img?.path ? urls[img.path] : undefined; return img && url ? (
+      {fix && (() => { const img = images.find((i) => i.id === fix); const url = img?.path ? (img.thumb_path && urls[img.thumb_path] ? urls[img.thumb_path] : urls[img.path]) : undefined; return img && url ? (
         <CorrectionModal imageUrl={url} aspect={img.aspect ?? shoot.aspect} isStaff={isStaff} onClose={() => setFix(null)} onSubmit={(v) => submitFix(img, "edit", v)} />
       ) : null; })()}
       {compare && (() => { const img = images.find((i) => i.id === compare); const par = images.find((i) => i.id === img?.parent_id); const a = par?.path ? urls[par.path] : undefined; const b = img?.path ? urls[img.path] : undefined; return img && a && b ? (

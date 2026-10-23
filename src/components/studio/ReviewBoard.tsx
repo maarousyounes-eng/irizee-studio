@@ -21,13 +21,13 @@ export default function ReviewBoard({ me }: { me: { id: string; name: string; ro
 
   const load = useCallback(async () => {
     const { data } = await sb.from("images")
-      .select("id, path, aspect, kind, version, score, verdict, review_status, created_by, created_at, qc, shoot_id, shoots(prompt, products(name))")
+      .select("id, path, thumb_path, aspect, kind, version, score, verdict, review_status, created_by, created_at, qc, shoot_id, shoots(prompt, products(name))")
       .eq("review_status", tab).not("path", "is", null).order("created_at", { ascending: false }).limit(100);
     setRows(data ?? []);
   }, [sb, tab]);
   useEffect(() => { setRows(null); load(); }, [load]);
 
-  const urls = useSignedUrls((rows ?? []).map((r) => r.path));
+  const urls = useSignedUrls((rows ?? []).flatMap((r) => [r.path, r.thumb_path]));
 
   async function decide(r: any, status: "approved" | "rejected" | "draft") {
     let comment: string | null = null;
@@ -38,7 +38,7 @@ export default function ReviewBoard({ me }: { me: { id: string; name: string; ro
     load();
   }
 
-  const name = (r: any) => `irizee_${String(r.shoots?.products?.name ?? "produit").toLowerCase().replace(/[^a-z0-9]+/g, "-")}_${String(r.aspect ?? "").replace(":", "x")}_${r.id.slice(0, 6)}.png`;
+  const name = (r: any) => `irizee_${String(r.shoots?.products?.name ?? "produit").toLowerCase().replace(/[^a-z0-9]+/g, "-")}_${String(r.aspect ?? "").replace(":", "x")}_${r.id.slice(0, 6)}.${String(r.path ?? "").split(".").pop() ?? "jpg"}`;
 
   async function zipAll() {
     if (!rows?.length) return;
@@ -69,7 +69,7 @@ export default function ReviewBoard({ me }: { me: { id: string; name: string; ro
           {rows.map((r) => (
             <Card key={r.id} className="overflow-hidden flex flex-col">
               <div className="bg-[#F4F4F5]" style={{ aspectRatio: String(r.aspect ?? "4:5").replace(":", " / ") }}>
-                {urls[r.path] ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={urls[r.path]} alt="" onClick={() => setZoom(urls[r.path])} className="w-full h-full object-cover cursor-zoom-in" /> : <div className="w-full h-full flex items-center justify-center"><Spinner /></div>}
+                {urls[r.path] ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={urls[r.thumb_path ?? r.path] ?? urls[r.path]} alt="" loading="lazy" decoding="async" onClick={() => setZoom(urls[r.path])} className="w-full h-full object-cover cursor-zoom-in" /> : <div className="w-full h-full flex items-center justify-center"><Spinner /></div>}
               </div>
               <div className="p-3.5 space-y-2 text-[12px] flex-1">
                 <div className="flex items-center justify-between gap-2">

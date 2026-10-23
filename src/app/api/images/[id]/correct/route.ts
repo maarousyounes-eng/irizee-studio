@@ -1,5 +1,5 @@
 import { requireUser, handle, HttpError } from "@/lib/api";
-import { checkQuota, download, interpretCorrection } from "@/lib/generation";
+import { checkQuota } from "@/lib/generation";
 
 export const maxDuration = 60;
 
@@ -28,20 +28,12 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       if (p && !p.rules.includes(feedback)) await sb.from("products").update({ rules: [...p.rules, feedback] }).eq("id", pid);
     }
 
-    // La demande est comprise UNE fois, puis partagée par toutes les propositions
-    let shared: Record<string, unknown> = {};
-    if (mode === "edit") {
-      const prev = await download(sb, parent.path);
-      const refImgs = (await Promise.all(refs.map((r) => download(sb, r).catch(() => null)))).filter(Boolean) as { buf: Buffer; mime: string }[];
-      const it = await interpretCorrection(prev, feedback, zone, avoid || undefined, refImgs);
-      shared = { instruction: it.instruction, understood: it.understood, region: it.region };
-    }
     const group = crypto.randomUUID();
     const rows = Array.from({ length: n }, (_, i) => ({
       shoot_id: parent.shoot_id, parent_id: parent.id, kind: mode === "label" ? "label" : "correction",
       version: (parent.version ?? 1) + 1, variant_index: parent.variant_index, aspect: parent.aspect, model_id: parent.model_id,
       feedback: mode === "label" ? "Réparation de l'étiquette" : feedback,
-      params: { ...(zone ? { zone } : {}), ...shared, group, n, i: i + 1, original: feedback, ...(refs.length ? { refs } : {}), round: Math.min(2, Math.max(0, Number(b.round) || 0)), ...(avoid ? { avoid } : {}) },
+      params: { ...(zone ? { zone } : {}), group, n, i: i + 1, original: feedback, ...(refs.length ? { refs } : {}), round: Math.min(2, Math.max(0, Number(b.round) || 0)), ...(avoid ? { avoid } : {}) },
       created_by: user.id,
     }));
     const { data: imgs, error } = await sb.from("images").insert(rows).select("id");
