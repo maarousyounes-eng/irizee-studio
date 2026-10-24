@@ -393,6 +393,12 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
                   {img.params?.not_applied?.length > 0 && (
                     <p className="text-[#E8444A] bg-red-50 rounded-lg px-2.5 py-1.5 leading-snug"><span className="font-semibold">Non appliqué :</span> {(img.params.not_applied as string[]).join(" · ")}</p>
                   )}
+                  {qc?.issues && qc.issues.length > 0 && (
+                    <div className="text-[#E8444A] bg-red-50 rounded-lg px-2.5 py-1.5 leading-snug">
+                      <p className="font-semibold">Problèmes détectés :</p>
+                      <ul className="list-disc pl-4">{qc.issues.slice(0, 5).map((t, k) => <li key={k}>{t}</li>)}</ul>
+                    </div>
+                  )}
                   {img.kind === "correction" && qc?.sharpness_ratio !== undefined && qc.sharpness_ratio < 0.8 && (
                     <p className="text-[#B45309] bg-amber-50 rounded-lg px-2.5 py-1.5 leading-snug"><span className="font-semibold">Netteté en baisse :</span> cette version est {Math.round((1 - qc.sharpness_ratio) * 100)} % moins nette que l&apos;image corrigée. Compare avec « Avant / après » : la version précédente reste intacte.</p>
                   )}
@@ -413,6 +419,11 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
                           </li>
                         ))}
                         <li>{qc.color_ok ? "✓" : "✗"} couleur / matière · {qc.shape_ok ? "✓" : "✗"} forme · {qc.anatomy_ok ? "✓" : "✗"} mains / visage</li>
+                        {qc.human && qc.human.present !== false && (
+                          <li>{qc.human.fingers_count_ok !== false && qc.human.hands_ok !== false ? "✓" : "✗"} doigts / mains · {qc.human.grip_ok !== false ? "✓" : "✗"} prise du produit · {qc.human.face_ok !== false ? "✓" : "✗"} visage · {qc.human.limbs_ok !== false ? "✓" : "✗"} membres · {qc.human.body_ok !== false ? "✓" : "✗"} corps · {qc.human.accessories_ok !== false ? "✓" : "✗"} accessoires</li>
+                        )}
+                        {qc.face_matches_model !== undefined && <li>{qc.face_matches_model ? "✓" : "✗"} ressemble au mannequin choisi</li>}
+                        {qc.artifacts_ok !== undefined && <li>{qc.artifacts_ok ? "✓" : "✗"} pas d&apos;artefact (textures fondues, objets fusionnés, produit coupé)</li>}
                         <li>{qc.hero_foreground ? "✓" : "✗"} produit en héros ({qc.product_height_pct}% de la hauteur) · {qc.proportion_ok ? "✓" : "✗"} échelle</li>
                       </ul>
                     </details>

@@ -413,18 +413,22 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
 function verdict(qc: QC, correction = false) {
   const wrong = qc.texts.filter((t) => t.status === "wrong").length;
   const unread = qc.texts.filter((t) => t.status === "unreadable").length;
+  const h = qc.human;
+  const humanBad = !!h && h.present !== false && [h.hands_ok, h.fingers_count_ok, h.grip_ok, h.face_ok, h.limbs_ok, h.body_ok, h.accessories_ok].some((x) => x === false);
+  const anatomyBad = !qc.anatomy_ok || humanBad;
+  const deviant = qc.artifacts_ok === false || qc.face_matches_model === false;
   const unwanted = !!qc.unwanted_changes && !/^(none|aucun|n\/a|-)?$/i.test(qc.unwanted_changes.trim());
   // Une correction est jugée sur sa demande et sur les dégâts qu'elle cause, pas sur les défauts déjà présents avant :
   // texte du produit faux, main déformée ailleurs, etc. passent en « à vérifier » (le bouton Étiquette sert à les réparer).
   const hard = correction
     ? qc.instruction_followed === false || qc.ghost_or_duplicate === true || qc.foreign_logo || qc.matches_reference === false || (qc.edit_quality_0_10 ?? 10) < 5
-    : wrong > 0 || qc.instruction_followed === false || qc.ghost_or_duplicate === true || qc.all_copies_exact === false || qc.label_orientation_ok === false || !qc.color_ok || !qc.shape_ok || qc.foreign_logo || !qc.anatomy_ok;
-  const soft = unwanted || (correction && (qc.sharpness_ratio ?? 1) < 0.8) || (correction && ((qc.edit_quality_0_10 ?? 10) < 8 || wrong > 0 || qc.all_copies_exact === false || !qc.anatomy_ok || !qc.color_ok || !qc.shape_ok || qc.label_orientation_ok === false))
+    : deviant || wrong > 0 || qc.instruction_followed === false || qc.ghost_or_duplicate === true || qc.all_copies_exact === false || qc.label_orientation_ok === false || !qc.color_ok || !qc.shape_ok || qc.foreign_logo || anatomyBad;
+  const soft = unwanted || (correction && (qc.sharpness_ratio ?? 1) < 0.8) || (correction && (deviant || (qc.edit_quality_0_10 ?? 10) < 8 || wrong > 0 || qc.all_copies_exact === false || anatomyBad || !qc.color_ok || !qc.shape_ok || qc.label_orientation_ok === false))
     || qc.skin_natural === false || unread > 1 || !qc.proportion_ok || !qc.angle_ok || (qc.product_height_pct ?? 100) < 8 || qc.realism_0_10 < 6;
   const w = correction ? 0.25 : 1; // poids des défauts hérités dans le score d'une correction
   const score = Math.max(0, Math.min(100, Math.round(
     qc.realism_0_10 * 6 - wrong * 12 * w - unread * 3 * w - (qc.color_ok ? 0 : 20 * w) - (qc.shape_ok ? 0 : 15 * w) - (qc.foreign_logo ? 20 : 0)
-    - (qc.anatomy_ok ? 0 : 10 * w) - (correction ? Math.max(0, 8 - (qc.edit_quality_0_10 ?? 8)) * 6 : 0) - (qc.matches_reference === false ? 30 : 0) - (qc.instruction_followed === false ? 40 : 0) - (qc.ghost_or_duplicate ? 20 : 0) - (unwanted ? 10 : 0) - (qc.skin_natural === false ? 15 : 0)
+    - (anatomyBad ? 15 * w : 0) - (qc.artifacts_ok === false ? 10 * w : 0) - (qc.face_matches_model === false ? 25 : 0) - (correction ? Math.max(0, 8 - (qc.edit_quality_0_10 ?? 8)) * 6 : 0) - (qc.matches_reference === false ? 30 : 0) - (qc.instruction_followed === false ? 40 : 0) - (qc.ghost_or_duplicate ? 20 : 0) - (unwanted ? 10 : 0) - (qc.skin_natural === false ? 15 : 0)
     - (qc.all_copies_exact === false ? 20 * w : 0) - (qc.label_orientation_ok === false ? 15 * w : 0) - (qc.proportion_ok ? 0 : 8) - (qc.angle_ok ? 0 : 5) + 40)));
   return { verdict: (hard ? "rejected" : soft ? "review" : "valid") as ImageRow["verdict"], score };
 }
@@ -435,9 +439,15 @@ export const qualityCheck = async (sb: SupabaseClient, image: ImageRow) => {
 
 async function qualityCheckInner(sb: SupabaseClient, image: ImageRow) {
   if (!image.path) throw new Error("Pas d'image à contrôler");
-  const { data: shoot } = await sb.from("shoots").select("product_id").eq("id", image.shoot_id).single();
+  const { data: shoot } = await sb.from("shoots").select("product_id, no_people").eq("id", image.shoot_id).single();
   const { product, imagePaths } = await loadProduct(sb, shoot!.product_id);
   const pack = await download(sb, imagePaths[0]);
+  let modelRef: { buf: Buffer; mime: string } | null = null;
+  const mid = (image as any).model_id as string | null;
+  if (mid && !shoot!.no_people) {
+    const { data: m } = await sb.from("models").select("path").eq("id", mid).single();
+    if (m?.path) modelRef = await download(sb, m.path).catch(() => null);
+  }
   const gen = await download(sb, image.path);
   let before: { buf: Buffer; mime: string } | null = null;
   const instr = (image.params as any)?.instruction as string | undefined;
@@ -446,7 +456,7 @@ async function qualityCheckInner(sb: SupabaseClient, image: ImageRow) {
     if (par?.path) before = await download(sb, par.path);
   }
   const qcRefs = before ? (await Promise.all((((image.params as any)?.refs as string[] | undefined) ?? []).slice(0, 3).map((p) => download(sb, p).catch(() => null)))).filter(Boolean) as { buf: Buffer; mime: string }[] : [];
-  const qcParts = [{ text: qcPrompt(product, before ? { instruction: instr!, refCount: qcRefs.length } : undefined) }, imgPart(pack.buf, pack.mime), imgPart(gen.buf, gen.mime), ...(before ? [imgPart(before.buf, before.mime)] : []), ...qcRefs.map((r) => imgPart(r.buf, r.mime))];
+  const qcParts = [{ text: qcPrompt(product, before ? { instruction: instr!, refCount: qcRefs.length } : undefined, { modelRef: !!modelRef }) }, imgPart(pack.buf, pack.mime), imgPart(gen.buf, gen.mime), ...(before ? [imgPart(before.buf, before.mime)] : []), ...qcRefs.map((r) => imgPart(r.buf, r.mime)), ...(modelRef ? [imgPart(modelRef.buf, modelRef.mime)] : [])];
   let r: any;
   try { r = await gemini(MODELS.vision, qcParts, { purpose: "contrôle qualité", json: true, timeoutMs: 70_000 }); }
   catch { r = await gemini(MODELS.text, qcParts, { purpose: "contrôle qualité (secours)", json: true, timeoutMs: 35_000 }); } // modèle plus rapide si le premier est trop lent
