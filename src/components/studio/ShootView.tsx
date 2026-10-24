@@ -179,6 +179,17 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
   }
 
   /** Relance la correction depuis l'image d'origine, en disant à l'IA ce qui n'a pas marché la dernière fois. */
+  /** Relance une déclinaison de format ratée : même image source, même format ; l'ancien essai est écarté. */
+  async function retryFormat(img: ImageRow) {
+    if (!img.parent_id || !img.aspect) return;
+    try {
+      const r = await api<{ imageIds: string[] }>(`/api/images/${img.parent_id}/formats`, { aspects: [img.aspect] });
+      await sb.from("images").update({ params: { ...img.params, archived: true } }).eq("id", img.id);
+      await load(); run(r.imageIds);
+      flash("Déclinaison relancée");
+    } catch (e) { flash(e instanceof Error ? e.message : "Erreur"); }
+  }
+
   async function retryFix(img: ImageRow) {
     const parent = images.find((i) => i.id === img.parent_id);
     if (!parent) return;
@@ -432,6 +443,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
                     <div className="flex flex-wrap gap-1.5 mt-auto">
                       <Btn size="sm" variant="ghost" onClick={() => setFix(img.id)}><Pencil size={12} /> Corriger</Btn>
                       {img.kind === "correction" && img.params?.n > 1 && !img.params?.archived && <Btn size="sm" onClick={() => { archiveGroup(img); flash("Proposition gardée, les autres sont écartées"); }}><Check size={12} /> Garder celle-ci</Btn>}
+                      {img.kind === "format" && !img.params?.archived && <Btn size="sm" variant="ghost" onClick={() => retryFormat(img)} title="Refait cette déclinaison depuis la même image"><RotateCcw size={12} /> Réessayer</Btn>}
                       {img.kind === "correction" && !img.params?.archived && <Btn size="sm" variant="ghost" onClick={() => retryFix(img)} title="Relance en tenant compte de ce qui n'a pas marché"><RotateCcw size={12} /> Réessayer</Btn>}
                       {img.parent_id && img.kind !== "format" && <Btn size="sm" variant="ghost" onClick={() => setCompare(img.id)}>Avant / après</Btn>}
                       <Btn size="sm" variant="ghost" onClick={() => submitFix(img, "label")} title="Corrige uniquement le texte de l'étiquette"><Type size={12} /> Étiquette</Btn>
