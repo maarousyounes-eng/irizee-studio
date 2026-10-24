@@ -87,11 +87,11 @@ async function sharpness(b: Buffer): Promise<number> {
 
 /** Vrai si l'image a réellement changé (comparaison de pixels, sans IA, gratuite). */
 async function hasChanged(a: Buffer, b: Buffer): Promise<boolean> {
-  const raw = (x: Buffer) => sharp(x).resize(256, 256, { fit: "fill" }).greyscale().raw().toBuffer();
+  const raw = (x: Buffer) => sharp(x).resize(512, 512, { fit: "fill" }).greyscale().raw().toBuffer();
   const [ra, rb] = await Promise.all([raw(a), raw(b)]);
   let diff = 0;
-  for (let i = 0; i < ra.length; i++) if (Math.abs(ra[i] - rb[i]) > 22) diff++;
-  return diff / ra.length > 0.003;
+  for (let i = 0; i < ra.length; i++) if (Math.abs(ra[i] - rb[i]) > 18) diff++;
+  return diff / ra.length > 0.001;
 }
 
 const UNCHANGED_QC = {
@@ -198,6 +198,7 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
   let prevImg: { buf: Buffer; mime: string } | null = null;
   let origImg: { buf: Buffer; mime: string } | null = null;
   let nInsp = 0;
+  let skipChangeCheck = false; // réparation d'étiquette : le texte ne change que quelques pixels, c'est normal
 
   if (image.kind === "generated") {
     model = shoot.engine === "pro" ? MODELS.pro : shoot.engine === "flash" ? MODELS.flash : (image.variant_index % 2 === 0 ? MODELS.flash : MODELS.pro);
@@ -260,6 +261,7 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
       const localTasks = items.filter(({ it }) => it.intent !== "label" && it.region);
       const globalTasks = items.filter(({ it }) => it.intent !== "label" && !it.region);
       // 1) retouches locales ET réparation d'étiquette en parallèle (le total dépend de la plus lente, pas de la somme)
+      if (labelTasks.length) skipChangeCheck = true;
       const labelJob = labelTasks.length ? (async () => {
         const z = await locateProduct(prev);
         if (!z) return null;
@@ -321,7 +323,7 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
       // Filet de sécurité : demande non interprétée à la création
       const it = await interpretCorrection(prev, image.feedback ?? "", zonesIn[0] ?? null, prm.avoid, refs, original, product.real_size);
       instruction = it.instruction; region = it.region;
-      if (it.intent === "label") { editMode = "label"; const z = await locateProduct(prev); region = z; }
+      if (it.intent === "label") { editMode = "label"; skipChangeCheck = true; const z = await locateProduct(prev); region = z; }
       await sb.from("images").update({ params: { ...prm, instruction, understood: it.understood, region } }).eq("id", image.id);
     } else if (image.kind === "label") {
       // Réparation d'étiquette : on repère le produit et on ne retouche que lui
@@ -381,7 +383,7 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
 
   // Retouche sans effet ? (comparaison de pixels gratuite) → 2e tentative renforcée, avec la taille réelle du produit
   let unchanged = false;
-  if (image.kind === "correction" && prevImg && buf && !(await hasChanged(prevImg.buf, buf))) {
+  if (image.kind === "correction" && !skipChangeCheck && !/étiquette|etiquette|texte|orthograph|faute|écriture|ecriture|typo/i.test(image.feedback ?? "") && prevImg && buf && !(await hasChanged(prevImg.buf, buf))) {
     const instr = String((cur.params as any)?.instruction ?? image.feedback ?? "");
     const strong = correctionPrompt({
       product, rules, mode: "edit", hasOriginal: !!origImg,
