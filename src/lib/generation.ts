@@ -154,13 +154,13 @@ function splitTasks(text: string): string[] {
   return text.split(/\n+/).map((l) => l.replace(/^\s*(?:[-–•*]|\d+[.)])\s*/, "").trim()).filter((l) => l.length > 2).slice(0, 5);
 }
 
-export interface Interpretation { instruction: string; understood: string; region: Zone | null; intent: "edit" | "label" }
+export interface Interpretation { instruction: string; understood: string; region: Zone | null; intent: "edit" | "label"; useOriginal: boolean }
 
 /** Comprend la demande : instruction précise, phrase « Compris », zone à retoucher (zone entourée + éléments concernés). */
 export async function interpretCorrection(prev: { buf: Buffer; mime: string }, feedback: string, userZone: Zone | null, avoid?: string, refs: { buf: Buffer; mime: string }[] = [], original: { buf: Buffer; mime: string } | null = null, realSize?: string): Promise<Interpretation> {
   const meta = await sharp(prev.buf).metadata();
   const W = meta.width ?? 0, H = meta.height ?? 0;
-  let instruction = feedback, understood = "", region: Zone | null = userZone, intent: "edit" | "label" = "edit";
+  let instruction = feedback, understood = "", region: Zone | null = userZone, intent: "edit" | "label" = "edit", useOriginal = false;
   try {
     const zoneCrop = userZone && W && H ? await sharp(prev.buf).extract({
       left: Math.round(Math.max(0, userZone.x * W)), top: Math.round(Math.max(0, userZone.y * H)),
@@ -169,6 +169,7 @@ export async function interpretCorrection(prev: { buf: Buffer; mime: string }, f
     const r = await gemini(MODELS.text, [{ text: interpretPrompt({ realSize, feedback, hasZone: !!zoneCrop, avoid, refCount: refs.length, hasOriginal: !!original }) }, imgPart(prev.buf, prev.mime), ...(original ? [imgPart(original.buf, original.mime)] : []), ...(zoneCrop ? [imgPart(zoneCrop, "image/png")] : []), ...refs.map((r) => imgPart(r.buf, r.mime))], { purpose: "localisation produit", json: true, timeoutMs: 40_000 });
     const it = parseJson<{ instruction?: string; understood?: string; scope?: string; intent?: string; boxes?: unknown; box?: unknown }>(firstText(r));
     if (it.intent === "label") intent = "label";
+    useOriginal = (it as { use_original?: unknown }).use_original === true;
     if (it.instruction) instruction = it.instruction;
     if (it.understood) understood = it.understood;
     if (it.scope === "local") {
@@ -178,7 +179,7 @@ export async function interpretCorrection(prev: { buf: Buffer; mime: string }, f
       region = u && u.w * u.h <= 0.45 ? u : null;
     } else region = null;
   } catch { /* on garde la demande telle quelle */ }
-  return { instruction, understood, region, intent };
+  return { instruction, understood, region, intent, useOriginal };
 }
 
 export const generateImage = (sb: SupabaseClient, image: ImageRow, userId: string, signal?: AbortSignal) =>
@@ -271,7 +272,7 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
       })() : Promise.resolve(null);
       const [edits, labelRes] = await Promise.all([
         Promise.all(localTasks.map(async ({ it, k }) => {
-          const r = await localEditCrop({ prev: prev.buf, W, H, region: it.region!, instruction: it.instruction, mode: "edit", product, rules, refs: [], packshots, original, model, signal, timeoutMs: left() });
+          const r = await localEditCrop({ prev: prev.buf, W, H, region: it.region!, instruction: it.instruction, mode: "edit", product, rules, refs: [], packshots, original: it.useOriginal ? original : null, model, signal, timeoutMs: left() });
           return r ? { ...r, region: it.region!, k } : null;
         })),
         labelJob,
@@ -281,7 +282,8 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
       if (labelRes) acc = await pasteBack(acc, labelRes.edited, labelRes.box, labelRes.region, W, H); // l'étiquette en dernier
       // 2) changements globaux (lumière, fond entier…) : seulement s'il reste du temps
       if (globalTasks.length && left() > 120_000) {
-        const gp: Part[] = [{ text: correctionPrompt({ product, rules, feedback: globalTasks.map(({ it }) => it.instruction).join(" Also: "), mode: "edit", hasOriginal: !!original }) }, imgPart(acc, "image/png"), ...(original ? [imgPart(original.buf, original.mime)] : []), ...packshots.map((p) => imgPart(p.buf, p.mime))];
+        const gOrig = globalTasks.some(({ it }) => it.useOriginal) ? original : null;
+        const gp: Part[] = [{ text: correctionPrompt({ product, rules, feedback: globalTasks.map(({ it }) => it.instruction).join(" Also: "), mode: "edit", hasOriginal: !!gOrig }) }, imgPart(acc, "image/png"), ...(gOrig ? [imgPart(gOrig.buf, gOrig.mime)] : []), ...packshots.map((p) => imgPart(p.buf, p.mime))];
         try { const gb = firstImage(await gemini(model, gp, { purpose: "retouche globale", image: true, aspect, size: shoot.size, signal, timeoutMs: left() })); if (gb) acc = gb; } catch { /* on garde les retouches locales */ }
       }
       // Tâches qui n'ont pas pu être appliquées : on le dit
@@ -305,7 +307,7 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
       const outs = await Promise.all(zonesIn.slice(0, 5).map(async (z) => {
         const it = await interpretCorrection(prev, (z.note ?? "").trim() || image.feedback || "", z, prm.avoid, refs, original, product.real_size);
         const reg: Zone = it.region ?? z;
-        const r = await localEditCrop({ prev: prev.buf, W, H, region: reg, instruction: it.instruction, mode: "edit", product, rules, refs, packshots, original, model, signal });
+        const r = await localEditCrop({ prev: prev.buf, W, H, region: reg, instruction: it.instruction, mode: "edit", product, rules, refs, packshots, original: it.useOriginal ? original : null, model, signal });
         return r ? { ...r, region: reg, understood: it.understood, instruction: it.instruction } : null;
       }));
       const okOuts = outs.map((o, k) => ({ o, k })).filter((x) => x.o) as { o: NonNullable<(typeof outs)[number]>; k: number }[];
@@ -324,6 +326,7 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
       // Filet de sécurité : demande non interprétée à la création
       const it = await interpretCorrection(prev, image.feedback ?? "", zonesIn[0] ?? null, prm.avoid, refs, original, product.real_size);
       instruction = it.instruction; region = it.region;
+      if (!it.useOriginal) { original = null; origImg = null; } // on ne remet la version d'origine que si le client le demande
       if (it.intent === "label") { editMode = "label"; skipChangeCheck = true; const z = await locateProduct(prev); region = z; }
       await sb.from("images").update({ params: { ...prm, instruction, understood: it.understood, region } }).eq("id", image.id);
     } else if (image.kind === "label") {

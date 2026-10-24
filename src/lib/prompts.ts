@@ -108,6 +108,7 @@ export function formatPrompt(a: { product: Product; rules: string[]; aspect: str
     "NON-NEGOTIABLE RULES:", numbered([...a.rules, ...(a.product.rules ?? [])]), "",
     `TASK: recreate this exact same photo (same person, same product, same styling, same lighting, same color palette, same mood) in aspect ratio ${a.aspect}.`,
     "Recompose and extend the scene naturally so that the whole product stays complete and fully visible, keeps the same relative scale to the person, and its label stays sharp and legible. Never crop the product. Do not add text or logos. Keep the visible fine skin texture and individual eyebrow hair strokes: never smooth the skin.",
+    "The result must be ONE single continuous photograph that fills the whole frame: NO collage, NO split panels, NO inset or picture-in-picture photos, NO duplicated person or product, NO borders or empty bands. To fit a different shape, extend the background and surroundings naturally around the same subject; the person and the product are never repeated or tiled.",
     a.product.texts?.length ? `Texts that must appear exactly on the product:\n${textsBlock(a.product)}` : "",
   ].filter(Boolean).join("\n");
 }
@@ -165,7 +166,8 @@ export function interpretPrompt(a: { realSize?: string; feedback: string; hasZon
     a.realSize ? `REAL SIZE of the product: ${a.realSize.replace(/\n/g, ", ")}. If the request concerns the size or scale of the product, write the instruction with concrete proportions based on this real size (for example: the tube must be about as long as the model's hand, from wrist to fingertips, and clearly smaller than her face and shoulders).` : "",
     `Client request: "${a.feedback}"`,
     a.avoid ? `A previous attempt FAILED because: ${a.avoid}. Write the instruction so that this mistake does not happen again, with more explicit and concrete details.` : "",
-    'Return JSON only: {"instruction": str, "understood": str, "scope": "local"|"global", "intent": "edit"|"label", "boxes": [[ymin, xmin, ymax, xmax], ...]}.',
+    'Return JSON only: {"instruction": str, "understood": str, "scope": "local"|"global", "intent": "edit"|"label", "use_original": bool, "boxes": [[ymin, xmin, ymax, xmax], ...]}.',
+    "use_original = true ONLY when the client explicitly asks to bring back, undo or restore something that existed in the original version (for example \"remets la bague\", \"reviens à comme avant\", \"le mannequin d'origine\"). For any other request (change the background, the light, a pose, an object, a color...) use_original MUST be false: the retoucher must then work on Image 1 only and never copy back the original version.",
     "instruction = a precise, concrete English instruction for the retoucher: what exactly to change, in which element (hand, product, outfit, background, light, skin...), the exact target result, and what must stay unchanged. Never ask to change the product's shape, label text or logo unless the client explicitly asks to fix them to match the packshot.",
     RECIPES,
     "intent = \"label\" ONLY when the request is solely about fixing the printed text, spelling or logo on the product so that it matches the packshot (e.g. \"corrige les erreurs d'écriture\", \"le texte du produit est faux\"); otherwise \"edit\".",
