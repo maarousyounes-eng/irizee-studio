@@ -37,6 +37,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
   const [images, setImages] = useState<ImageRow[]>(initialImages);
   const [filter, setFilter] = useState<"all" | "valid" | "review" | "rejected" | "pending" | "approved">("all");
   const [hideRejected, setHideRejected] = useState(false);
+  const [sortBy, setSortBy] = useState<"recent" | "score">("recent");
   const [showArchived, setShowArchived] = useState(false);
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -101,8 +102,13 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
       if (filter === "pending" || filter === "approved") return i.review_status === filter;
       return i.verdict === filter;
     });
-    return list.sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || a.variant_index - b.variant_index || a.version - b.version);
-  }, [images, filter, hideRejected, showArchived]);
+    return sortBy === "recent"
+      ? list.sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at))
+      : list.sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || a.variant_index - b.variant_index || a.version - b.version);
+  }, [images, filter, hideRejected, showArchived, sortBy]);
+
+  // La dernière image créée par une correction (pour s'y retrouver)
+  const latestFixId = useMemo(() => images.filter((i) => i.kind === "correction" && !i.params?.archived).sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at))[0]?.id, [images]);
 
   // Si aucune proposition ne répond à la demande, la plateforme réessaie seule (une fois), en disant à l'IA ce qui a échoué.
   const retried = useRef<Set<string>>(new Set());
@@ -302,6 +308,12 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
             </>
           )}
         </div>
+        <label className="flex items-center gap-1.5 text-xs text-[#6B6B72]">Trier :
+          <select value={sortBy} onChange={(e) => setSortBy(e.target.value as "recent" | "score")} className="rounded-lg border border-[#E4E4E7] bg-white px-2 py-1 text-xs">
+            <option value="recent">Plus récentes d&apos;abord</option>
+            <option value="score">Meilleur score d&apos;abord</option>
+          </select>
+        </label>
         <label className="flex items-center gap-1.5 text-xs text-[#6B6B72]"><input type="checkbox" checked={hideRejected} onChange={(e) => setHideRejected(e.target.checked)} /> Masquer les rejetées</label>
         {archivedCount > 0 && <label className="flex items-center gap-1.5 text-xs text-[#6B6B72]"><input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} /> Afficher les essais écartés ({archivedCount})</label>}
       </div>
@@ -343,6 +355,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
                     <div className="flex flex-col gap-1 items-start">
                       {v ? <Badge tone={v.tone} className="bg-white/95">{v.label}</Badge> : <Badge tone="gray" className="bg-white/95"><Spinner className="w-3 h-3" /> Contrôle…</Badge>}
                       {(img.kind !== "generated" || img.version > 1) && <Badge tone="blue" className="bg-white/95">{img.kind === "format" ? `Format ${FORMATS[img.aspect ?? ""]?.short ?? img.aspect}` : img.params?.n > 1 ? `Proposition ${img.params.i}/${img.params.n}` : `Version ${img.version}`}</Badge>}
+                      {img.id === latestFixId && <Badge tone="blue" className="bg-white/95">★ Dernière corrigée</Badge>}
                       {img.params?.archived && <Badge tone="gray" className="bg-white/95">Écartée</Badge>}
                     </div>
                     {img.score !== null && <span className="bg-black/65 text-white rounded-full px-2 py-0.5 text-[11px] font-bold">{img.score}/100</span>}
