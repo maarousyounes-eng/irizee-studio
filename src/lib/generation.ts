@@ -72,6 +72,19 @@ async function localEditCrop(a: {
   return edited ? { edited, box } : null;
 }
 
+/** Netteté globale (variance du Laplacien sur une version normalisée) : sert à détecter une retouche qui « lisse » l'image. */
+async function sharpness(b: Buffer): Promise<number> {
+  const { data, info } = await sharp(b).resize(1024, null, { withoutEnlargement: false }).greyscale().raw().toBuffer({ resolveWithObject: true });
+  const w = info.width, h = info.height;
+  let sum = 0, sum2 = 0, n = 0;
+  for (let y = 1; y < h - 1; y += 2) for (let x = 1; x < w - 1; x += 2) {
+    const i = y * w + x;
+    const l = 4 * data[i] - data[i - 1] - data[i + 1] - data[i - w] - data[i + w];
+    sum += l; sum2 += l * l; n++;
+  }
+  return n ? sum2 / n - (sum / n) ** 2 : 0;
+}
+
 /** Vrai si l'image a réellement changé (comparaison de pixels, sans IA, gratuite). */
 async function hasChanged(a: Buffer, b: Buffer): Promise<boolean> {
   const raw = (x: Buffer) => sharp(x).resize(256, 256, { fit: "fill" }).greyscale().raw().toBuffer();
@@ -404,7 +417,7 @@ function verdict(qc: QC, correction = false) {
   const hard = correction
     ? qc.instruction_followed === false || qc.ghost_or_duplicate === true || qc.foreign_logo || qc.matches_reference === false || (qc.edit_quality_0_10 ?? 10) < 5
     : wrong > 0 || qc.instruction_followed === false || qc.ghost_or_duplicate === true || qc.all_copies_exact === false || qc.label_orientation_ok === false || !qc.color_ok || !qc.shape_ok || qc.foreign_logo || !qc.anatomy_ok;
-  const soft = unwanted || (correction && ((qc.edit_quality_0_10 ?? 10) < 8 || wrong > 0 || qc.all_copies_exact === false || !qc.anatomy_ok || !qc.color_ok || !qc.shape_ok || qc.label_orientation_ok === false))
+  const soft = unwanted || (correction && (qc.sharpness_ratio ?? 1) < 0.8) || (correction && ((qc.edit_quality_0_10 ?? 10) < 8 || wrong > 0 || qc.all_copies_exact === false || !qc.anatomy_ok || !qc.color_ok || !qc.shape_ok || qc.label_orientation_ok === false))
     || qc.skin_natural === false || unread > 1 || !qc.proportion_ok || !qc.angle_ok || (qc.product_height_pct ?? 100) < 8 || qc.realism_0_10 < 6;
   const w = correction ? 0.25 : 1; // poids des défauts hérités dans le score d'une correction
   const score = Math.max(0, Math.min(100, Math.round(
@@ -437,6 +450,9 @@ async function qualityCheckInner(sb: SupabaseClient, image: ImageRow) {
   catch { r = await gemini(MODELS.text, qcParts, { purpose: "contrôle qualité (secours)", json: true, timeoutMs: 35_000 }); } // modèle plus rapide si le premier est trop lent
   const qc = parseJson<QC>(firstText(r));
   qc.texts = qc.texts ?? [];
+  if (before) {
+    try { const [a, b] = await Promise.all([sharpness(before.buf), sharpness(gen.buf)]); if (a > 0) qc.sharpness_ratio = Math.round((b / a) * 100) / 100; } catch { /* mesure facultative */ }
+  }
   const v = verdict(qc, !!before);
   await sb.from("images").update({ qc, verdict: v.verdict, score: v.score }).eq("id", image.id);
   return v;
