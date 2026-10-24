@@ -38,6 +38,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
   const [filter, setFilter] = useState<"all" | "valid" | "review" | "rejected" | "pending" | "approved">("all");
   const [hideRejected, setHideRejected] = useState(false);
   const [sortBy, setSortBy] = useState<"recent" | "score">("recent");
+  const [grouped, setGrouped] = useState(true);
   const [showArchived, setShowArchived] = useState(false);
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -106,6 +107,18 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
       ? list.sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at))
       : list.sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || a.variant_index - b.variant_index || a.version - b.version);
   }, [images, filter, hideRejected, showArchived, sortBy]);
+
+  // Regroupement : chaque image d'origine avec toutes ses versions (corrections, étiquette, formats) côte à côte
+  const groups = useMemo(() => {
+    const byId = new Map(images.map((i) => [i.id, i]));
+    const rootOf = (i: ImageRow) => { let c = i; for (let k = 0; k < 12 && c.parent_id && byId.has(c.parent_id); k++) c = byId.get(c.parent_id)!; return c.id; };
+    const m = new Map<string, ImageRow[]>();
+    visible.forEach((i) => { const r = rootOf(i); m.set(r, [...(m.get(r) ?? []), i]); });
+    const arr = Array.from(m.entries()).map(([rootId, items]) => ({ rootId, items: items.sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at)) }));
+    const last = (g: { items: ImageRow[] }) => Math.max(...g.items.map((i) => +new Date(i.created_at)));
+    const best = (g: { items: ImageRow[] }) => Math.max(...g.items.map((i) => i.score ?? -1));
+    return arr.sort((a, b) => (sortBy === "recent" ? last(b) - last(a) : best(b) - best(a)));
+  }, [images, visible, sortBy]);
 
   // La dernière image créée par une correction (pour s'y retrouver)
   const latestFixId = useMemo(() => images.filter((i) => i.kind === "correction" && !i.params?.archived).sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at))[0]?.id, [images]);
@@ -308,6 +321,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
             </>
           )}
         </div>
+        <label className="flex items-center gap-1.5 text-xs text-[#6B6B72]"><input type="checkbox" checked={grouped} onChange={(e) => setGrouped(e.target.checked)} /> Regrouper les versions d&apos;une même image</label>
         <label className="flex items-center gap-1.5 text-xs text-[#6B6B72]">Trier :
           <select value={sortBy} onChange={(e) => setSortBy(e.target.value as "recent" | "score")} className="rounded-lg border border-[#E4E4E7] bg-white px-2 py-1 text-xs">
             <option value="recent">Plus récentes d&apos;abord</option>
@@ -319,8 +333,8 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
       </div>
       {counts.generating > 0 && <div className="text-xs text-[#6B6B72] mb-3 flex flex-wrap items-center gap-3"><span className="flex items-center gap-2"><Spinner /> {counts.generating} image(s) en cours de génération — tu peux rester sur cette page.</span><Btn size="sm" variant="danger" onClick={() => { if (confirm(`Annuler les ${counts.generating} générations en cours ?`)) cancelImages(images.filter((i) => i.state === "generating")); }}><X size={12} /> Tout annuler</Btn></div>}
 
-      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-        {visible.map((img) => {
+      {(() => {
+        const renderCard = (img: ImageRow) => {
           const url = img.path ? urls[img.path] : undefined;
           const generating = img.state === "generating";
           const stuck = generating && !running.has(img.id) && Date.now() - new Date(img.created_at).getTime() > 180_000;
@@ -429,8 +443,21 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
               )}
             </Card>
           );
-        })}
-      </div>
+        };
+        if (!grouped) return <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">{visible.map((img) => <div key={img.id}>{renderCard(img)}</div>)}</div>;
+        return (
+          <div className="space-y-6">
+            {groups.map((g, gi) => (
+              <section key={g.rootId}>
+                <p className="text-xs font-semibold text-[#6B6B72] mb-2">Image {(images.find((x) => x.id === g.rootId)?.variant_index ?? groups.length - gi - 1) + 1} · {g.items.length} version{g.items.length > 1 ? "s" : ""}{g.items.length > 1 ? " (de l'originale à la plus récente, de gauche à droite)" : ""}</p>
+                <div className="flex gap-4 overflow-x-auto pb-3">
+                  {g.items.map((img) => <div key={img.id} className="w-[300px] sm:w-[340px] flex-shrink-0">{renderCard(img)}</div>)}
+                </div>
+              </section>
+            ))}
+          </div>
+        );
+      })()}
       {visible.length === 0 && <p className="text-sm text-[#6B6B72] text-center py-10">Aucune image dans ce filtre.</p>}
 
       <Lightbox src={zoom} onClose={() => setZoom(null)} />
