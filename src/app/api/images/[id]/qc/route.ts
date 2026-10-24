@@ -15,7 +15,7 @@ export async function POST(_: Request, { params }: { params: { id: string } }) {
     } catch (e) {
       // Un contrôle indisponible ne doit jamais bloquer l'image : elle passe « à vérifier ».
       const msg = e instanceof Error ? e.message : "Contrôle indisponible";
-      await sb.from("images").update({ verdict: "review", score: 0, qc: { texts: [], comment: "Contrôle qualité indisponible : " + msg.slice(0, 120) } }).eq("id", params.id);
+      await sb.from("images").update({ verdict: "review", score: null, qc: { texts: [], comment: "Contrôle qualité indisponible : " + msg.slice(0, 120) } }).eq("id", params.id);
       return { verdict: "review", score: 0 };
     }
   });
