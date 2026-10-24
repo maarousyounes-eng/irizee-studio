@@ -364,7 +364,7 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
       if (!buf) noImage = noImageReason(resp);
     } catch (e) { lastErr = e; }
   };
-  await run(parts, "");
+  if (!buf) await run(parts, "");
   if (!buf && image.kind !== "generated") await run(parts, "");
   if (!buf && noImage && image.kind === "generated" && nInsp > 0) {
     for (let k = 0; k < nInsp && !buf; k++) {
