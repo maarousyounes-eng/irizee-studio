@@ -109,7 +109,8 @@ function labelErrors(expected: string[], read: string[]) {
   const got = new Set(read.flatMap(norm));
   const missing = Array.from(exp).filter((w) => w.length >= 4 && !got.has(w));
   const invented = Array.from(got).filter((w) => w.length >= 4 && !exp.has(w) && !/^\d/.test(w));
-  return { missing, invented, n: missing.length + invented.length };
+  // Les mots manquants peuvent venir d'une main ou d'une courbure qui cache le texte : seules les fautes visibles comptent
+  return { missing, invented, n: invented.length };
 }
 
 /** Réparation d'étiquette avec vérification : retouche (2K), lecture bon marché du résultat, une 2e tentative ciblée sur les mots faux. */

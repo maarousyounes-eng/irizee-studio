@@ -414,8 +414,8 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
                       <summary className="cursor-pointer text-[11px] font-semibold text-[#A0A0A8]">Détail du contrôle</summary>
                       <ul className="mt-1.5 space-y-0.5">
                         {qc.texts.map((t, k) => (
-                          <li key={k} className={t.status === "ok" ? "text-[#16A249]" : t.status === "wrong" ? "text-[#E8444A]" : "text-[#B45309]"}>
-                            {t.status === "ok" ? "✓" : t.status === "wrong" ? "✗" : "?"} {t.expected}{t.status === "wrong" ? ` → lu « ${t.read} »` : ""}
+                          <li key={k} className={t.status === "ok" ? "text-[#16A249]" : t.status === "wrong" ? "text-[#E8444A]" : t.status === "hidden" ? "text-[#A0A0A8]" : "text-[#B45309]"}>
+                            {t.status === "ok" ? "✓" : t.status === "wrong" ? "✗" : t.status === "hidden" ? "–" : "?"} {t.expected}{t.status === "wrong" ? ` → lu « ${t.read} »` : t.status === "hidden" ? " (masqué : normal)" : ""}
                           </li>
                         ))}
                         <li>{qc.color_ok ? "✓" : "✗"} couleur / matière · {qc.shape_ok ? "✓" : "✗"} forme · {qc.anatomy_ok ? "✓" : "✗"} mains / visage</li>
