@@ -32,12 +32,12 @@ export default async function StudioPage({ searchParams }: { searchParams: { con
   }
 
   // « Recommencer » : mêmes réglages qu'un shooting existant (produit, mannequins, inspirations, consigne, format…)
-  let again: { productId: string; productIds?: string[]; projectId: string | null; modelIds: string[]; noPeople: boolean; prompt: string; aspect: string; size: string; engine: string; variants: number; inspirationPaths: string[] } | undefined;
+  let again: { productId: string; productIds?: string[]; productMode?: string | null; projectId: string | null; modelIds: string[]; noPeople: boolean; prompt: string; aspect: string; size: string; engine: string; variants: number; inspirationPaths: string[] } | undefined;
   if (searchParams.again) {
-    const { data: sh } = await sb.from("shoots").select("id, project_id, product_id, product_ids, model_ids, no_people, prompt, aspect, size, engine, inspiration_paths").eq("id", searchParams.again).single();
+    const { data: sh } = await sb.from("shoots").select("id, project_id, product_id, product_ids, product_mode, model_ids, no_people, prompt, aspect, size, engine, inspiration_paths").eq("id", searchParams.again).single();
     if (sh) {
       const { count } = await sb.from("images").select("id", { count: "exact", head: true }).eq("shoot_id", sh.id).eq("kind", "generated");
-      again = { productId: sh.product_id, productIds: (sh.product_ids as string[] | null) ?? undefined, projectId: sh.project_id, modelIds: sh.model_ids ?? [], noPeople: !!sh.no_people, prompt: sh.prompt, aspect: sh.aspect, size: sh.size, engine: sh.engine, variants: Math.min(12, Math.max(1, count ?? 6)), inspirationPaths: sh.inspiration_paths ?? [] };
+      again = { productId: sh.product_id, productIds: (sh.product_ids as string[] | null) ?? undefined, productMode: sh.product_mode, projectId: sh.project_id, modelIds: sh.model_ids ?? [], noPeople: !!sh.no_people, prompt: sh.prompt, aspect: sh.aspect, size: sh.size, engine: sh.engine, variants: Math.min(12, Math.max(1, count ?? 6)), inspirationPaths: sh.inspiration_paths ?? [] };
     }
   }
 

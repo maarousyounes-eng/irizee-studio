@@ -31,7 +31,7 @@ export async function POST(req: Request) {
     }
 
     const { data: shoot, error } = await sb.from("shoots").insert({
-      project_id: b.projectId || null, product_id: productIds[0], product_ids: productIds.length > 1 ? productIds : null, model_id: modelIds[0] ?? null, model_ids: modelIds, concept_id: b.conceptId || null,
+      project_id: b.projectId || null, product_id: productIds[0], product_ids: productIds.length > 1 ? productIds : null, product_mode: productIds.length > 1 ? (b.productMode === "together" ? "together" : "split") : null, model_id: modelIds[0] ?? null, model_ids: modelIds, concept_id: b.conceptId || null,
       prompt: String(b.prompt).trim(), aspect: b.aspect, size: ["1K", "2K", "4K"].includes(b.size) ? b.size : "2K",
       engine: ["flash", "pro", "mix"].includes(b.engine) ? b.engine : "mix", no_people: !!b.noPeople,
       inspiration_paths: paths, analysis, created_by: user.id,

@@ -18,7 +18,7 @@ interface Props {
   initialConceptId?: string;
   initialProductId?: string;
   initial: { inspirationPaths: string[]; productId?: string; aspect?: string };
-  again?: { productId: string; productIds?: string[]; projectId: string | null; modelIds: string[]; noPeople: boolean; prompt: string; aspect: string; size: string; engine: string; variants: number; inspirationPaths: string[] };
+  again?: { productId: string; productIds?: string[]; productMode?: string | null; projectId: string | null; modelIds: string[]; noPeople: boolean; prompt: string; aspect: string; size: string; engine: string; variants: number; inspirationPaths: string[] };
 }
 
 export default function NewShootForm(p: Props) {
@@ -28,6 +28,7 @@ export default function NewShootForm(p: Props) {
   const isCreator = p.role === "creator";
 
   const [projectId, setProjectId] = useState<string>(p.again?.projectId ?? (isCreator ? p.projects[0]?.id ?? "" : ""));
+  const [productMode, setProductMode] = useState<"split" | "together">(p.again?.productMode === "together" ? "together" : "split");
   const [extraIds, setExtraIds] = useState<string[]>(p.again?.productIds?.slice(1) ?? []);
   const [productId, setProductId] = useState(p.again?.productId ?? p.initial.productId ?? p.initialProductId ?? "");
   // Mannequins : par défaut, les mannequins de la marque (ou tous ceux qui existent)
@@ -108,7 +109,7 @@ export default function NewShootForm(p: Props) {
     setBusy(true);
     try {
       const r = await api<{ shootId: string; imageIds: string[] }>("/api/shoots", {
-        productId, productIds: [productId, ...extraIds.filter((x) => x !== productId)].slice(0, 4), projectId: projectId || null, modelIds: peopleMode === "models" ? modelIds : [],
+        productId, productIds: [productId, ...extraIds.filter((x) => x !== productId)].slice(0, 4), productMode, projectId: projectId || null, modelIds: peopleMode === "models" ? modelIds : [],
         conceptId: conceptId || null, prompt, aspect, size, engine, variants, noPeople, inspirationPaths: inspirations,
       });
       sessionStorage.setItem(`run:${r.shootId}`, JSON.stringify(r.imageIds));
@@ -197,7 +198,12 @@ export default function NewShootForm(p: Props) {
                   );
                 })}
               </div>
-              {extraIds.filter((e) => e !== productId).length > 0 && <p className="text-[11px] text-[#B45309] mt-1">Plusieurs produits dans une même image : le texte et la forme de chacun sont plus difficiles à garder fidèles.</p>}
+              {extraIds.filter((e) => e !== productId).length > 0 && (
+                <div className="mt-2 space-y-1">
+                  <label className="flex items-start gap-2 text-xs"><input type="radio" className="mt-0.5" checked={productMode === "split"} onChange={() => setProductMode("split")} /><span><b>Un produit par image</b>, en alternance (recommandé si tes inspirations montrent un seul produit). Chaque inspiration est utilisée pour chaque produit.</span></label>
+                  <label className="flex items-start gap-2 text-xs"><input type="radio" className="mt-0.5" checked={productMode === "together"} onChange={() => setProductMode("together")} /><span><b>Tous ensemble dans la même photo</b> : le texte et la forme de chacun sont plus difficiles à garder fidèles.</span></label>
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -182,6 +182,12 @@ export async function interpretCorrection(prev: { buf: Buffer; mime: string }, f
   return { instruction, understood, region, intent, useOriginal };
 }
 
+/** Produit concerné par une image : en mode « un produit par image », il alterne selon la variante ; sinon le produit principal. */
+export function productIdFor(shoot: { product_id: string; product_ids?: string[] | null; product_mode?: string | null }, image: { variant_index: number }) {
+  const ids = shoot.product_ids ?? [];
+  return shoot.product_mode === "split" && ids.length > 1 ? ids[(image.variant_index ?? 0) % ids.length] : shoot.product_id;
+}
+
 export const generateImage = (sb: SupabaseClient, image: ImageRow, userId: string, signal?: AbortSignal) =>
   withAiCtx({ sb, userId, shootId: image.shoot_id, imageId: image.id }, () => generateImageInner(sb, image, userId, signal));
 
@@ -190,10 +196,12 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
   const left = () => Math.max(25_000, Math.min(200_000, 240_000 - (Date.now() - t0))); // Vercel coupe à 300 s : budget de 240 s
   const { data: shoot } = await sb.from("shoots").select("*").eq("id", image.shoot_id).single();
   if (!shoot) throw new Error("Shooting introuvable");
-  const { product, imagePaths } = await loadProduct(sb, shoot.product_id);
+  const split = shoot.product_mode === "split" && ((shoot.product_ids as string[] | null)?.length ?? 0) > 1;
+  const mainId = productIdFor(shoot, image);
+  const { product, imagePaths } = await loadProduct(sb, mainId);
   const rules = await brandRules(sb);
   // Plusieurs produits dans la même photo : on charge aussi les autres produits (un packshot chacun)
-  const otherIds = (((shoot.product_ids as string[] | null) ?? []).filter((x) => x !== shoot.product_id)).slice(0, 3);
+  const otherIds = split ? [] : (((shoot.product_ids as string[] | null) ?? []).filter((x) => x !== shoot.product_id)).slice(0, 3);
   const others: { product: Product; paths: string[] }[] = [];
   for (const oid of otherIds) { try { const o = await loadProduct(sb, oid); others.push({ product: o.product, paths: o.imagePaths }); } catch { /* produit supprimé : ignoré */ } }
   const packshots = await Promise.all([...imagePaths, ...others.map((o) => o.paths[0])].map((p) => download(sb, p)));
@@ -210,7 +218,8 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
     model = shoot.engine === "pro" ? MODELS.pro : shoot.engine === "flash" ? MODELS.flash : (image.variant_index % 2 === 0 ? MODELS.flash : MODELS.pro);
     // Une inspiration par variante : l'image i suit SON inspiration (pose, cadrage, lumière, style) ; elles tournent s'il y a plus de variantes que d'inspirations.
     const allInsp = shoot.inspiration_paths as string[];
-    const pick = allInsp.length > 1 ? image.variant_index % allInsp.length : 0;
+    const nProd = split ? (shoot.product_ids as string[]).length : 1;
+    const pick = allInsp.length > 1 ? Math.floor(image.variant_index / nProd) % allInsp.length : 0; // en mode « un produit par image », chaque inspiration sert à chaque produit
     const inspirations = await Promise.all((allInsp.length > 1 ? [allInsp[pick]] : allInsp).map((p) => download(sb, p)));
     const perAnalysis = String(shoot.analysis ?? "").split(ANALYSIS_SEP);
     const analysisFor = allInsp.length > 1 && perAnalysis.length === allInsp.length ? perAnalysis[pick] : (shoot.analysis ?? "");
@@ -447,12 +456,12 @@ export const qualityCheck = async (sb: SupabaseClient, image: ImageRow) => {
 
 async function qualityCheckInner(sb: SupabaseClient, image: ImageRow) {
   if (!image.path) throw new Error("Pas d'image à contrôler");
-  const { data: shoot } = await sb.from("shoots").select("product_id, product_ids, no_people").eq("id", image.shoot_id).single();
-  const { product, imagePaths } = await loadProduct(sb, shoot!.product_id);
+  const { data: shoot } = await sb.from("shoots").select("product_id, product_ids, product_mode, no_people").eq("id", image.shoot_id).single();
+  const { product, imagePaths } = await loadProduct(sb, productIdFor(shoot!, image));
   const pack = await download(sb, imagePaths[0]);
   const qcOthers: Product[] = [];
   const extraPacks: { buf: Buffer; mime: string }[] = [];
-  for (const oid of (((shoot!.product_ids as string[] | null) ?? []).filter((x) => x !== shoot!.product_id)).slice(0, 3)) {
+  for (const oid of (shoot!.product_mode === "split" ? [] : ((shoot!.product_ids as string[] | null) ?? []).filter((x) => x !== shoot!.product_id)).slice(0, 3)) {
     try { const o = await loadProduct(sb, oid); qcOthers.push(o.product); extraPacks.push(await download(sb, o.imagePaths[0])); } catch { /* ignoré */ }
   }
   let modelRef: { buf: Buffer; mime: string } | null = null;
