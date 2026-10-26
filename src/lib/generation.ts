@@ -192,7 +192,11 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
   if (!shoot) throw new Error("Shooting introuvable");
   const { product, imagePaths } = await loadProduct(sb, shoot.product_id);
   const rules = await brandRules(sb);
-  const packshots = await Promise.all(imagePaths.map((p) => download(sb, p)));
+  // Plusieurs produits dans la même photo : on charge aussi les autres produits (un packshot chacun)
+  const otherIds = (((shoot.product_ids as string[] | null) ?? []).filter((x) => x !== shoot.product_id)).slice(0, 3);
+  const others: { product: Product; paths: string[] }[] = [];
+  for (const oid of otherIds) { try { const o = await loadProduct(sb, oid); others.push({ product: o.product, paths: o.imagePaths }); } catch { /* produit supprimé : ignoré */ } }
+  const packshots = await Promise.all([...imagePaths, ...others.map((o) => o.paths[0])].map((p) => download(sb, p)));
   const aspect = image.aspect || shoot.aspect;
   let parts: Part[] = [];
   let model: string;
@@ -219,7 +223,7 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
     }
     const prompt = buildPrompt({
       product, rules, userPrompt: shoot.prompt, aspect, analysis: analysisFor,
-      variation: variationHint(image.variant_index, shoot.no_people), nProductImages: packshots.length,
+      others: others.map((o) => ({ product: o.product, n: 1 })), variation: variationHint(image.variant_index, shoot.no_people), nProductImages: imagePaths.length,
       hasModelRef: !!modelRef, modelDescription, noPeople: shoot.no_people,
     });
     nInsp = inspirations.length;
@@ -443,9 +447,14 @@ export const qualityCheck = async (sb: SupabaseClient, image: ImageRow) => {
 
 async function qualityCheckInner(sb: SupabaseClient, image: ImageRow) {
   if (!image.path) throw new Error("Pas d'image à contrôler");
-  const { data: shoot } = await sb.from("shoots").select("product_id, no_people").eq("id", image.shoot_id).single();
+  const { data: shoot } = await sb.from("shoots").select("product_id, product_ids, no_people").eq("id", image.shoot_id).single();
   const { product, imagePaths } = await loadProduct(sb, shoot!.product_id);
   const pack = await download(sb, imagePaths[0]);
+  const qcOthers: Product[] = [];
+  const extraPacks: { buf: Buffer; mime: string }[] = [];
+  for (const oid of (((shoot!.product_ids as string[] | null) ?? []).filter((x) => x !== shoot!.product_id)).slice(0, 3)) {
+    try { const o = await loadProduct(sb, oid); qcOthers.push(o.product); extraPacks.push(await download(sb, o.imagePaths[0])); } catch { /* ignoré */ }
+  }
   let modelRef: { buf: Buffer; mime: string } | null = null;
   const mid = (image as any).model_id as string | null;
   if (mid && !shoot!.no_people) {
@@ -460,7 +469,7 @@ async function qualityCheckInner(sb: SupabaseClient, image: ImageRow) {
     if (par?.path) before = await download(sb, par.path);
   }
   const qcRefs = before ? (await Promise.all((((image.params as any)?.refs as string[] | undefined) ?? []).slice(0, 3).map((p) => download(sb, p).catch(() => null)))).filter(Boolean) as { buf: Buffer; mime: string }[] : [];
-  const qcParts = [{ text: qcPrompt(product, before ? { instruction: instr!, refCount: qcRefs.length } : undefined, { modelRef: !!modelRef }) }, imgPart(pack.buf, pack.mime), imgPart(gen.buf, gen.mime), ...(before ? [imgPart(before.buf, before.mime)] : []), ...qcRefs.map((r) => imgPart(r.buf, r.mime)), ...(modelRef ? [imgPart(modelRef.buf, modelRef.mime)] : [])];
+  const qcParts = [{ text: qcPrompt(product, before ? { instruction: instr!, refCount: qcRefs.length } : undefined, { modelRef: !!modelRef, others: qcOthers }) }, imgPart(pack.buf, pack.mime), imgPart(gen.buf, gen.mime), ...(before ? [imgPart(before.buf, before.mime)] : []), ...qcRefs.map((r) => imgPart(r.buf, r.mime)), ...extraPacks.map((r) => imgPart(r.buf, r.mime)), ...(modelRef ? [imgPart(modelRef.buf, modelRef.mime)] : [])];
   let r: any;
   try { r = await gemini(MODELS.vision, qcParts, { purpose: "contrôle qualité", json: true, timeoutMs: 70_000 }); }
   catch { r = await gemini(MODELS.text, qcParts, { purpose: "contrôle qualité (secours)", json: true, timeoutMs: 35_000 }); } // modèle plus rapide si le premier est trop lent

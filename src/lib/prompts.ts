@@ -32,7 +32,7 @@ const textsBlock = (p: Product) => (p.texts ?? []).map((t) => `- ${t}`).join("\n
 
 export function buildPrompt(a: {
   product: Product; rules: string[]; userPrompt: string; aspect: string; analysis: string;
-  variation: string; nProductImages: number; hasModelRef: boolean; modelDescription?: string; noPeople: boolean;
+  others?: { product: Product; n: number }[]; variation: string; nProductImages: number; hasModelRef: boolean; modelDescription?: string; noPeople: boolean;
 }) {
   const all = numbered([...a.rules, ...(a.product.rules ?? [])]);
   const people = a.noPeople
@@ -41,12 +41,23 @@ export function buildPrompt(a: {
       ? `The person in the photo MUST be exactly the same fictional person as in the MODEL REFERENCE image: reproduce that exact face (face shape, eyes, eyebrows, nose, lips, freckles and marks), the same skin tone, age impression and hair colour${a.modelDescription ? `. Description: ${a.modelDescription}` : ""}. Hair color, hairstyle and skin tone are those of the MODEL REFERENCE, not of the style reference. Only the outfit, pose and expression come from the brief. Never use the person from the style reference images: the face must be recognizably the MODEL REFERENCE person in every image of the series.`
       : a.variation;
   // Le nombre de produits suit l'inspiration (un produit héros, ou plusieurs copies), sauf consigne contraire du client.
-  const copies =
+  const copiesSingle =
     "PRODUCT ARRANGEMENT: reproduce the arrangement of the product(s) seen in the inspiration (a single hero product, or several repeated / floating copies at different scales), unless the client brief says otherwise. " +
     "EVERY copy of the product, even small, blurred or in the background, must be an exact replica of the real packshot: same proportions, same label layout, same text direction along the product, same cap and colors. Never invent a different product shape and never add look-alike products that are not the packshot.";
+  const oth = a.others ?? [];
+  const copies = oth.length
+    ? `PRODUCT ARRANGEMENT: the photo must show ALL ${1 + oth.length} different products together (${[a.product, ...oth.map((o) => o.product)].map((x) => `"${x.name}"`).join(", ")}), arranged the way the style reference arranges its products (held, lined up or grouped), each at its correct relative real-world size, each clearly visible with its label facing the camera. Each product must be an exact replica of its OWN packshot: never merge, swap, duplicate or redesign them, and never invent a product that is not listed.`
+    : copiesSingle;
+  const othersBlock = oth.map((o) => [
+    `Another product to show: "${o.product.name}".`,
+    o.product.look ? `Its appearance: ${o.product.look}` : "",
+    o.product.real_size ? `Its real-world size: ${o.product.real_size.replace(/\n/g, ", ")}.` : "",
+    o.product.texts?.length ? `Exact printed texts on it:\n${textsBlock(o.product)}` : "",
+  ].filter(Boolean).join("\n")).join("\n\n");
   return [
     "You are a world-class advertising photographer producing a photorealistic campaign photo for the cosmetics brand Irizée.",
     `The FIRST ${a.nProductImages} image(s) are the REAL product reference photos (packshots) of "${a.product.name}".` +
+      (oth.length ? ` Then, in this order: ${oth.map((o) => `${o.n} packshot image(s) of "${o.product.name}"`).join("; ")}.` : "") +
       (a.hasModelRef ? " The next image is the MODEL REFERENCE (face sheet of a fictional model)." : "") +
       (a.hasModelRef
         ? " The remaining image(s) are the STYLE REFERENCE: reproduce ONLY its pose, framing, lens, lighting, color grading and mood. The person shown in the style reference must NOT be reproduced in any way: NOT her face, NOT her hair color or hairstyle, NOT her skin tone. The person in your photo is the one from the MODEL REFERENCE, with her exact face, hair and skin tone."
@@ -58,6 +69,8 @@ export function buildPrompt(a: {
     a.product.look ? `Product appearance: ${a.product.look}` : "",
     a.product.real_size ? `Real-world size: ${a.product.real_size}. Keep this exact scale versus hands and body: a hand-held product of this size is only about as long as the model's hand (palm and fingers), never oversized, never giant.` : "",
     a.product.texts?.length ? `Exact printed texts on the product (must be legible and spelled exactly like this):\n${textsBlock(a.product)}` : "",
+    "",
+    othersBlock,
     "",
     a.analysis ? `Analysis of the style reference photo (reproduce this concept, composition and style, not the identity):\n${a.analysis}` : "",
     "PRODUCT SCALE: it is a small cosmetic tube. It must look exactly as big as the object held in the style reference relative to the person (never bigger), and never exceed its real size: when held near the face it stays about a hand's length and must not cover the lower face or dominate the frame. The person remains the main subject; the product is a precise, discreet accessory unless the client brief asks otherwise.",
@@ -123,11 +136,12 @@ export function modelSheetPrompt(a: { name: string; description: string }) {
   ].join("\n");
 }
 
-export function qcPrompt(p: Product, correction?: { instruction: string; refCount?: number }, opts?: { modelRef?: boolean }) {
+export function qcPrompt(p: Product, correction?: { instruction: string; refCount?: number }, opts?: { modelRef?: boolean; others?: Product[] }) {
   return [
     "You are a strict quality inspector for a cosmetics brand.",
     "Image 1 = the REAL product packshot. Image 2 = a generated advertising photo that must show this exact product." + (correction ? " Image 3 = the same photo BEFORE a correction was applied." + (correction.refCount ? ` The last ${correction.refCount} image(s) are REFERENCE image(s) supplied by the client showing what they wanted.` : "") : ""),
     correction ? `A correction was requested: "${correction.instruction}". Compare image 3 (before) and image 2 (after): set instruction_followed to true ONLY if the requested change is clearly and convincingly visible in image 2 (for example, if a hand must hold the product, the fingers must visibly wrap around it and it must not float). List in unwanted_changes every element that changed although it was NOT requested (face, outfit, background, product shape or text, framing...), or an empty string if none. Set ghost_or_duplicate to true if a leftover, ghost or duplicate of a moved or removed object is visible. BE A DEMANDING ART DIRECTOR about the quality of the modified or added element: edit_quality_0_10 = how natural and well executed it is (correct proportions and scale, perspective, lighting, shadows, depth of field and sharpness consistent with the scene, clean edges, no distortion, no artifacts, realistic like a real photograph). Give 8 or more ONLY if you would publish it without any retouching; give 4 or less if it looks fake, pasted, deformed or badly drawn. List the visible defects of the modification in edit_defects (short French sentence, empty if none).${correction.refCount ? " Set matches_reference to false if the result clearly does not look like what the reference shows (same kind, style, shape, colors); otherwise true." : ""}` : "",
+    opts?.others?.length ? `MULTI-PRODUCT PHOTO: ${1 + opts.others.length} different products must appear together. After the reference images (if any), ${opts.others.length} extra packshot image(s) follow, one per product, in this order: ${opts.others.map((o) => `"${o.name}"`).join(", ")}. Judge EACH product separately against its own packshot (texts, shape, color, cap) and include in "texts" the expected texts of ALL products, not only the first. In this multi-product photo judge every product that is clearly visible, not only one hero product. Expected texts of the other products: ${JSON.stringify(opts.others.map((o) => ({ name: o.name, texts: o.texts ?? [] })))}. Their appearance: ${opts.others.map((o) => `${o.name}: ${o.look ?? ""}`).join(" | ")}. set shape_ok and all_copies_exact to false if any product is missing, merged with another, swapped or redesigned.` : "",
     opts?.modelRef ? "The LAST image is the MODEL REFERENCE sheet of the person who must appear in the photo: set face_matches_model to true only if the person in image 2 is clearly the same person (same face shape, eyes, nose, lips, skin tone, hair colour)." : "",
     "TOLERANCE: judge like a professional photo editor, not like a pixel scanner. Natural photographic situations are NORMAL and must NEVER be flagged as defects: partial occlusion of the product by a hand, fingers, hair or arm; the product cropped by the frame edge on purpose; shallow depth-of-field blur on background or distant items; specular highlights and reflections on glossy packaging; the label foreshortened or partly invisible because the product is curved or seen from the side; natural shadows; motion or lens effects; the product shown at an angle. Only flag what a real client would call an error: wrong or invented words that are clearly visible, a distorted or invented product shape, impossible anatomy, objects that merge or float unnaturally, a wrong or missing mannequin identity. When in doubt about something you cannot see clearly, do NOT flag it.",
     "HUMAN CHECK (if a person is visible; otherwise human.present=false and every other human field true). Inspect very carefully and count: each visible hand has exactly 5 fingers (4 fingers + thumb) with natural joints, lengths and nails, and no fused, missing, extra, twisted or bent-backwards finger (fingers_count_ok / hands_ok); the grip on the product is physically plausible: fingers wrap around it, the thumb is opposed, the product does not float and no hand passes through an object (grip_ok); face: both eyes the same size, aligned and looking coherently, symmetrical features, natural lips and teeth with no extra or merged teeth, normal ears and brows (face_ok); at most two arms and two hands, no extra or missing limb (limbs_ok); neck, shoulders and body proportions are plausible (body_ok); glasses, earrings, hair and clothing are coherent: no merging into skin or hair, no duplicated or asymmetrical accessory, no melted texture (accessories_ok). Also artifacts_ok = false if you see garbled or melted textures, objects that float or merge, a cropped or cut product, or strange shapes in the background.",

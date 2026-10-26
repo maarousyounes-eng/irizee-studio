@@ -10,7 +10,8 @@ export async function POST(req: Request) {
   return handle(async () => {
     const { sb, user, profile } = await requireUser();
     const b = await req.json();
-    if (!b.productId) throw new HttpError(400, "Choisis un produit");
+    const productIds: string[] = Array.from(new Set([b.productId, ...(Array.isArray(b.productIds) ? b.productIds : [])].filter((x: unknown): x is string => typeof x === "string" && !!x))).slice(0, 4);
+    if (!productIds.length) throw new HttpError(400, "Choisis un produit");
     if (!String(b.prompt ?? "").trim()) throw new HttpError(400, "Écris une consigne");
     if (!FORMATS[b.aspect]) throw new HttpError(400, "Format invalide");
     const n = Math.min(12, Math.max(1, Number(b.variants) || 4));
@@ -30,7 +31,7 @@ export async function POST(req: Request) {
     }
 
     const { data: shoot, error } = await sb.from("shoots").insert({
-      project_id: b.projectId || null, product_id: b.productId, model_id: modelIds[0] ?? null, model_ids: modelIds, concept_id: b.conceptId || null,
+      project_id: b.projectId || null, product_id: productIds[0], product_ids: productIds.length > 1 ? productIds : null, model_id: modelIds[0] ?? null, model_ids: modelIds, concept_id: b.conceptId || null,
       prompt: String(b.prompt).trim(), aspect: b.aspect, size: ["1K", "2K", "4K"].includes(b.size) ? b.size : "2K",
       engine: ["flash", "pro", "mix"].includes(b.engine) ? b.engine : "mix", no_people: !!b.noPeople,
       inspiration_paths: paths, analysis, created_by: user.id,

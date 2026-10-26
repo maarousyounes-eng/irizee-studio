@@ -21,7 +21,7 @@ export interface Concept {
 export interface Project { id: string; name: string; description: string }
 export interface Shoot {
   id: string; project_id: string | null; product_id: string; model_id: string | null; model_ids?: string[]; prompt: string;
-  aspect: string; size: string; engine: string; no_people: boolean; product_copies?: string; inspiration_paths: string[];
+  aspect: string; size: string; engine: string; no_people: boolean; product_copies?: string; product_ids?: string[] | null; inspiration_paths: string[];
   analysis: string | null; created_by: string; created_at: string;
 }
 export interface QC {

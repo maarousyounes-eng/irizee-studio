@@ -18,7 +18,7 @@ interface Props {
   initialConceptId?: string;
   initialProductId?: string;
   initial: { inspirationPaths: string[]; productId?: string; aspect?: string };
-  again?: { productId: string; projectId: string | null; modelIds: string[]; noPeople: boolean; prompt: string; aspect: string; size: string; engine: string; variants: number; inspirationPaths: string[] };
+  again?: { productId: string; productIds?: string[]; projectId: string | null; modelIds: string[]; noPeople: boolean; prompt: string; aspect: string; size: string; engine: string; variants: number; inspirationPaths: string[] };
 }
 
 export default function NewShootForm(p: Props) {
@@ -28,6 +28,7 @@ export default function NewShootForm(p: Props) {
   const isCreator = p.role === "creator";
 
   const [projectId, setProjectId] = useState<string>(p.again?.projectId ?? (isCreator ? p.projects[0]?.id ?? "" : ""));
+  const [extraIds, setExtraIds] = useState<string[]>(p.again?.productIds?.slice(1) ?? []);
   const [productId, setProductId] = useState(p.again?.productId ?? p.initial.productId ?? p.initialProductId ?? "");
   // Mannequins : par défaut, les mannequins de la marque (ou tous ceux qui existent)
   const brandIds = p.models.filter((m) => m.is_brand_model).map((m) => m.id);
@@ -107,7 +108,7 @@ export default function NewShootForm(p: Props) {
     setBusy(true);
     try {
       const r = await api<{ shootId: string; imageIds: string[] }>("/api/shoots", {
-        productId, projectId: projectId || null, modelIds: peopleMode === "models" ? modelIds : [],
+        productId, productIds: [productId, ...extraIds.filter((x) => x !== productId)].slice(0, 4), projectId: projectId || null, modelIds: peopleMode === "models" ? modelIds : [],
         conceptId: conceptId || null, prompt, aspect, size, engine, variants, noPeople, inspirationPaths: inspirations,
       });
       sessionStorage.setItem(`run:${r.shootId}`, JSON.stringify(r.imageIds));
@@ -181,6 +182,24 @@ export default function NewShootForm(p: Props) {
           <select className={INPUT} value={productId} onChange={(e) => setProductId(e.target.value)}>
             {allowedProducts.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
           </select>
+          {allowedProducts.length > 1 && (
+            <div className="mt-2">
+              <p className="text-[11px] text-[#6B6B72] mb-1">Ajouter d&apos;autres produits dans la même photo (4 au total maximum) :</p>
+              <div className="space-y-1">
+                {allowedProducts.filter((x) => x.id !== productId).map((x) => {
+                  const on = extraIds.includes(x.id);
+                  return (
+                    <label key={x.id} className="flex items-center gap-2 text-xs text-[#0A0A0B]">
+                      <input type="checkbox" checked={on} disabled={!on && extraIds.filter((e) => e !== productId).length >= 3}
+                        onChange={(e) => setExtraIds((cur) => e.target.checked ? [...cur, x.id] : cur.filter((i) => i !== x.id))} />
+                      {x.name}
+                    </label>
+                  );
+                })}
+              </div>
+              {extraIds.filter((e) => e !== productId).length > 0 && <p className="text-[11px] text-[#B45309] mt-1">Plusieurs produits dans une même image : le texte et la forme de chacun sont plus difficiles à garder fidèles.</p>}
+            </div>
+          )}
         </div>
         <div>
           <Label>Personnes sur les photos</Label>
