@@ -28,7 +28,7 @@ export default function NewShootForm(p: Props) {
   const isCreator = p.role === "creator";
 
   const [projectId, setProjectId] = useState<string>(p.again?.projectId ?? (isCreator ? p.projects[0]?.id ?? "" : ""));
-  const [productMode, setProductMode] = useState<"split" | "together">(p.again?.productMode === "together" ? "together" : "split");
+  const [productMode, setProductMode] = useState<"split" | "together" | "mix">(p.again?.productMode === "together" || p.again?.productMode === "split" ? p.again.productMode : "mix");
   const [extraIds, setExtraIds] = useState<string[]>(p.again?.productIds?.slice(1) ?? []);
   const [productId, setProductId] = useState(p.again?.productId ?? p.initial.productId ?? p.initialProductId ?? "");
   // Mannequins : par défaut, les mannequins de la marque (ou tous ceux qui existent)
@@ -200,8 +200,10 @@ export default function NewShootForm(p: Props) {
               </div>
               {extraIds.filter((e) => e !== productId).length > 0 && (
                 <div className="mt-2 space-y-1">
-                  <label className="flex items-start gap-2 text-xs"><input type="radio" className="mt-0.5" checked={productMode === "split"} onChange={() => setProductMode("split")} /><span><b>Un produit par image</b>, en alternance (recommandé si tes inspirations montrent un seul produit). Chaque inspiration est utilisée pour chaque produit.</span></label>
-                  <label className="flex items-start gap-2 text-xs"><input type="radio" className="mt-0.5" checked={productMode === "together"} onChange={() => setProductMode("together")} /><span><b>Tous ensemble dans la même photo</b> : le texte et la forme de chacun sont plus difficiles à garder fidèles.</span></label>
+                  <label className="flex items-start gap-2 text-xs"><input type="radio" className="mt-0.5" checked={productMode === "mix"} onChange={() => setProductMode("mix")} /><span><b>Mélange</b> (recommandé) : des images avec chaque produit seul, et des images avec tous les produits ensemble. Chaque inspiration est utilisée pour chaque cas.</span></label>
+                  <label className="flex items-start gap-2 text-xs"><input type="radio" className="mt-0.5" checked={productMode === "split"} onChange={() => setProductMode("split")} /><span><b>Un produit par image</b>, en alternance.</span></label>
+                  <label className="flex items-start gap-2 text-xs"><input type="radio" className="mt-0.5" checked={productMode === "together"} onChange={() => setProductMode("together")} /><span><b>Tous ensemble</b> dans chaque photo : le texte et la forme de chacun sont plus difficiles à garder fidèles.</span></label>
+                  {productMode === "mix" && <p className="text-[11px] text-[#6B6B72]">Avec {1 + extraIds.filter((e) => e !== productId).length} produits, {2 + extraIds.filter((e) => e !== productId).length} variantes font un cycle complet (chaque produit seul + tous ensemble) : choisis un multiple de {2 + extraIds.filter((e) => e !== productId).length}.</p>}
                 </div>
               )}
             </div>
