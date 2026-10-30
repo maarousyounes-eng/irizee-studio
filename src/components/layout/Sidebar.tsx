@@ -6,7 +6,7 @@ import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
-import { Sparkles, Images, CheckCircle2, BookMarked, Trash2, Package, UserRound, FolderKanban, Users, ListChecks, Coins, LogOut, Menu, X } from "lucide-react";
+import { Sparkles, Images, CheckCircle2, BookMarked, Trash2, Package, UserRound, FolderKanban, Users, ListChecks, Coins, FlaskConical, LogOut, Menu, X } from "lucide-react";
 import type { Role } from "@/types";
 
 type Item = { label: string; href: string; icon: React.ElementType; roles: Role[] };
@@ -26,6 +26,7 @@ const ADMIN: Item[] = [
   { label: "Équipe & quotas", href: "/settings/team", icon: Users, roles: ["admin"] },
   { label: "Règles de marque", href: "/settings/rules", icon: ListChecks, roles: ["admin"] },
   { label: "Coûts IA", href: "/settings/costs", icon: Coins, roles: ["admin"] },
+  { label: "Comparatif modèles", href: "/settings/benchmark", icon: FlaskConical, roles: ["admin"] },
 ];
 const ROLE_LABEL: Record<Role, string> = { admin: "Administrateur", employee: "Équipe Irizée", creator: "Créateur / agence" };
 
