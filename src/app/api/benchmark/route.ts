@@ -6,7 +6,19 @@ import { buildPrompt, variationHint } from "@/lib/prompts";
 
 export const maxDuration = 300;
 
-const OPENAI_MODEL = process.env.OPENAI_IMAGE_MODEL || "gpt-image-1";
+/** Choisit le modèle d'image OpenAI le plus récent disponible sur ce compte (sauf si OPENAI_IMAGE_MODEL est fixé). */
+async function pickOpenAIModel(key: string): Promise<string> {
+  if (process.env.OPENAI_IMAGE_MODEL) return process.env.OPENAI_IMAGE_MODEL;
+  const res = await fetch("https://api.openai.com/v1/models", { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(20_000) });
+  const j = await res.json();
+  if (!res.ok) throw new HttpError(400, `OpenAI ${res.status}: ${JSON.stringify(j).slice(0, 200)}`);
+  const ids: string[] = (j.data ?? []).map((m: { id: string }) => m.id);
+  const cands = ids.filter((id) => /^gpt-image/i.test(id) && !/mini/i.test(id) && !/\d{4}-\d{2}-\d{2}/.test(id));
+  const key2 = (id: string) => (id.match(/(\d+(?:\.\d+)?)/)?.[1] ?? "0").split(".").map(Number).reduce((a, n, i) => a + n / 10 ** (i * 2), 0);
+  cands.sort((a, b) => key2(b) - key2(a));
+  if (!cands.length) throw new HttpError(400, `Aucun modèle d'image OpenAI disponible sur ce compte. Modèles vus : ${ids.filter((i) => /image|dall/i.test(i)).join(", ") || "aucun"}. Vérifie la vérification d'organisation sur platform.openai.com.`);
+  return cands[0];
+}
 const OPENAI_EUR = 0.2; // estimation par image (qualité haute, portrait)
 
 function openaiSize(aspect: string) {
@@ -28,6 +40,7 @@ export async function POST(req: Request) {
     const providers: ("gemini" | "openai")[] = openaiKey ? ["gemini", "openai"] : ["gemini"];
     if (!openaiKey) throw new HttpError(400, "La clé OpenAI n'est pas configurée : ajoute la variable OPENAI_API_KEY dans Vercel (Settings > Environment Variables), puis redéploie.");
 
+    const OPENAI_MODEL = await pickOpenAIModel(openaiKey);
     const { product, imagePaths } = await loadProduct(sb, shoot.product_id);
     const rules = await brandRules(sb);
     const packshots = await Promise.all(imagePaths.map((p) => download(sb, p)));
