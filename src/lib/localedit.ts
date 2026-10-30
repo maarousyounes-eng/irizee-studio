@@ -45,8 +45,40 @@ export async function pasteBack(original: Buffer, edited: Buffer, box: CropBox, 
   const zx = zone.x * W - left - grow, zy = zone.y * H - top - grow;
   const zw = zone.w * W + 2 * grow, zh = zone.h * H + 2 * grow;
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><rect width="100%" height="100%" fill="black"/><rect x="${zx}" y="${zy}" width="${zw}" height="${zh}" rx="${feather}" fill="white"/></svg>`;
-  const mask = await sharp(Buffer.from(svg)).blur(feather / 2).greyscale().raw().toBuffer();
-  const rgb = await sharp(edited).resize(width, height, { fit: "fill" }).removeAlpha().raw().toBuffer();
+  const zoneMask = await sharp(Buffer.from(svg)).blur(feather / 2).greyscale().raw().toBuffer();
+
+  const orig = await sharp(original).removeAlpha().extract({ left, top, width, height }).raw().toBuffer();
+  const ed = await sharp(edited).resize(width, height, { fit: "fill" }).removeAlpha().raw().toBuffer();
+  const n = width * height;
+
+  // 1) Mise au ton : le modèle re-rend le recadrage avec une exposition / des couleurs légèrement différentes.
+  //    On compare l'anneau extérieur à la zone (censé rester identique) pour recaler l'ensemble du recadrage.
+  const sumO = [0, 0, 0], sumE = [0, 0, 0], sq = [0, 0, 0];
+  let cnt = 0;
+  for (let i = 0; i < n; i++) {
+    if (zoneMask[i] > 8) continue; // hors zone uniquement
+    for (let c = 0; c < 3; c++) { const o = orig[i * 3 + c], e = ed[i * 3 + c]; sumO[c] += o; sumE[c] += e; sq[c] += (o - e) * (o - e); }
+    cnt++;
+  }
+  const adj = new Float32Array(ed.length);
+  const off = [0, 0, 0];
+  if (cnt > n * 0.04) for (let c = 0; c < 3; c++) off[c] = Math.max(-40, Math.min(40, (sumO[c] - sumE[c]) / cnt));
+  for (let i = 0; i < ed.length; i++) adj[i] = Math.max(0, Math.min(255, ed[i] + off[i % 3]));
+
+  // 2) Masque des changements réels : on ne recolle que les pixels que le modèle a vraiment modifiés (objet ajouté, retiré, main…),
+  //    pas toute la zone. Le reste garde les pixels d'origine (netteté, grain et ton intacts), donc pas de « patch » rectangulaire.
+  const diff = Buffer.alloc(n);
+  for (let i = 0; i < n; i++) {
+    const d = Math.max(Math.abs(adj[i * 3] - orig[i * 3]), Math.abs(adj[i * 3 + 1] - orig[i * 3 + 1]), Math.abs(adj[i * 3 + 2] - orig[i * 3 + 2]));
+    diff[i] = d <= 12 ? 0 : d >= 30 ? 255 : Math.round(((d - 12) / 18) * 255);
+  }
+  // on regroupe (flou) puis on étend (gain) pour couvrir les bords de l'objet modifié, avec un dégradé doux
+  const grown = await sharp(diff, { raw: { width, height, channels: 1 } }).blur(Math.max(2, 0.008 * short)).linear(3, 0).blur(Math.max(1.5, 0.004 * short)).extractChannel(0).raw().toBuffer();
+  const mask = Buffer.alloc(n);
+  for (let i = 0; i < n; i++) mask[i] = Math.round((grown[i] * zoneMask[i]) / 255);
+
+  const rgb = Buffer.alloc(ed.length);
+  for (let i = 0; i < ed.length; i++) rgb[i] = Math.round(adj[i]);
   const patch = await sharp(rgb, { raw: { width, height, channels: 3 } })
     .joinChannel(mask, { raw: { width, height, channels: 1 } })
     .png().toBuffer();

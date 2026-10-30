@@ -456,7 +456,15 @@ function verdict(qc: QC, correction = false) {
     qc.realism_0_10 * 6 - wrong * 12 * w - unread * 3 * w - (qc.color_ok ? 0 : 20 * w) - (qc.shape_ok ? 0 : 15 * w) - (qc.foreign_logo ? 20 : 0)
     - (anatomyBad ? 15 * w : 0) - (qc.artifacts_ok === false ? 10 * w : 0) - (qc.face_matches_model === false ? 25 : 0) - (correction ? Math.max(0, 8 - (qc.edit_quality_0_10 ?? 8)) * 6 : 0) - (qc.matches_reference === false ? 30 : 0) - (qc.instruction_followed === false ? 40 : 0) - (qc.ghost_or_duplicate ? 20 : 0) - (unwanted ? 10 : 0) - (qc.skin_natural === false ? 15 : 0)
     - (qc.all_copies_exact === false ? 20 * w : 0) - (qc.label_orientation_ok === false ? 15 * w : 0) - (qc.proportion_ok ? 0 : 8) - (qc.angle_ok ? 0 : 5) + 40)));
-  return { verdict: (hard ? "rejected" : soft ? "review" : "valid") as ImageRow["verdict"], score };
+  let finalScore = score;
+  if (correction) {
+    // Pour une correction, le score mesure la RETOUCHE (réussite + qualité) ; les défauts hérités de l'image d'origine pèsent peu
+    const inherited = Math.min(12, (wrong > 0 ? 3 : 0) + (anatomyBad ? 3 : 0) + (!qc.color_ok ? 3 : 0) + (!qc.shape_ok ? 3 : 0) + (qc.all_copies_exact === false ? 3 : 0));
+    let sc = (qc.edit_quality_0_10 ?? 5) * 10 - (qc.ghost_or_duplicate ? 20 : 0) - (unwanted ? 10 : 0) - ((qc.sharpness_ratio ?? 1) < 0.8 ? 15 : 0) - (qc.matches_reference === false ? 30 : 0) - (deviant ? 10 : 0) - inherited;
+    if (qc.instruction_followed === false) sc = Math.min(sc, 30);
+    finalScore = Math.max(0, Math.min(100, Math.round(sc)));
+  }
+  return { verdict: (hard ? "rejected" : soft ? "review" : "valid") as ImageRow["verdict"], score: finalScore };
 }
 export const qualityCheck = async (sb: SupabaseClient, image: ImageRow) => {
   const { data: { user } } = await sb.auth.getUser();
