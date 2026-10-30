@@ -65,17 +65,9 @@ export async function pasteBack(original: Buffer, edited: Buffer, box: CropBox, 
   if (cnt > n * 0.04) for (let c = 0; c < 3; c++) off[c] = Math.max(-40, Math.min(40, (sumO[c] - sumE[c]) / cnt));
   for (let i = 0; i < ed.length; i++) adj[i] = Math.max(0, Math.min(255, ed[i] + off[i % 3]));
 
-  // 2) Masque des changements réels : on ne recolle que les pixels que le modèle a vraiment modifiés (objet ajouté, retiré, main…),
-  //    pas toute la zone. Le reste garde les pixels d'origine (netteté, grain et ton intacts), donc pas de « patch » rectangulaire.
-  const diff = Buffer.alloc(n);
-  for (let i = 0; i < n; i++) {
-    const d = Math.max(Math.abs(adj[i * 3] - orig[i * 3]), Math.abs(adj[i * 3 + 1] - orig[i * 3 + 1]), Math.abs(adj[i * 3 + 2] - orig[i * 3 + 2]));
-    diff[i] = d <= 12 ? 0 : d >= 30 ? 255 : Math.round(((d - 12) / 18) * 255);
-  }
-  // on regroupe (flou) puis on étend (gain) pour couvrir les bords de l'objet modifié, avec un dégradé doux
-  const grown = await sharp(diff, { raw: { width, height, channels: 1 } }).blur(Math.max(2, 0.008 * short)).linear(3, 0).blur(Math.max(1.5, 0.004 * short)).extractChannel(0).raw().toBuffer();
-  const mask = Buffer.alloc(n);
-  for (let i = 0; i < n; i++) mask[i] = Math.round((grown[i] * zoneMask[i]) / 255);
+  // 2) Collage de la zone retouchée avec bord adouci (le masque « pixels modifiés » a été retiré : un recadrage légèrement décalé par le modèle
+  //    produisait un visage dupliqué).
+  const mask = zoneMask;
 
   const rgb = Buffer.alloc(ed.length);
   for (let i = 0; i < ed.length; i++) rgb[i] = Math.round(adj[i]);
