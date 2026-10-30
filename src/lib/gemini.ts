@@ -1,6 +1,7 @@
 // Appels Gemini — à n'importer que depuis du code serveur (routes API).
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import sharp from "sharp";
 export const MODELS = {
   flash: "gemini-3.1-flash-image",
   pro: "gemini-3-pro-image",
@@ -35,7 +36,7 @@ function estimateEur(model: string, size: string | undefined, usage: any, images
   else usd += (((usage?.candidatesTokenCount ?? 0) + (usage?.thoughtsTokenCount ?? 0)) * pout) / 1e6;
   return Math.round(usd * USD_EUR * 10000) / 10000;
 }
-async function logCall(row: { purpose: string; model: string; status: string; http?: number; ms: number; usage?: any; imagesOut?: number; size?: string; note?: string }) {
+async function logCall(row: { purpose: string; model: string; status: string; http?: number; ms: number; usage?: any; imagesOut?: number; size?: string; note?: string; cost?: number }) {
   const c = als.getStore();
   if (!c) return;
   try {
@@ -44,15 +45,87 @@ async function logCall(row: { purpose: string; model: string; status: string; ht
       purpose: row.purpose, model: row.model, status: row.status, http_status: row.http ?? null, duration_ms: row.ms,
       input_tokens: row.usage?.promptTokenCount ?? null, output_tokens: row.usage?.candidatesTokenCount ?? null,
       images_out: row.imagesOut ?? 0, size: row.size ?? null,
-      cost_eur: row.status === "ok" ? estimateEur(row.model, row.size, row.usage, row.imagesOut ?? 0) : 0,
+      cost_eur: row.status === "ok" ? (row.cost ?? estimateEur(row.model, row.size, row.usage, row.imagesOut ?? 0)) : 0,
       note: row.note?.slice(0, 200) ?? null,
     });
   } catch { /* le journal ne doit jamais bloquer une génération */ }
 }
 
+// ---------- OpenAI (moteur d'image au choix) ----------
+const OPENAI_EUR_PER_IMAGE = 0.2; // estimation : à comparer avec la facture OpenAI
+let openaiModel: { name: string; at: number } | null = null;
+
+/** Modèle d'image OpenAI le plus récent disponible sur le compte (sauf OPENAI_IMAGE_MODEL). */
+export async function resolveOpenAIModel(key: string): Promise<string> {
+  if (process.env.OPENAI_IMAGE_MODEL) return process.env.OPENAI_IMAGE_MODEL;
+  if (openaiModel && Date.now() - openaiModel.at < 3600_000) return openaiModel.name;
+  const res = await fetch("https://api.openai.com/v1/models", { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(20_000) });
+  const j = await res.json();
+  if (!res.ok) throw new Error(`OpenAI ${res.status}: ${JSON.stringify(j).slice(0, 200)}`);
+  const ids: string[] = (j.data ?? []).map((m: { id: string }) => m.id);
+  const ver = (id: string) => (id.match(/(\d+(?:\.\d+)?)/)?.[1] ?? "0").split(".").map(Number).reduce((a, n, i) => a + n / 10 ** (i * 2), 0);
+  const cands = ids.filter((id) => /^gpt-image/i.test(id) && !/mini/i.test(id) && !/\d{4}-\d{2}-\d{2}/.test(id)).sort((a, b) => ver(b) - ver(a));
+  if (!cands.length) throw new Error("Aucun modèle d'image OpenAI disponible sur ce compte");
+  openaiModel = { name: cands[0], at: Date.now() };
+  return cands[0];
+}
+
+async function fitAspect(buf: Buffer, aspect?: string) {
+  if (!aspect) return buf;
+  const [aw, ah] = aspect.split(":").map(Number);
+  if (!aw || !ah) return buf;
+  const m = await sharp(buf).metadata();
+  const w = m.width ?? 0, h = m.height ?? 0;
+  if (!w || !h) return buf;
+  const target = aw / ah;
+  let cw = w, ch = h;
+  if (w / h > target) cw = Math.round(h * target); else ch = Math.round(w / target);
+  return sharp(buf).extract({ left: Math.floor((w - cw) / 2), top: Math.floor((h - ch) / 2), width: cw, height: ch }).png().toBuffer();
+}
+
+/** Appel OpenAI (édition d'image avec références) ; renvoie une réponse au format Gemini pour que le reste du code ne change pas. */
+async function callOpenAI(model: string, parts: Part[], o: { purpose?: string; aspect?: string; timeoutMs?: number; signal?: AbortSignal }) {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) throw new Error("OPENAI_API_KEY manquante côté serveur");
+  const name = model === "openai:auto" ? await resolveOpenAIModel(key) : model.slice(7);
+  const prompt = parts.filter((p): p is { text: string } => "text" in p).map((p) => p.text).join("\n\n");
+  const imgs = parts.filter((p): p is { inline_data: { mime_type: string; data: string } } => "inline_data" in p).slice(0, 16);
+  const [aw, ah] = (o.aspect ?? "1:1").split(":").map(Number);
+  const r = aw && ah ? aw / ah : 1;
+  const size = r > 1.2 ? "1536x1024" : r < 0.83 ? "1024x1536" : "1024x1024";
+  let lastErr: Error = new Error("Erreur OpenAI");
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const t0 = Date.now();
+    const fd = new FormData();
+    fd.append("model", name); fd.append("prompt", prompt); fd.append("size", size); fd.append("quality", "high"); fd.append("n", "1");
+    imgs.forEach((p, k) => fd.append("image[]", new Blob([new Uint8Array(Buffer.from(p.inline_data.data, "base64"))], { type: p.inline_data.mime_type }), `ref${k}.${p.inline_data.mime_type.includes("png") ? "png" : "jpg"}`));
+    let res: Response;
+    try {
+      res = await fetch("https://api.openai.com/v1/images/edits", { method: "POST", headers: { Authorization: `Bearer ${key}` }, body: fd, signal: o.signal ? AbortSignal.any([o.signal, AbortSignal.timeout(o.timeoutMs ?? 240_000)]) : AbortSignal.timeout(o.timeoutMs ?? 240_000) });
+    } catch (e) {
+      await logCall({ purpose: o.purpose ?? "autre", model: name, status: "timeout", ms: Date.now() - t0, note: e instanceof Error ? e.message : "" });
+      throw e;
+    }
+    const j = await res.json().catch(() => ({}));
+    if (res.ok) {
+      const b64: string | undefined = j.data?.[0]?.b64_json;
+      if (!b64) { await logCall({ purpose: o.purpose ?? "autre", model: name, status: "ok", ms: Date.now() - t0, imagesOut: 0, note: "réponse sans image" }); return { candidates: [{ content: { parts: [] } }] }; }
+      const out = await fitAspect(Buffer.from(b64, "base64"), o.aspect);
+      await logCall({ purpose: o.purpose ?? "autre", model: name, status: "ok", ms: Date.now() - t0, imagesOut: 1, size, cost: OPENAI_EUR_PER_IMAGE });
+      return { candidates: [{ content: { parts: [{ inlineData: { mime_type: "image/png", data: out.toString("base64") } }] } }] };
+    }
+    await logCall({ purpose: o.purpose ?? "autre", model: name, status: "error", http: res.status, ms: Date.now() - t0, note: JSON.stringify(j).slice(0, 150) });
+    lastErr = new Error(`OpenAI ${res.status}: ${JSON.stringify(j).slice(0, 300)}`);
+    if (![429, 500, 502, 503, 504].includes(res.status)) throw lastErr;
+    await new Promise((r2) => setTimeout(r2, 2000 * (attempt + 1)));
+  }
+  throw lastErr;
+}
+
 interface Opts { purpose?: string; image?: boolean; json?: boolean; aspect?: string; size?: string; timeoutMs?: number; signal?: AbortSignal }
 
 export async function gemini(model: string, parts: Part[], { purpose, image, json, aspect, size, timeoutMs, signal }: Opts = {}) {
+  if (model.startsWith("openai:")) return callOpenAI(model, parts, { purpose, aspect, timeoutMs, signal });
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new Error("GEMINI_API_KEY manquante côté serveur");
   const generationConfig: Record<string, unknown> = image

@@ -259,9 +259,9 @@ export default function NewShootForm(p: Props) {
           <div>
             <Label>Moteur</Label>
             <select className={INPUT} value={engine} onChange={(e) => setEngine(e.target.value)}>
-              <option value="pro">Qualité max (conseillé)</option>
-              <option value="mix">Mix</option>
-              <option value="flash">Rapide</option>
+              <option value="pro">Gemini — qualité max (≈ 0,13 € / image)</option>
+              <option value="openai">OpenAI — meilleur modèle (≈ 0,20 € / image)</option>
+              <option value="flash">Gemini — rapide</option>
             </select>
           </div>
           <div>

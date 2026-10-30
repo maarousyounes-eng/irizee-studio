@@ -33,7 +33,7 @@ export async function POST(req: Request) {
     const { data: shoot, error } = await sb.from("shoots").insert({
       project_id: b.projectId || null, product_id: productIds[0], product_ids: productIds.length > 1 ? productIds : null, product_mode: productIds.length > 1 ? (["together", "split", "mix"].includes(b.productMode) ? b.productMode : "mix") : null, model_id: modelIds[0] ?? null, model_ids: modelIds, concept_id: b.conceptId || null,
       prompt: String(b.prompt).trim(), aspect: b.aspect, size: ["1K", "2K", "4K"].includes(b.size) ? b.size : "2K",
-      engine: ["flash", "pro", "mix"].includes(b.engine) ? b.engine : "mix", no_people: !!b.noPeople,
+      engine: ["flash", "pro", "mix", "openai"].includes(b.engine) ? b.engine : "pro", no_people: !!b.noPeople,
       inspiration_paths: paths, analysis, created_by: user.id,
     }).select("id").single();
     if (error || !shoot) throw new HttpError(400, error?.message ?? "Création impossible");

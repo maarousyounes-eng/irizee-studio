@@ -225,7 +225,7 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
   let skipChangeCheck = false; // réparation d'étiquette : le texte ne change que quelques pixels, c'est normal
 
   if (image.kind === "generated") {
-    model = shoot.engine === "pro" ? MODELS.pro : shoot.engine === "flash" ? MODELS.flash : (image.variant_index % 2 === 0 ? MODELS.flash : MODELS.pro);
+    model = shoot.engine === "openai" ? "openai:auto" : shoot.engine === "pro" ? MODELS.pro : shoot.engine === "flash" ? MODELS.flash : (image.variant_index % 2 === 0 ? MODELS.flash : MODELS.pro);
     // Une inspiration par variante : l'image i suit SON inspiration (pose, cadrage, lumière, style) ; elles tournent s'il y a plus de variantes que d'inspirations.
     const allInsp = shoot.inspiration_paths as string[];
     const pick = allInsp.length > 1 ? Math.floor(image.variant_index / plan.slots) % allInsp.length : 0; // avec plusieurs produits, chaque inspiration sert à chaque cas (chaque produit seul, tous ensemble)
