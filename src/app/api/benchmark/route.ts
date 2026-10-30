@@ -6,6 +6,19 @@ import { buildPrompt, variationHint } from "@/lib/prompts";
 
 export const maxDuration = 300;
 
+/** Choisit le meilleur modèle d'image Gemini disponible : la plus haute version de la famille « pro », sinon la plus haute version d'un modèle d'image. */
+async function pickGeminiModel(): Promise<string> {
+  try {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=200`, { headers: { "x-goog-api-key": process.env.GEMINI_API_KEY ?? "" }, signal: AbortSignal.timeout(20_000) });
+    const j = await res.json();
+    const names: string[] = (j.models ?? []).filter((m: { supportedGenerationMethods?: string[] }) => (m.supportedGenerationMethods ?? []).includes("generateContent")).map((m: { name: string }) => m.name.replace(/^models\//, "")).filter((n: string) => /image/i.test(n));
+    const ver = (id: string) => (id.match(/(\d+(?:\.\d+)?)/)?.[1] ?? "0").split(".").map(Number).reduce((a, n, i) => a + n / 10 ** (i * 2), 0);
+    const pro = names.filter((n) => /pro/i.test(n)).sort((a, b) => ver(b) - ver(a));
+    const any = names.sort((a, b) => ver(b) - ver(a));
+    return pro[0] ?? any[0] ?? MODELS.pro;
+  } catch { return MODELS.pro; }
+}
+
 /** Choisit le modèle d'image OpenAI le plus récent disponible sur ce compte (sauf si OPENAI_IMAGE_MODEL est fixé). */
 async function pickOpenAIModel(key: string): Promise<string> {
   if (process.env.OPENAI_IMAGE_MODEL) return process.env.OPENAI_IMAGE_MODEL;
@@ -41,6 +54,7 @@ export async function POST(req: Request) {
     if (!openaiKey) throw new HttpError(400, "La clé OpenAI n'est pas configurée : ajoute la variable OPENAI_API_KEY dans Vercel (Settings > Environment Variables), puis redéploie.");
 
     const OPENAI_MODEL = await pickOpenAIModel(openaiKey);
+    const GEMINI_MODEL = await pickGeminiModel();
     const { product, imagePaths } = await loadProduct(sb, shoot.product_id);
     const rules = await brandRules(sb);
     const packshots = await Promise.all(imagePaths.map((p) => download(sb, p)));
@@ -70,7 +84,7 @@ export async function POST(req: Request) {
           let out: Buffer | null = null;
           if (provider === "gemini") {
             const parts: Part[] = [{ text: prompt }, ...refs.map((r) => imgPart(r.buf, r.mime))];
-            out = firstImage(await gemini(MODELS.pro, parts, { purpose: "comparatif", image: true, aspect, size: shoot.size }));
+            out = firstImage(await gemini(GEMINI_MODEL, parts, { purpose: "comparatif", image: true, aspect, size: shoot.size }));
           } else {
             const fd = new FormData();
             fd.append("model", OPENAI_MODEL);
@@ -91,9 +105,9 @@ export async function POST(req: Request) {
           const path = `generated/benchmark/${crypto.randomUUID()}.jpg`;
           const up = await sb.storage.from("studio").upload(path, jpg, { contentType: "image/jpeg" });
           if (up.error) throw new Error(up.error.message);
-          results.push({ provider: provider === "gemini" ? MODELS.pro : OPENAI_MODEL, path, ms: Date.now() - t0 });
+          results.push({ provider: provider === "gemini" ? GEMINI_MODEL : OPENAI_MODEL, path, ms: Date.now() - t0 });
         } catch (e) {
-          results.push({ provider: provider === "gemini" ? MODELS.pro : OPENAI_MODEL, path: "", ms: Date.now() - t0, error: e instanceof Error ? e.message.slice(0, 200) : "Erreur" });
+          results.push({ provider: provider === "gemini" ? GEMINI_MODEL : OPENAI_MODEL, path: "", ms: Date.now() - t0, error: e instanceof Error ? e.message.slice(0, 200) : "Erreur" });
         }
       }));
     });
