@@ -34,56 +34,46 @@ export function buildPrompt(a: {
   product: Product; rules: string[]; userPrompt: string; aspect: string; analysis: string;
   others?: { product: Product; n: number }[]; variation: string; nProductImages: number; hasModelRef: boolean; modelDescription?: string; noPeople: boolean;
 }) {
-  const all = numbered([...a.rules, ...(a.product.rules ?? [])]);
-  const people = a.noPeople
+  // Version courte et cohérente : chaque consigne n'apparaît qu'une fois, sans ordres contradictoires.
+  const oth = a.others ?? [];
+  const products = [a.product, ...oth.map((o) => o.product)];
+  const productBlock = (p: Product) => [
+    `"${p.name}"${p.look ? `: ${p.look}` : ""}`,
+    p.real_size ? `Real size: ${p.real_size.replace(/\n/g, ", ")}.` : "",
+    p.texts?.length ? `Printed texts, spelled exactly:\n${textsBlock(p)}` : "",
+  ].filter(Boolean).join("\n");
+  const roles = [
+    (a.nProductImages > 1 ? `Images 1 to ${a.nProductImages}: packshots` : "Image 1: packshot") + ` of the real product "${a.product.name}".`,
+    ...oth.map((o) => `Next ${o.n} image(s): packshot of the real product "${o.product.name}".`),
+    a.hasModelRef ? "Next image: the MODEL REFERENCE (the person to show)." : "",
+    "Last image(s): the STYLE REFERENCE.",
+  ].filter(Boolean).join(" ");
+  const person = a.noPeople
     ? "There is no person in the image."
     : a.hasModelRef
-      ? `The person in the photo MUST be exactly the same fictional person as in the MODEL REFERENCE image: reproduce that exact face (face shape, eyes, eyebrows, nose, lips, freckles and marks), the same skin tone, age impression and hair colour${a.modelDescription ? `. Description: ${a.modelDescription}` : ""}. Hair color, hairstyle and skin tone are those of the MODEL REFERENCE, not of the style reference. Only the outfit, pose and expression come from the brief. Never use the person from the style reference images: the face must be recognizably the MODEL REFERENCE person in every image of the series.`
-      : a.variation;
-  // Le nombre de produits suit l'inspiration (un produit héros, ou plusieurs copies), sauf consigne contraire du client.
-  const copiesSingle =
-    "PRODUCT ARRANGEMENT: reproduce the arrangement of the product(s) seen in the inspiration (a single hero product, or several repeated / floating copies at different scales), unless the client brief says otherwise. " +
-    "EVERY copy of the product, even small, blurred or in the background, must be an exact replica of the real packshot: same proportions, same label layout, same text direction along the product, same cap and colors. Never invent a different product shape and never add look-alike products that are not the packshot.";
-  const oth = a.others ?? [];
-  const copies = oth.length
-    ? `PRODUCT ARRANGEMENT: the photo must show ALL ${1 + oth.length} different products together (${[a.product, ...oth.map((o) => o.product)].map((x) => `"${x.name}"`).join(", ")}), arranged the way the style reference arranges its products (held, lined up or grouped), each at its correct relative real-world size, each clearly visible with its label facing the camera. Each product must be an exact replica of its OWN packshot: never merge, swap, duplicate or redesign them, and never invent a product that is not listed.`
-    : copiesSingle;
-  const othersBlock = oth.map((o) => [
-    `Another product to show: "${o.product.name}".`,
-    o.product.look ? `Its appearance: ${o.product.look}` : "",
-    o.product.real_size ? `Its real-world size: ${o.product.real_size.replace(/\n/g, ", ")}.` : "",
-    o.product.texts?.length ? `Exact printed texts on it:\n${textsBlock(o.product)}` : "",
-  ].filter(Boolean).join("\n")).join("\n\n");
+      ? `PERSON: exactly the person of the MODEL REFERENCE (same face, skin tone, hair colour and hairstyle)${a.modelDescription ? `: ${a.modelDescription}` : ""}. Take only the pose, gesture and expression from the style reference, never the face or hair of the person shown there.`
+      : `PERSON: ${a.variation}`;
   return [
-    "You are a world-class advertising photographer producing a photorealistic campaign photo for the cosmetics brand Irizée.",
-    `The FIRST ${a.nProductImages} image(s) are the REAL product reference photos (packshots) of "${a.product.name}".` +
-      (oth.length ? ` Then, in this order: ${oth.map((o) => `${o.n} packshot image(s) of "${o.product.name}"`).join("; ")}.` : "") +
-      (a.hasModelRef ? " The next image is the MODEL REFERENCE (face sheet of a fictional model)." : "") +
-      (a.hasModelRef
-        ? " The remaining image(s) are the STYLE REFERENCE: reproduce ONLY its pose, framing, lens, lighting, color grading and mood. The person shown in the style reference must NOT be reproduced in any way: NOT her face, NOT her hair color or hairstyle, NOT her skin tone. The person in your photo is the one from the MODEL REFERENCE, with her exact face, hair and skin tone."
-        : " The remaining image(s) are the STYLE REFERENCE: reproduce its pose, framing, lens, lighting, color grading, makeup and styling mood faithfully. Only the person's identity and the product are different (the person must be a different fictional person, the product is the real packshot)."),
+    "Create a photorealistic high-end advertising photo for the cosmetics brand Irizée.",
+    roles,
     "",
-    "NON-NEGOTIABLE RULES (apply to every image):",
-    all,
+    "BRAND RULES:", numbered([...a.rules, ...products.flatMap((p) => p.rules ?? [])]),
     "",
-    a.product.look ? `Product appearance: ${a.product.look}` : "",
-    a.product.real_size ? `Real-world size: ${a.product.real_size}. Keep this exact scale versus hands and body: a hand-held product of this size is only about as long as the model's hand (palm and fingers), never oversized, never giant.` : "",
-    a.product.texts?.length ? `Exact printed texts on the product (must be legible and spelled exactly like this):\n${textsBlock(a.product)}` : "",
+    `PRODUCT${products.length > 1 ? "S (all of them appear together, each one a faithful copy of its own packshot)" : ""}:`,
+    products.map(productBlock).join("\n\n"),
+    "The product is an exact copy of its packshot: same silhouette, proportions, cap, material, colours, label layout and text direction. Products visible in the style reference belong to other brands: take their place and position, never their design.",
     "",
-    othersBlock,
+    "STYLE: reproduce the style reference: composition, camera angle and lens, pose, lighting, colour palette, background, mood, and the way the product is placed (held, floating, number of copies), at a realistic scale for the product.",
+    a.analysis ? `Description of the style reference:\n${a.analysis}` : "",
     "",
-    a.analysis ? `Analysis of the style reference photo (reproduce this concept, composition and style, not the identity):\n${a.analysis}` : "",
-    "PRODUCT SCALE: it is a small cosmetic tube. It must look exactly as big as the object held in the style reference relative to the person (never bigger), and never exceed its real size: when held near the face it stays about a hand's length and must not cover the lower face or dominate the frame. The person remains the main subject; the product is a precise, discreet accessory unless the client brief asks otherwise.",
+    `CLIENT BRIEF (priority over the style reference when they differ): ${a.userPrompt}`,
     "",
-    copies,
-    "PRODUCT LOCK: any product, bottle, dropper, pipette, cap or packaging visible in the style reference belongs to ANOTHER brand. Never copy its shape, glass, neck, collar, cap, pipette, colors or label. Replace it entirely by the real packshot product, with its exact silhouette, cap, neck, collar, pipette and colors. Never invent a new product design.",
-    "PRODUCT FIDELITY: the product must be a pixel-faithful copy of the packshot: same silhouette and proportions, same cap, same finish and colors, same label layout, and the same direction of the printed text (if the text runs along the length of the product, it must keep running along the length, never rotated across it). Never redesign, restyle or reinterpret the product.",
-    `Client brief: ${a.userPrompt}`,
-    people,
+    person,
+    a.noPeople ? "" : "Hands are anatomically correct: five fingers per hand, natural joints and a firm, plausible grip on the product.",
     "",
     REALISM,
-    `Output format: aspect ratio ${a.aspect}. Sharp, professional lighting, no watermark, no added text or captions.`,
-  ].filter(Boolean).join("\n");
+    `Format: aspect ratio ${a.aspect}. No watermark, no added text.`,
+  ].filter((l, i, arr) => l !== "" || arr[i - 1] !== "").join("\n");
 }
 
 const originalNote = "The image after Image 1 is the ORIGINAL version of this photo before earlier corrections: use it to restore any element the client says has disappeared or changed by mistake, copying it exactly as it was.";
