@@ -217,3 +217,20 @@ export const READ_LABEL_PROMPT =
 
 export const LOCATE_PRODUCT_PROMPT =
   'Find the largest, most prominent cosmetic product (tube, bottle) in this advertising photo. Return JSON only: {"box": [ymin, xmin, ymax, xmax]} with integer coordinates from 0 to 1000 relative to the image, covering the whole product including its cap.';
+
+/** Textes publicitaires : plusieurs angles, longueurs adaptées à Meta, TikTok et Google. */
+export function adCopyPrompt(a: { product: Product; rules: string[]; idea: string; n: number; hasImage: boolean }) {
+  return [
+    "You are a senior performance copywriter for the French cosmetics brand Irizée. Write ad copy IN FRENCH for Meta (Instagram/Facebook), TikTok and Google.",
+    a.hasImage ? "The attached image is the visual that will be used for the ad: write copy that matches it." : "",
+    `Product: "${a.product.name}".`,
+    a.product.texts?.length ? `Facts printed on the product (the ONLY product facts you may use): ${a.product.texts.join(" | ")}` : "",
+    a.rules.length ? `Brand rules (mandatory):\n${a.rules.map((r, i) => `${i + 1}. ${r}`).join("\n")}` : "",
+    `Client's idea for this ad: "${a.idea}"`,
+    "COMPLIANCE (mandatory): no medical or therapeutic claims, no guaranteed results, no before/after promises, no body shaming. NEVER invent a price, a discount, a promo code, a number of customers, a rating, an ingredient, a percentage or a customer review: use them only if the client's idea gives them, word for word. If the idea contains a customer review, put it verbatim in quote (and the author if given), otherwise quote and quote_author are empty strings. badge is a very short sticker text (max 12 characters, e.g. \"-20 %\", \"Nouveau\") ONLY if the idea mentions a promo or a launch, otherwise an empty string.",
+    `Write ${a.n} DIFFERENT angles (for example: benefit, emotion/self-care, routine, social proof only if given, offer only if given, curiosity).`,
+    "Length limits (hard): hook ≤ 45 characters (big text on the image, punchy, no hashtags); headline ≤ 40; primary_text ≤ 300 with the key message in the first 125 characters, may include 1–2 emojis; bullets: exactly 3 short benefits ≤ 32 characters each, taken from the product facts; tiktok_caption ≤ 100 characters with 2–3 relevant hashtags; google.headlines: 5 different headlines ≤ 30 characters; google.long_headline ≤ 90; google.descriptions: 2 descriptions ≤ 90.",
+    'cta is one of: "Découvrir", "Acheter", "Commander", "En savoir plus", "Essayer".',
+    'Return JSON only: {"angles":[{"name":str (2-4 words in French describing the angle),"hook":str,"headline":str,"primary_text":str,"cta":str,"badge":str,"bullets":[str,str,str],"quote":str,"quote_author":str,"tiktok_caption":str,"google":{"headlines":[str,str,str,str,str],"long_headline":str,"descriptions":[str,str]}}]}',
+  ].filter(Boolean).join("\n");
+}
