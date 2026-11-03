@@ -37,6 +37,8 @@ export default function AdEditor({ initial, productName, isAdmin }: { initial: A
   }, [ad, sb]);
 
   const t = ad.texts;
+  // Code à mettre dans le nom de la pub sur Meta : relie ce visuel à ses résultats dans Irizée Brand
+  const code = `IZ-${ad.id.replace(/-/g, "").slice(0, 6).toUpperCase()}`;
   const setT = (patch: Partial<AdTexts>) => setAd((a) => ({ ...a, texts: { ...a.texts, ...patch } }));
   const setG = (patch: Partial<AdTexts["google"]>) => setAd((a) => ({ ...a, texts: { ...a.texts, google: { ...a.texts.google, ...patch } } }));
   const look = useMemo(() => ({ texts: t, template: ad.template, fonts: ad.fonts, palette: ad.palette, focus: ad.focus, src: ad.source_path }), [t, ad.template, ad.fonts, ad.palette, ad.focus, ad.source_path]);
@@ -69,6 +71,7 @@ export default function AdEditor({ initial, productName, isAdmin }: { initial: A
     const g = t.google;
     return [
       `Pub Irizée — ${productName}`, `Idée : ${ad.idea}`, "",
+      `NOM DE LA PUB À UTILISER DANS META (pour le suivi dans Irizée Brand) : ${code} — ${t.hook || t.headline}`, "",
       "=== META (Instagram / Facebook) ===", `Texte principal : ${t.primary_text}`, `Titre : ${t.headline}`, `Bouton : ${t.cta}`, "",
       "=== TIKTOK ===", `Légende : ${t.tiktok_caption}`, "",
       "=== GOOGLE ===", ...g.headlines.map((h, i) => `Titre ${i + 1} : ${h}`), `Titre long : ${g.long_headline}`, ...g.descriptions.map((d, i) => `Description ${i + 1} : ${d}`),
@@ -79,7 +82,7 @@ export default function AdEditor({ initial, productName, isAdmin }: { initial: A
     setBusy(f.key);
     try {
       const url = await renderPng(f);
-      const a = document.createElement("a"); a.href = url; a.download = `irizee-ad-${f.key}.png`; a.click();
+      const a = document.createElement("a"); a.href = url; a.download = `${code}-${f.key}.png`; a.click();
     } catch (e) { setMsg(e instanceof Error ? e.message : "Export impossible"); }
     setBusy(null);
   }
@@ -92,11 +95,11 @@ export default function AdEditor({ initial, productName, isAdmin }: { initial: A
       for (const ex of EXPORTS) {
         const f = AD_FORMATS.find((x) => x.key === ex.format)!;
         cache[f.key] ??= await renderPng(f);
-        zip.file(ex.file, cache[f.key].split(",")[1], { base64: true });
+        zip.file(ex.file.replace(/([^/]+)$/, `${code}-$1`), cache[f.key].split(",")[1], { base64: true });
       }
       zip.file("textes.txt", textFile());
       const blob = await zip.generateAsync({ type: "blob" });
-      const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `irizee-ads-${productName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.zip`; a.click();
+      const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `${code}-${productName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.zip`; a.click();
     } catch (e) { setMsg(e instanceof Error ? e.message : "Export impossible"); }
     setBusy(null);
   }
@@ -115,6 +118,7 @@ export default function AdEditor({ initial, productName, isAdmin }: { initial: A
           <Link href="/ads" className="text-xs text-[#6B6B72] hover:text-[#0A0A0B]">← Toutes les pubs</Link>
           <Badge tone={STATUS[ad.review_status].tone}>{STATUS[ad.review_status].label}</Badge>
           <span className="text-[11px] text-[#A0A0A8]">{saved ? "Enregistré" : "Enregistrement…"}</span>
+          <button type="button" onClick={() => { navigator.clipboard?.writeText(code); setMsg(`Code ${code} copié : mets-le dans le nom de la pub sur Meta pour suivre ses résultats dans Irizée Brand.`); }} title="Copier le code de suivi" className="text-[11px] font-semibold rounded-full bg-[#EBF2FF] text-[#2B6EE8] px-2 py-0.5">{code}</button>
         </div>
         <div className="flex flex-wrap gap-2">
           {ad.review_status === "draft" && <Btn size="sm" variant="soft" onClick={() => setAd((a) => ({ ...a, review_status: "pending" }))}><Send size={12} /> Soumettre à validation</Btn>}
