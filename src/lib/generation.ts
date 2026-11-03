@@ -452,7 +452,7 @@ function verdict(qc: QC, correction = false) {
   // texte du produit faux, main déformée ailleurs, etc. passent en « à vérifier » (le bouton Étiquette sert à les réparer).
   const hard = correction
     ? qc.instruction_followed === false || qc.ghost_or_duplicate === true || qc.foreign_logo || qc.matches_reference === false || (qc.edit_quality_0_10 ?? 10) < 5
-    : deviant || wrong > 0 || qc.instruction_followed === false || qc.ghost_or_duplicate === true || qc.all_copies_exact === false || qc.label_orientation_ok === false || !qc.color_ok || !qc.shape_ok || qc.foreign_logo || anatomyBad;
+    : deviant || wrong > 0 || qc.added_text === true || (!!qc.expected_count && !!qc.product_count && qc.product_count !== qc.expected_count) || qc.instruction_followed === false || qc.ghost_or_duplicate === true || qc.all_copies_exact === false || qc.label_orientation_ok === false || !qc.color_ok || !qc.shape_ok || qc.foreign_logo || anatomyBad;
   const soft = unwanted || (correction && (qc.sharpness_ratio ?? 1) < 0.8) || (correction && (deviant || (qc.edit_quality_0_10 ?? 10) < 8 || wrong > 0 || qc.all_copies_exact === false || anatomyBad || !qc.color_ok || !qc.shape_ok || qc.label_orientation_ok === false))
     || qc.skin_natural === false || unread > 1 || !qc.proportion_ok || !qc.angle_ok || (qc.product_height_pct ?? 100) < 8 || qc.realism_0_10 < 6;
   const w = correction ? 0.25 : 1; // poids des défauts hérités dans le score d'une correction
@@ -509,6 +509,7 @@ async function qualityCheckInner(sb: SupabaseClient, image: ImageRow) {
   catch { r = await gemini(MODELS.text, qcParts, { purpose: "contrôle qualité (secours)", json: true, timeoutMs: 35_000 }); } // modèle plus rapide si le premier est trop lent
   const qc = parseJson<QC>(firstText(r));
   qc.texts = qc.texts ?? [];
+  if (!noProduct && qcOthers.length) qc.expected_count = 1 + qcOthers.length; // plusieurs produits ensemble : un de chaque, pas plus
   if (noProduct) Object.assign(qc, { texts: [], color_ok: true, shape_ok: true, all_copies_exact: true, label_orientation_ok: true, product_height_pct: 100, hero_foreground: true, proportion_ok: true, angle_ok: true });
   if (before) {
     try { const [a, b] = await Promise.all([sharpness(before.buf), sharpness(gen.buf)]); if (a > 0) qc.sharpness_ratio = Math.round((b / a) * 100) / 100; } catch { /* mesure facultative */ }
