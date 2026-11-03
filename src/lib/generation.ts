@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { MODELS, gemini, imgPart, firstImage, firstText, noImageReason, parseJson, withAiCtx, type Part } from "./gemini";
 import sharp from "sharp";
-import { buildPrompt, correctionPrompt, sizeLine, formatPrompt, interpretPrompt, localEditPrompt, LOCATE_PRODUCT_PROMPT, READ_LABEL_PROMPT, qcPrompt, variationHint } from "./prompts";
+import { buildPrompt, correctionPrompt, qcPromptNoProduct, sizeLine, formatPrompt, interpretPrompt, localEditPrompt, LOCATE_PRODUCT_PROMPT, READ_LABEL_PROMPT, qcPrompt, variationHint } from "./prompts";
 import { cropBoxFor, cropImage, pasteBack, unionZones, zoneFromBox, zonesFromBoxes, type CropBox, type Zone } from "./localedit";
 import type { ImageRow, Product, QC } from "@/types";
 
@@ -208,10 +208,14 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
   const { data: shoot } = await sb.from("shoots").select("*").eq("id", image.shoot_id).single();
   if (!shoot) throw new Error("Shooting introuvable");
   const plan = productPlan(shoot, image);
-  const { product, imagePaths } = await loadProduct(sb, plan.mainId);
+  const noProduct = !!shoot.no_product;
+  const loaded = await loadProduct(sb, plan.mainId);
+  // Image sans produit : aucun packshot, aucune consigne produit (sinon le modèle l'ajouterait)
+  const product: Product = noProduct ? { ...loaded.product, texts: [], look: "", real_size: "", rules: ["There is NO product in this image: never add any bottle, tube, jar, packaging, brand name or logo."] } : loaded.product;
+  const imagePaths = noProduct ? [] : loaded.imagePaths;
   const rules = await brandRules(sb);
   // Plusieurs produits dans la même photo : on charge aussi les autres produits (un packshot chacun)
-  const otherIds = plan.otherIds;
+  const otherIds = noProduct ? [] : plan.otherIds;
   const others: { product: Product; paths: string[] }[] = [];
   for (const oid of otherIds) { try { const o = await loadProduct(sb, oid); others.push({ product: o.product, paths: o.imagePaths }); } catch { /* produit supprimé : ignoré */ } }
   const packshots = await Promise.all([...imagePaths, ...others.map((o) => o.paths[0])].map((p) => download(sb, p)));
@@ -242,7 +246,7 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
     const prompt = buildPrompt({
       product, rules, userPrompt: shoot.prompt, aspect, analysis: analysisFor,
       others: others.map((o) => ({ product: o.product, n: 1 })), variation: variationHint(image.variant_index, shoot.no_people), nProductImages: imagePaths.length,
-      hasModelRef: !!modelRef, modelDescription, noPeople: shoot.no_people,
+      hasModelRef: !!modelRef, modelDescription, noPeople: shoot.no_people, noProduct,
     });
     nInsp = inspirations.length;
     parts = [{ text: prompt }, ...packshots.map((p) => imgPart(p.buf, p.mime)), ...(modelRef ? [imgPart(modelRef.buf, modelRef.mime)] : []), ...inspirations.map((p) => imgPart(p.buf, p.mime))];
@@ -473,7 +477,7 @@ export const qualityCheck = async (sb: SupabaseClient, image: ImageRow) => {
 
 async function qualityCheckInner(sb: SupabaseClient, image: ImageRow) {
   if (!image.path) throw new Error("Pas d'image à contrôler");
-  const { data: shoot } = await sb.from("shoots").select("product_id, product_ids, product_mode, no_people").eq("id", image.shoot_id).single();
+  const { data: shoot } = await sb.from("shoots").select("product_id, product_ids, product_mode, no_people, no_product").eq("id", image.shoot_id).single();
   const qPlan = productPlan(shoot!, image);
   const { product, imagePaths } = await loadProduct(sb, qPlan.mainId);
   const pack = await download(sb, imagePaths[0]);
@@ -496,12 +500,16 @@ async function qualityCheckInner(sb: SupabaseClient, image: ImageRow) {
     if (par?.path) before = await download(sb, par.path);
   }
   const qcRefs = before ? (await Promise.all((((image.params as any)?.refs as string[] | undefined) ?? []).slice(0, 3).map((p) => download(sb, p).catch(() => null)))).filter(Boolean) as { buf: Buffer; mime: string }[] : [];
-  const qcParts = [{ text: qcPrompt(product, before ? { instruction: instr!, refCount: qcRefs.length } : undefined, { modelRef: !!modelRef, others: qcOthers }) }, imgPart(pack.buf, pack.mime), imgPart(gen.buf, gen.mime), ...(before ? [imgPart(before.buf, before.mime)] : []), ...qcRefs.map((r) => imgPart(r.buf, r.mime)), ...extraPacks.map((r) => imgPart(r.buf, r.mime)), ...(modelRef ? [imgPart(modelRef.buf, modelRef.mime)] : [])];
+  const noProduct = !!shoot!.no_product;
+  const qcParts = noProduct
+    ? [{ text: qcPromptNoProduct(before ? { instruction: instr!, refCount: qcRefs.length } : undefined, { modelRef: !!modelRef }) }, imgPart(gen.buf, gen.mime), ...(before ? [imgPart(before.buf, before.mime)] : []), ...qcRefs.map((r) => imgPart(r.buf, r.mime)), ...(modelRef ? [imgPart(modelRef.buf, modelRef.mime)] : [])]
+    : [{ text: qcPrompt(product, before ? { instruction: instr!, refCount: qcRefs.length } : undefined, { modelRef: !!modelRef, others: qcOthers }) }, imgPart(pack.buf, pack.mime), imgPart(gen.buf, gen.mime), ...(before ? [imgPart(before.buf, before.mime)] : []), ...qcRefs.map((r) => imgPart(r.buf, r.mime)), ...extraPacks.map((r) => imgPart(r.buf, r.mime)), ...(modelRef ? [imgPart(modelRef.buf, modelRef.mime)] : [])];
   let r: any;
   try { r = await gemini(MODELS.vision, qcParts, { purpose: "contrôle qualité", json: true, timeoutMs: 70_000 }); }
   catch { r = await gemini(MODELS.text, qcParts, { purpose: "contrôle qualité (secours)", json: true, timeoutMs: 35_000 }); } // modèle plus rapide si le premier est trop lent
   const qc = parseJson<QC>(firstText(r));
   qc.texts = qc.texts ?? [];
+  if (noProduct) Object.assign(qc, { texts: [], color_ok: true, shape_ok: true, all_copies_exact: true, label_orientation_ok: true, product_height_pct: 100, hero_foreground: true, proportion_ok: true, angle_ok: true });
   if (before) {
     try { const [a, b] = await Promise.all([sharpness(before.buf), sharpness(gen.buf)]); if (a > 0) qc.sharpness_ratio = Math.round((b / a) * 100) / 100; } catch { /* mesure facultative */ }
   }

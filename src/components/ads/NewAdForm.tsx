@@ -46,6 +46,10 @@ export default function NewAdForm({ products, pics, models }: { products: { id: 
   const [engine, setEngine] = useState("pro");
   const [count, setCount] = useState(2);
   const [aspect, setAspect] = useState("4:5");
+  const [imgProducts, setImgProducts] = useState<"one" | "several" | "none">("one");
+  const [extraIds, setExtraIds] = useState<string[]>([]);
+  const [productMode, setProductMode] = useState<"together" | "split" | "mix">("together");
+  const risky = /avant|apr[eè]s|acn[eé]|bouton|imperfection|ride|tache|cicatrice|ecz[eé]ma|rougeur|pore dilat/i.test(visual);
   const [shootId, setShootId] = useState<string | null>(null);
   const [gen, setGen] = useState<GenImg[]>([]);
   const inspRef = useRef<HTMLInputElement>(null);
@@ -75,12 +79,16 @@ export default function NewAdForm({ products, pics, models }: { products: { id: 
     if (!productId) return setError("Choisis un produit (à droite)");
     if (!visual.trim()) return setError("Décris le visuel à créer");
     if (people === "models" && !modelIds.length) return setError("Coche au moins un mannequin");
+    if (imgProducts === "several" && !extraIds.filter((x) => x !== productId).length) return setError("Coche au moins un autre produit");
     setBusy(true);
     try {
       const sp = SPACE[space];
       const prompt = `[Ads] ${visual.trim()}` + (sp.text ? `\n\nVisuel pour une publicité : laisse un grand espace vide et uni (fond simple, sans objet ni personne) ${sp.text}, pour y poser un titre plus tard. Le produit et le visage restent en dehors de cette zone.` : "") + " Aucun texte ajouté dans l'image.";
       const r = await api<{ shootId: string; imageIds: string[] }>("/api/shoots", {
         productId, prompt, aspect, size: "2K", engine, variants: count, noPeople: people === "none",
+        noProduct: imgProducts === "none",
+        productIds: imgProducts === "several" ? [productId, ...extraIds.filter((x) => x !== productId)].slice(0, 4) : [productId],
+        productMode: imgProducts === "several" ? productMode : undefined,
         modelIds: people === "models" ? modelIds : [], inspirationPaths: insp,
       });
       setShootId(r.shootId);
@@ -148,6 +156,29 @@ export default function NewAdForm({ products, pics, models }: { products: { id: 
                 </div>
               </div>
             </div>
+            <div>
+              <Label>Produits dans l&apos;image</Label>
+              <div className="grid grid-cols-3 gap-1">
+                {([["one", "Le produit choisi"], ["several", "Plusieurs produits"], ["none", "Aucun produit"]] as const).map(([k, l]) => <button key={k} type="button" onClick={() => setImgProducts(k)} className={`rounded-lg border px-1 py-1.5 text-[11px] ${imgProducts === k ? "border-[#2B6EE8] bg-[#EBF2FF] text-[#2B6EE8] font-semibold" : "border-[#E4E4E7]"}`}>{l}</button>)}
+              </div>
+              {imgProducts === "one" && <p className="text-[11px] text-[#A0A0A8] mt-1">Le produit choisi à droite, avec son vrai packshot.</p>}
+              {imgProducts === "none" && <p className="text-[11px] text-[#A0A0A8] mt-1">Gros plan peau, texture, ambiance, lifestyle… : aucun flacon ni logo dans l&apos;image. Le produit choisi à droite sert seulement aux textes de la pub.</p>}
+              {imgProducts === "several" && (
+                <div className="mt-2 space-y-2">
+                  <div className="flex flex-wrap gap-3">
+                    {products.filter((x) => x.id !== productId).map((x) => {
+                      const on = extraIds.includes(x.id);
+                      return <label key={x.id} className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={on} disabled={!on && extraIds.filter((e) => e !== productId).length >= 3} onChange={(e) => setExtraIds((c) => e.target.checked ? [...c, x.id] : c.filter((i) => i !== x.id))} />{x.name}</label>;
+                    })}
+                  </div>
+                  <div className="grid grid-cols-3 gap-1">
+                    {([["together", "Tous ensemble"], ["split", "Un par image"], ["mix", "Mélange"]] as const).map(([k, l]) => <button key={k} type="button" onClick={() => setProductMode(k)} className={`rounded-lg border px-1 py-1.5 text-[11px] ${productMode === k ? "border-[#2B6EE8] bg-[#EBF2FF] text-[#2B6EE8] font-semibold" : "border-[#E4E4E7]"}`}>{l}</button>)}
+                  </div>
+                  <p className="text-[11px] text-[#A0A0A8]">Avec le produit choisi à droite + les produits cochés (4 au total maximum).</p>
+                </div>
+              )}
+            </div>
+            {risky && <p className="text-[11px] text-[#B45309] bg-amber-50 rounded-lg px-2.5 py-1.5">Attention : les visuels « avant / après » ou montrant des imperfections de peau sont souvent refusés par Meta et TikTok pour les cosmétiques, et ta règle de marque n°4 interdit de suggérer un résultat sur la peau. Préfère une peau naturelle, sans promesse de résultat.</p>}
             {people === "models" && (
               <div className="flex flex-wrap gap-2">
                 {models.map((m) => {

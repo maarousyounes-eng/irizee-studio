@@ -32,7 +32,7 @@ const textsBlock = (p: Product) => (p.texts ?? []).map((t) => `- ${t}`).join("\n
 
 export function buildPrompt(a: {
   product: Product; rules: string[]; userPrompt: string; aspect: string; analysis: string;
-  others?: { product: Product; n: number }[]; variation: string; nProductImages: number; hasModelRef: boolean; modelDescription?: string; noPeople: boolean;
+  others?: { product: Product; n: number }[]; variation: string; nProductImages: number; hasModelRef: boolean; modelDescription?: string; noPeople: boolean; noProduct?: boolean;
 }) {
   // Version courte et cohérente : chaque consigne n'apparaît qu'une fois, sans ordres contradictoires.
   const oth = a.others ?? [];
@@ -43,7 +43,7 @@ export function buildPrompt(a: {
     p.texts?.length ? `Printed texts, spelled exactly:\n${textsBlock(p)}` : "",
   ].filter(Boolean).join("\n");
   const roles = [
-    (a.nProductImages > 1 ? `Images 1 to ${a.nProductImages}: packshots` : "Image 1: packshot") + ` of the real product "${a.product.name}".`,
+    a.noProduct ? "" : (a.nProductImages > 1 ? `Images 1 to ${a.nProductImages}: packshots` : "Image 1: packshot") + ` of the real product "${a.product.name}".`,
     ...oth.map((o) => `Next ${o.n} image(s): packshot of the real product "${o.product.name}".`),
     a.hasModelRef ? "Next image: the MODEL REFERENCE (the person to show)." : "",
     "Last image(s): the STYLE REFERENCE.",
@@ -59,17 +59,21 @@ export function buildPrompt(a: {
     "",
     "BRAND RULES:", numbered([...a.rules, ...products.flatMap((p) => p.rules ?? [])]),
     "",
-    `PRODUCT${products.length > 1 ? "S (all of them appear together, each one a faithful copy of its own packshot)" : ""}:`,
-    products.map(productBlock).join("\n\n"),
-    "The product is an exact copy of its packshot: same silhouette, proportions, cap, material, colours, label layout and text direction. Products visible in the style reference belong to other brands: take their place and position, never their design.",
+    ...(a.noProduct
+      ? ["NO PRODUCT: this image shows no product at all: no bottle, tube, jar, packaging, cosmetic container, brand name or logo, even if the style reference shows one."]
+      : [
+        `PRODUCT${products.length > 1 ? "S (all of them appear together, each one a faithful copy of its own packshot)" : ""}:`,
+        products.map(productBlock).join("\n\n"),
+        "The product is an exact copy of its packshot: same silhouette, proportions, cap, material, colours, label layout and text direction. Products visible in the style reference belong to other brands: take their place and position, never their design.",
+      ]),
     "",
-    "STYLE: reproduce the style reference: composition, camera angle and lens, pose, lighting, colour palette, background, mood, and the way the product is placed (held, floating, number of copies), at a realistic scale for the product.",
+    a.noProduct ? "STYLE: reproduce the style reference: composition, camera angle and lens, pose, lighting, colour palette, background and mood." : "STYLE: reproduce the style reference: composition, camera angle and lens, pose, lighting, colour palette, background, mood, and the way the product is placed (held, floating, number of copies), at a realistic scale for the product.",
     a.analysis ? `Description of the style reference:\n${a.analysis}` : "",
     "",
     `CLIENT BRIEF (priority over the style reference when they differ): ${a.userPrompt}`,
     "",
     person,
-    a.noPeople ? "" : "Hands are anatomically correct: five fingers per hand, natural joints and a firm, plausible grip on the product.",
+    a.noPeople ? "" : a.noProduct ? "Hands are anatomically correct: five fingers per hand, natural joints." : "Hands are anatomically correct: five fingers per hand, natural joints and a firm, plausible grip on the product.",
     "",
     REALISM,
     `Format: aspect ratio ${a.aspect}. No watermark, no added text.`,
@@ -124,6 +128,20 @@ export function modelSheetPrompt(a: { name: string; description: string }) {
     "Head and shoulders (include the hands near the face if the description mentions nails or rings), soft studio light, plain light-grey background, no text, no watermark.",
     REALISM,
   ].join("\n");
+}
+
+/** Contrôle qualité d'une image SANS produit (peau, texture, ambiance…). */
+export function qcPromptNoProduct(correction?: { instruction: string; refCount?: number }, opts?: { modelRef?: boolean }) {
+  return [
+    "You are a strict quality inspector for the advertising photos of a cosmetics brand.",
+    "Image 1 = a generated advertising photo that must contain NO product: no bottle, tube, jar, packaging, brand name or logo." + (correction ? " Image 2 = the same photo BEFORE a correction was applied." + (correction.refCount ? ` The next ${correction.refCount} image(s) are REFERENCE image(s) supplied by the client.` : "") : ""),
+    correction ? `A correction was requested: "${correction.instruction}". Set instruction_followed to true ONLY if the requested change is clearly visible in image 1 compared with image 2. List in unwanted_changes what changed without being requested (empty string if none). ghost_or_duplicate = true if a leftover or duplicate of a moved or removed element is visible. edit_quality_0_10 = how natural the modification is (8+ only if publishable as is); edit_defects = short French sentence (empty if none).` : "",
+    opts?.modelRef ? "The LAST image is the MODEL REFERENCE: face_matches_model = true only if the person in image 1 is clearly the same person." : "",
+    "foreign_logo = true if ANY product, packaging, brand name or logo is visible in image 1.",
+    "TOLERANCE: judge like a professional photo editor: shallow depth of field, shadows, cropping and natural skin texture are normal. Only flag what a client would call an error.",
+    "HUMAN CHECK (if a person is visible; otherwise human.present=false and every other human field true): exactly 5 fingers per visible hand with natural joints, symmetric natural face, eyes, lips and teeth, no extra or missing limb, plausible body, coherent hair, jewellery and clothing. artifacts_ok = false if you see melted textures, merged or floating objects or strange shapes.",
+    `Return JSON only: {"foreign_logo":bool,"anatomy_ok":bool,"skin_natural":bool,"human":{"present":bool,"hands_ok":bool,"fingers_count_ok":bool,"grip_ok":bool,"face_ok":bool,"limbs_ok":bool,"body_ok":bool,"accessories_ok":bool},"artifacts_ok":bool,"issues":[str] (short French sentences, max 5, empty if none)${opts?.modelRef ? ',"face_matches_model":bool' : ""},"realism_0_10":int,"comment":str (one short sentence in French)${correction ? ',"instruction_followed":bool,"unwanted_changes":str,"ghost_or_duplicate":bool,"edit_quality_0_10":int,"edit_defects":str' : ""}}`,
+  ].filter(Boolean).join("\n");
 }
 
 export function qcPrompt(p: Product, correction?: { instruction: string; refCount?: number }, opts?: { modelRef?: boolean; others?: Product[] }) {
