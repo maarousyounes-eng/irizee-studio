@@ -2,7 +2,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { Btn, Empty, PageHeader } from "@/components/ui";
-import { imgUrl } from "@/lib/client";
+// (pas d'import depuis lib/client : ce module est réservé au navigateur)
+const imgUrl = (path: string) => `/api/img?p=${encodeURIComponent(path)}`;
 
 export const dynamic = "force-dynamic";
 
