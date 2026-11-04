@@ -1,4 +1,5 @@
 import type { Product } from "@/types";
+import { SOCIAL_STYLES, TEXT_ZONES, BA_CHANGES, type TypeParams } from "./visualTypes";
 
 const VARIATIONS = [
   "a young woman with a sharp black bob and fringe",
@@ -33,7 +34,9 @@ const textsBlock = (p: Product) => (p.texts ?? []).map((t) => `- ${t}`).join("\n
 export function buildPrompt(a: {
   product: Product; rules: string[]; userPrompt: string; aspect: string; analysis: string;
   others?: { product: Product; n: number }[]; variation: string; nProductImages: number; hasModelRef: boolean; modelDescription?: string; noPeople: boolean; noProduct?: boolean;
+  nModelRefs?: number; seriesRef?: boolean; typeLine?: string; realism?: string; hasStyleRef?: boolean;
 }) {
+  const nModels = a.hasModelRef ? Math.max(1, a.nModelRefs ?? 1) : 0;
   // Version courte et cohérente : chaque consigne n'apparaît qu'une fois, sans ordres contradictoires.
   const oth = a.others ?? [];
   const products = [a.product, ...oth.map((o) => o.product)];
@@ -45,12 +48,15 @@ export function buildPrompt(a: {
   const roles = [
     a.noProduct ? "" : (a.nProductImages > 1 ? `Images 1 to ${a.nProductImages}: packshots` : "Image 1: packshot") + ` of the real product "${a.product.name}".`,
     ...oth.map((o) => `Next ${o.n} image(s): packshot of the real product "${o.product.name}".`),
-    a.hasModelRef ? "Next image: the MODEL REFERENCE (the person to show)." : "",
-    "Last image(s): the STYLE REFERENCE.",
+    nModels === 1 ? "Next image: the MODEL REFERENCE (the person to show)." : nModels > 1 ? `Next ${nModels} images: the MODEL REFERENCES (the ${nModels} persons to show, one image per person).` : "",
+    a.seriesRef ? "Next image: the SERIES REFERENCE = the first image of the same series: keep exactly its person, outfit, set, lighting, colour palette and photographic style, but show the different shot described below." : "",
+    a.hasStyleRef === false ? "" : "Last image(s): the STYLE REFERENCE.",
   ].filter(Boolean).join(" ");
   const person = a.noPeople
     ? "There is no person in the image."
-    : a.hasModelRef
+    : nModels > 1
+      ? `PEOPLE: exactly the ${nModels} persons of the MODEL REFERENCES, each appearing once (same faces, skin tones, hair colours and hairstyles)${a.modelDescription ? `: ${a.modelDescription}` : ""}. Take only poses, gestures and expressions from the style reference, never the faces or hair of the people shown there.`
+      : a.hasModelRef
       ? `PERSON: exactly the person of the MODEL REFERENCE (same face, skin tone, hair colour and hairstyle)${a.modelDescription ? `: ${a.modelDescription}` : ""}. Take only the pose, gesture and expression from the style reference, never the face or hair of the person shown there.`
       : `PERSON: ${a.variation}`;
   return [
@@ -73,11 +79,12 @@ export function buildPrompt(a: {
     a.analysis ? `Description of the style reference:\n${a.analysis}` : "",
     "",
     `CLIENT BRIEF (priority over the style reference when they differ): ${a.userPrompt}`,
+    a.typeLine ? `\n${a.typeLine}` : "",
     "",
     person,
     a.noPeople ? "" : a.noProduct ? "Hands are anatomically correct: five fingers per hand, natural joints." : "Hands are anatomically correct: five fingers per hand, natural joints and a firm, plausible grip on the product.",
     "",
-    REALISM,
+    a.realism ?? REALISM,
     `Format: aspect ratio ${a.aspect}. Do NOT add any text, letters, words, typography, logo, watermark or graphic shapes to the image: the only text allowed is what is printed on the real products.`,
   ].filter((l, i, arr) => l !== "" || arr[i - 1] !== "").join("\n");
 }
@@ -243,4 +250,63 @@ export function adCopyPrompt(a: { product: Product; rules: string[]; idea: strin
     'cta is one of: "Découvrir", "Acheter", "Commander", "En savoir plus", "Essayer".',
     'Return JSON only: {"angles":[{"name":str (2-4 words in French describing the angle),"hook":str,"headline":str,"primary_text":str,"cta":str,"badge":str,"bullets":[str,str,str],"quote":str,"quote_author":str,"tiktok_caption":str,"google":{"headlines":[str,str,str,str,str],"long_headline":str,"descriptions":[str,str]}}]}',
   ].filter(Boolean).join("\n");
+}
+
+// ---------------------------------------------------------------- Types de visuel
+
+
+/** Consigne propre au type de visuel (ajoutée après la consigne du client). */
+export function typeLine(type: string, tp: TypeParams, vi: number, nSlides: number) {
+  if (type === "social") {
+    const s = SOCIAL_STYLES.find((x) => x.id === tp.socialStyle) ?? SOCIAL_STYLES[0];
+    return `VISUAL TYPE: an ORGANIC social media post (not an advertisement): ${s.en}.`;
+  }
+  if (type === "ad") {
+    const z = TEXT_ZONES.find((x) => x.id === tp.textZone);
+    return [
+      "VISUAL TYPE: a PAID SOCIAL AD visual: the product is the clear hero, bold and simple scroll-stopping composition, premium and clean, strong contrast.",
+      z?.en ? `Keep ${z.en} of the frame calm and uncluttered (simple background, no important element, no person's face) so that a headline can be added there later. Do not write anything there.` : "",
+    ].filter(Boolean).join(" ");
+  }
+  if (type === "carousel") {
+    const desc = (tp.slides ?? [])[vi] ?? "";
+    return `CAROUSEL: this image is slide ${vi + 1} of ${nSlides} of an Instagram carousel. All slides share the same person, outfit, set, lighting, colour palette and photographic style, but each slide is a different shot.${desc ? ` This slide shows: ${desc}` : ""}`;
+  }
+  if (type === "ba") {
+    const c = BA_CHANGES.find((x) => x.id === tp.baChange) ?? BA_CHANGES[0];
+    const before = (c.id === "autre" ? tp.baBefore : c.before) || "skin before the skincare routine";
+    return `BEFORE PHOTO of a before/after pair: a natural, front-facing beauty portrait, neutral even lighting, simple background. The skin shows ${before}. Realistic and natural, no makeup, no retouching.`;
+  }
+  return "";
+}
+
+/** Pour l'avant d'un avant/après : peau réelle, non retouchée. */
+export const REALISM_NATURAL =
+  "SKIN & DETAIL QUALITY: realistic, unretouched skin with natural pores and texture, true-to-life colours, crisp detail. Never plastic, waxy or blurred. Keep every styling detail exactly as described.";
+
+/** L'après : la même photo, seule la peau change. */
+export function baAfterPrompt(a: { tp: TypeParams; rules: string[]; hasProduct: boolean; aspect: string }) {
+  const c = BA_CHANGES.find((x) => x.id === a.tp.baChange) ?? BA_CHANGES[0];
+  const after = (c.id === "autre" ? a.tp.baAfter : c.after) || "healthier, more radiant skin";
+  return [
+    "You are creating the AFTER photo of a before/after pair for the cosmetics brand Irizée.",
+    "Image 1 = the BEFORE photo." + (a.hasProduct ? " The following image(s) = the REAL product packshot(s)." : ""),
+    a.rules.length ? `BRAND RULES:\n${numbered(a.rules)}` : "",
+    "TASK: recreate EXACTLY the same photo: same person (same face, features, hair, expression), same pose, same framing and camera angle, same background, same lighting, same clothes" + (a.hasProduct ? ", same product placement (the product stays identical to its packshot)" : "") + ".",
+    `ONLY the skin changes: it now shows ${after}. The improvement is realistic and credible, never exaggerated: real pores and natural texture stay visible, no beauty filter, no added makeup.`,
+    `Format: aspect ratio ${a.aspect}. Do NOT add any text, letters, arrows, labels or graphic elements.`,
+  ].filter(Boolean).join("\n");
+}
+
+/** Plan d'un carrousel : l'IA propose le contenu de chaque slide. */
+export function slidesPlanPrompt(a: { idea: string; n: number; products: string[]; people: boolean }) {
+  return [
+    "You are the creative director of a French cosmetics brand (Irizée) planning an Instagram carousel made of photos only (texts are added later).",
+    `Carousel idea from the client: "${a.idea || "showcase the product"}".`,
+    a.products.length ? `Products: ${a.products.join(", ")}.` : "No product appears in this carousel.",
+    a.people ? "A model (always the same person) can appear." : "No person appears.",
+    `Plan exactly ${a.n} slides that tell a coherent story from a strong cover to a closing slide, each a clearly different shot (framing, gesture, detail) in the same set and style.`,
+    "No medical claim, no invented result.",
+    'For each slide write one short French sentence (max 18 words) describing the photo to shoot. Return JSON only: {"slides": [str]}',
+  ].join("\n");
 }

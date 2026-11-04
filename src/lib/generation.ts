@@ -1,7 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { MODELS, gemini, imgPart, firstImage, firstText, noImageReason, parseJson, withAiCtx, type Part } from "./gemini";
 import sharp from "sharp";
-import { buildPrompt, correctionPrompt, qcPromptNoProduct, sizeLine, formatPrompt, interpretPrompt, localEditPrompt, LOCATE_PRODUCT_PROMPT, READ_LABEL_PROMPT, qcPrompt, variationHint } from "./prompts";
+import { baAfterPrompt, typeLine, REALISM_NATURAL, buildPrompt, correctionPrompt, qcPromptNoProduct, sizeLine, formatPrompt, interpretPrompt, localEditPrompt, LOCATE_PRODUCT_PROMPT, READ_LABEL_PROMPT, qcPrompt, variationHint } from "./prompts";
+import type { TypeParams } from "./visualTypes";
 import { cropBoxFor, cropImage, pasteBack, unionZones, zoneFromBox, zonesFromBoxes, type CropBox, type Zone } from "./localedit";
 import type { ImageRow, Product, QC } from "@/types";
 
@@ -230,26 +231,47 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
 
   if (image.kind === "generated") {
     model = shoot.engine === "openai" ? "openai:auto" : shoot.engine === "pro" ? MODELS.pro : shoot.engine === "flash" ? MODELS.flash : (image.variant_index % 2 === 0 ? MODELS.flash : MODELS.pro);
-    // Une inspiration par variante : l'image i suit SON inspiration (pose, cadrage, lumière, style) ; elles tournent s'il y a plus de variantes que d'inspirations.
-    const allInsp = shoot.inspiration_paths as string[];
-    const pick = allInsp.length > 1 ? Math.floor(image.variant_index / plan.slots) % allInsp.length : 0; // avec plusieurs produits, chaque inspiration sert à chaque cas (chaque produit seul, tous ensemble)
-    const inspirations = await Promise.all((allInsp.length > 1 ? [allInsp[pick]] : allInsp).map((p) => download(sb, p)));
-    const perAnalysis = String(shoot.analysis ?? "").split(ANALYSIS_SEP);
-    const analysisFor = allInsp.length > 1 && perAnalysis.length === allInsp.length ? perAnalysis[pick] : (shoot.analysis ?? "");
-    let modelRef: { buf: Buffer; mime: string } | null = null;
-    let modelDescription = "";
-    const modelId = (image as any).model_id ?? shoot.model_id;
-    if (modelId && !shoot.no_people) {
-      const { data: m } = await sb.from("models").select("path, description").eq("id", modelId).single();
-      if (m?.path) { modelRef = await download(sb, m.path); modelDescription = m.description; }
+    const vtype = String(shoot.visual_type ?? "photo");
+    const tp = (shoot.type_params ?? {}) as TypeParams;
+    // Avant / après : l'« après » est la même photo que l'« avant », seule la peau change
+    if (vtype === "ba" && image.variant_index % 2 === 1) {
+      const { data: bef } = await sb.from("images").select("path").eq("shoot_id", shoot.id).eq("kind", "generated").eq("variant_index", image.variant_index - 1).is("deleted_at", null).not("path", "is", null).order("created_at", { ascending: false }).limit(1).maybeSingle();
+      if (!bef?.path) throw new Error("La photo « avant » de cette paire n'est pas encore prête : relance « après » une fois l'avant terminé");
+      const before = await download(sb, bef.path);
+      parts = [{ text: baAfterPrompt({ tp, rules: [...rules, ...(noProduct ? [] : product.rules ?? [])], hasProduct: !noProduct, aspect }) }, imgPart(before.buf, before.mime), ...packshots.map((p) => imgPart(p.buf, p.mime))];
+    } else {
+      // Une inspiration par variante : l'image i suit SON inspiration (pose, cadrage, lumière, style) ; elles tournent s'il y a plus de variantes que d'inspirations.
+      // Carrousel : la même inspiration pour toutes les slides (cohérence de la série).
+      const allInsp = shoot.inspiration_paths as string[];
+      const pick = vtype === "carousel" ? 0 : allInsp.length > 1 ? Math.floor(image.variant_index / plan.slots) % allInsp.length : 0; // avec plusieurs produits, chaque inspiration sert à chaque cas (chaque produit seul, tous ensemble)
+      const inspirations = await Promise.all((allInsp.length > 1 ? [allInsp[pick]] : allInsp).map((p) => download(sb, p)));
+      const perAnalysis = String(shoot.analysis ?? "").split(ANALYSIS_SEP);
+      const analysisFor = allInsp.length > 1 && perAnalysis.length === allInsp.length ? perAnalysis[pick] : (shoot.analysis ?? "");
+      // Mannequin(s) : un par image, ou tous ensemble sur la même image
+      const modelRefs: { buf: Buffer; mime: string }[] = [];
+      const descs: string[] = [];
+      const together = shoot.model_mode === "together" && (shoot.model_ids ?? []).length > 1;
+      const ids: string[] = shoot.no_people ? [] : together ? (shoot.model_ids as string[]).slice(0, 3) : [((image as any).model_id ?? shoot.model_id) as string].filter(Boolean);
+      for (const mid of ids) {
+        const { data: m } = await sb.from("models").select("name, path, description").eq("id", mid).single();
+        if (m?.path) { modelRefs.push(await download(sb, m.path)); if (m.description) descs.push(together ? `${m.name}: ${m.description}` : m.description); }
+      }
+      // Carrousel : les slides suivantes reprennent la slide 1 (même personne, décor, lumière)
+      let series: { buf: Buffer; mime: string } | null = null;
+      if (vtype === "carousel" && image.variant_index > 0) {
+        const { data: s0 } = await sb.from("images").select("path").eq("shoot_id", shoot.id).eq("kind", "generated").eq("variant_index", 0).is("deleted_at", null).not("path", "is", null).order("created_at", { ascending: true }).limit(1).maybeSingle();
+        if (s0?.path) series = await download(sb, s0.path).catch(() => null);
+      }
+      const nSlides = (tp.slides ?? []).length || 1;
+      const prompt = buildPrompt({
+        product, rules, userPrompt: shoot.prompt, aspect, analysis: analysisFor,
+        others: others.map((o) => ({ product: o.product, n: 1 })), variation: variationHint(image.variant_index, shoot.no_people), nProductImages: imagePaths.length,
+        hasModelRef: modelRefs.length > 0, nModelRefs: modelRefs.length, modelDescription: descs.join(" / "), noPeople: shoot.no_people, noProduct,
+        ...(vtype === "photo" ? {} : { typeLine: typeLine(vtype, tp, image.variant_index, nSlides), seriesRef: !!series, hasStyleRef: inspirations.length > 0, realism: vtype === "ba" ? REALISM_NATURAL : undefined }),
+      });
+      nInsp = inspirations.length;
+      parts = [{ text: prompt }, ...packshots.map((p) => imgPart(p.buf, p.mime)), ...modelRefs.map((r) => imgPart(r.buf, r.mime)), ...(series ? [imgPart(series.buf, series.mime)] : []), ...inspirations.map((p) => imgPart(p.buf, p.mime))];
     }
-    const prompt = buildPrompt({
-      product, rules, userPrompt: shoot.prompt, aspect, analysis: analysisFor,
-      others: others.map((o) => ({ product: o.product, n: 1 })), variation: variationHint(image.variant_index, shoot.no_people), nProductImages: imagePaths.length,
-      hasModelRef: !!modelRef, modelDescription, noPeople: shoot.no_people, noProduct,
-    });
-    nInsp = inspirations.length;
-    parts = [{ text: prompt }, ...packshots.map((p) => imgPart(p.buf, p.mime)), ...(modelRef ? [imgPart(modelRef.buf, modelRef.mime)] : []), ...inspirations.map((p) => imgPart(p.buf, p.mime))];
   } else {
     if (!image.parent_id) throw new Error("Image parente manquante");
     const { data: parent } = await sb.from("images").select("path").eq("id", image.parent_id).single();

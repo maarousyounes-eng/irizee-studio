@@ -6,6 +6,7 @@ import { ImagePlus, X, Wand2 } from "lucide-react";
 import { Btn, Card, INPUT, Label, Spinner, Badge } from "@/components/ui";
 import { api, uploadImage, useSignedUrls, useSupabase } from "@/lib/client";
 import { FORMATS, type Role } from "@/types";
+import { VISUAL_TYPES, SOCIAL_STYLES, TEXT_ZONES, BA_CHANGES, type VisualType } from "@/lib/visualTypes";
 
 interface Props {
   role: Role;
@@ -18,7 +19,7 @@ interface Props {
   initialConceptId?: string;
   initialProductId?: string;
   initial: { inspirationPaths: string[]; productId?: string; aspect?: string };
-  again?: { productId: string; productIds?: string[]; productMode?: string | null; projectId: string | null; modelIds: string[]; noPeople: boolean; prompt: string; aspect: string; size: string; engine: string; variants: number; inspirationPaths: string[] };
+  again?: { visualType?: string; typeParams?: Record<string, any>; modelMode?: string; noProduct?: boolean; productId: string; productIds?: string[]; productMode?: string | null; projectId: string | null; modelIds: string[]; noPeople: boolean; prompt: string; aspect: string; size: string; engine: string; variants: number; inspirationPaths: string[] };
 }
 
 export default function NewShootForm(p: Props) {
@@ -42,6 +43,18 @@ export default function NewShootForm(p: Props) {
   const [engine, setEngine] = useState(p.again?.engine ?? "pro");
   const [size, setSize] = useState(p.again?.size ?? "2K");
   const [inspirations, setInspirations] = useState<string[]>(p.again?.inspirationPaths ?? p.initial.inspirationPaths);
+  const [vtype, setVtype] = useState<VisualType>((VISUAL_TYPES.find((t) => t.id === p.again?.visualType)?.id) ?? "photo");
+  const tp0 = p.again?.typeParams ?? {};
+  const [noProduct, setNoProduct] = useState(!!p.again?.noProduct);
+  const [modelMode, setModelMode] = useState<"split" | "together">(p.again?.modelMode === "together" ? "together" : "split");
+  const [socialStyle, setSocialStyle] = useState<string>(tp0.socialStyle ?? "feed");
+  const [textZone, setTextZone] = useState<string>(tp0.textZone ?? "top");
+  const [slides, setSlides] = useState<string[]>(Array.isArray(tp0.slides) && tp0.slides.length ? tp0.slides : ["", "", "", "", ""]);
+  const [planning, setPlanning] = useState(false);
+  const [baChange, setBaChange] = useState<string>(tp0.baChange ?? "terne");
+  const [baBefore, setBaBefore] = useState<string>(tp0.baBefore ?? "");
+  const [baAfter, setBaAfter] = useState<string>(tp0.baAfter ?? "");
+  const [pairs, setPairs] = useState(1);
   const [uploading, setUploading] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -99,18 +112,40 @@ export default function NewShootForm(p: Props) {
 
   const remaining = p.quota.limit === null ? Infinity : p.quota.limit - p.quota.used;
   const noPeople = peopleMode === "none";
+  const nImages = vtype === "carousel" ? slides.length : vtype === "ba" ? pairs * 2 : variants;
+
+  function selectType(t: VisualType) {
+    setVtype(t);
+    if (t === "ba") setNoProduct(true);
+    if (t === "carousel" || t === "social" || t === "ad") { if (aspect === "16:9") setAspect("4:5"); }
+  }
+
+  async function proposeSlides() {
+    setError(null);
+    if (!prompt.trim()) return setError("Décris d'abord l'histoire du carrousel dans la consigne");
+    setPlanning(true);
+    try {
+      const r = await api<{ slides: string[] }>("/api/shoots/slides", { idea: prompt, n: slides.length, productIds: noProduct ? [] : [productId, ...extraIds.filter((x) => x !== productId)], noProduct, people: !noPeople });
+      setSlides(r.slides);
+    } catch (e) { setError(e instanceof Error ? e.message : "Erreur"); }
+    setPlanning(false);
+  }
 
   async function submit() {
     setError(null);
     if (!productId) return setError("Choisis un produit");
-    if (!prompt.trim()) return setError("Écris une consigne");
+    if (!prompt.trim() && vtype !== "carousel" && vtype !== "ba") return setError("Écris une consigne");
+    if (vtype === "carousel" && !prompt.trim() && !slides.some((x) => x.trim())) return setError("Décris le carrousel dans la consigne, ou remplis les slides");
+    if (vtype === "ba" && baChange === "autre" && (!baBefore.trim() || !baAfter.trim())) return setError("Décris l'avant et l'après");
     if (isCreator && !projectId) return setError("Choisis un projet");
     if (peopleMode === "models" && !modelIds.length) return setError("Coche au moins un mannequin, ou choisis « Varié » / « Sans personne »");
     setBusy(true);
     try {
       const r = await api<{ shootId: string; imageIds: string[] }>("/api/shoots", {
         productId, productIds: [productId, ...extraIds.filter((x) => x !== productId)].slice(0, 4), productMode, projectId: projectId || null, modelIds: peopleMode === "models" ? modelIds : [],
-        conceptId: conceptId || null, prompt, aspect, size, engine, variants, noPeople, inspirationPaths: inspirations,
+        conceptId: conceptId || null, prompt, aspect, size, engine, variants, noPeople, noProduct, inspirationPaths: inspirations,
+        visualType: vtype, modelMode, slideCount: slides.length, pairs,
+        typeParams: { socialStyle, textZone, slides, baChange, baBefore, baAfter },
       });
       sessionStorage.setItem(`run:${r.shootId}`, JSON.stringify(r.imageIds));
       router.push(`/shoots/${r.shootId}`);
@@ -124,6 +159,52 @@ export default function NewShootForm(p: Props) {
   return (
     <div className="grid lg:grid-cols-[1fr_340px] gap-6 items-start">
       <div className="space-y-5">
+        <div>
+          <Label>Type de visuel</Label>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {VISUAL_TYPES.map((t) => (
+              <button key={t.id} type="button" onClick={() => selectType(t.id)}
+                className={`text-left rounded-2xl border p-3 transition ${vtype === t.id ? "border-[#2B6EE8] bg-[#EBF2FF] ring-1 ring-[#2B6EE8]" : "border-[#E4E4E7] bg-white hover:bg-[#F4F4F5]"}`}>
+                <p className="text-sm font-semibold">{t.name}</p>
+                <p className="text-[11px] text-[#6B6B72] mt-0.5 leading-snug">{t.desc}</p>
+              </button>
+            ))}
+          </div>
+          <p className="text-[11px] text-[#A0A0A8] mt-1.5">Les images sortent sans texte : vous poserez les textes ensuite dans Ads.</p>
+        </div>
+
+        {vtype === "social" && (
+          <div>
+            <Label>Style du post</Label>
+            <div className="flex flex-wrap gap-1.5">
+              {SOCIAL_STYLES.map((x) => <Chip key={x.id} on={socialStyle === x.id} onClick={() => setSocialStyle(x.id)}>{x.label}</Chip>)}
+            </div>
+          </div>
+        )}
+        {vtype === "ad" && (
+          <div>
+            <Label>Où laisser de la place pour le texte ?</Label>
+            <div className="flex flex-wrap gap-1.5">
+              {TEXT_ZONES.map((x) => <Chip key={x.id} on={textZone === x.id} onClick={() => setTextZone(x.id)}>{x.label}</Chip>)}
+            </div>
+          </div>
+        )}
+        {vtype === "ba" && (
+          <div className="space-y-2">
+            <Label>Ce qui change entre l&apos;avant et l&apos;après</Label>
+            <div className="flex flex-wrap gap-1.5">
+              {BA_CHANGES.map((x) => <Chip key={x.id} on={baChange === x.id} onClick={() => setBaChange(x.id)}>{x.label}</Chip>)}
+            </div>
+            {baChange === "autre" && (
+              <div className="grid sm:grid-cols-2 gap-2">
+                <input className={INPUT} value={baBefore} onChange={(e) => setBaBefore(e.target.value)} placeholder="Avant : ex. peau déshydratée, ridules visibles" />
+                <input className={INPUT} value={baAfter} onChange={(e) => setBaAfter(e.target.value)} placeholder="Après : ex. peau rebondie, ridules atténuées" />
+              </div>
+            )}
+            <p className="text-[11px] text-[#6B6B72]">L&apos;« après » est créé à partir de l&apos;« avant » : même personne, même cadrage, même lumière, seule la peau change.</p>
+            <p className="text-[12px] p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900">Rappel : en publicité payante, Meta et la réglementation française refusent un « résultat » trompeur. Un avant/après généré par IA ne doit pas être présenté comme un vrai résultat client. Plus souple en organique.</p>
+          </div>
+        )}
         {p.concepts.length > 0 && (
           <div>
             <Label>Partir d&apos;un concept de la bibliothèque</Label>
@@ -163,9 +244,32 @@ export default function NewShootForm(p: Props) {
         <div>
           <Label>Consigne</Label>
           <textarea className={INPUT + " min-h-[110px]"} value={prompt} onChange={(e) => setPrompt(e.target.value)}
-            placeholder="Ex : même ambiance mais tout en bleu électrique : chemise, lunettes et rayons au sol. Lumière douce du matin." />
+            placeholder={vtype === "carousel" ? "Ex : le rituel du soir avec le Masque Nila, de la couverture jusqu'au résultat. Ambiance douce, tons sable." : vtype === "ba" ? "Ex : portrait de face, lumière neutre, cheveux attachés (facultatif)" : vtype === "free" ? "Ex : gros plan d'une goutte de texture sur une pierre sombre" : "Ex : même ambiance mais tout en bleu électrique : chemise, lunettes et rayons au sol. Lumière douce du matin."} />
           <p className="text-[11px] text-[#A0A0A8] mt-1">Les règles de la marque sont appliquées automatiquement à chaque génération.</p>
         </div>
+
+        {vtype === "carousel" && (
+          <div>
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+              <Label>Les slides ({slides.length})</Label>
+              <div className="flex items-center gap-1.5">
+                <Btn size="sm" variant="ghost" disabled={slides.length <= 3} onClick={() => setSlides(slides.slice(0, -1))}>− 1</Btn>
+                <Btn size="sm" variant="ghost" disabled={slides.length >= 10} onClick={() => setSlides([...slides, ""])}>+ 1</Btn>
+                <Btn size="sm" onClick={proposeSlides} disabled={planning}>{planning ? <Spinner className="border-white/40 border-t-white" /> : <Wand2 size={13} />} L&apos;IA propose l&apos;enchaînement</Btn>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              {slides.map((x, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <span className="w-14 shrink-0 text-xs font-semibold text-[#6B6B72]">Slide {i + 1}</span>
+                  <input className={INPUT} value={x} onChange={(e) => setSlides(slides.map((y, k) => (k === i ? e.target.value : y)))}
+                    placeholder={i === 0 ? "Couverture : le produit en grand" : "Ce que montre cette slide (laisser vide : l'IA décide)"} />
+                </div>
+              ))}
+            </div>
+            <p className="text-[11px] text-[#A0A0A8] mt-1">La slide 1 est créée d&apos;abord ; les suivantes reprennent la même personne, le même décor et la même lumière. Slides vides : l&apos;IA propose le plan au lancement.</p>
+          </div>
+        )}
       </div>
 
       <Card className="p-5 space-y-4 lg:sticky lg:top-3">
@@ -180,6 +284,11 @@ export default function NewShootForm(p: Props) {
         )}
         <div>
           <Label>Produit</Label>
+          <div className="grid grid-cols-2 gap-1.5 mb-2">
+            <button type="button" onClick={() => setNoProduct(false)} className={`px-2 py-2 rounded-xl text-[11px] font-semibold border transition ${!noProduct ? "bg-[#EBF2FF] border-[#2B6EE8] text-[#2B6EE8]" : "bg-white border-[#E4E4E7] text-[#6B6B72] hover:bg-[#F4F4F5]"}`}>Avec produit</button>
+            <button type="button" onClick={() => setNoProduct(true)} className={`px-2 py-2 rounded-xl text-[11px] font-semibold border transition ${noProduct ? "bg-[#EBF2FF] border-[#2B6EE8] text-[#2B6EE8]" : "bg-white border-[#E4E4E7] text-[#6B6B72] hover:bg-[#F4F4F5]"}`}>Sans produit</button>
+          </div>
+          {noProduct ? <p className="text-[11px] text-[#6B6B72]">Aucun produit dans l&apos;image : seulement la personne, le décor ou la texture décrits.</p> : <>
           <select className={INPUT} value={productId} onChange={(e) => setProductId(e.target.value)}>
             {allowedProducts.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
           </select>
@@ -208,6 +317,7 @@ export default function NewShootForm(p: Props) {
               )}
             </div>
           )}
+          </>}
         </div>
         <div>
           <Label>Personnes sur les photos</Label>
@@ -234,8 +344,17 @@ export default function NewShootForm(p: Props) {
                   );
                 })}
               </div>
+              {modelIds.length > 1 && (
+                <div className="grid grid-cols-2 gap-1.5 mt-2">
+                  <button type="button" onClick={() => setModelMode("split")} className={`px-2 py-2 rounded-xl text-[11px] font-semibold border transition ${modelMode === "split" ? "bg-[#EBF2FF] border-[#2B6EE8] text-[#2B6EE8]" : "bg-white border-[#E4E4E7] text-[#6B6B72]"}`}>Un par image</button>
+                  <button type="button" onClick={() => setModelMode("together")} className={`px-2 py-2 rounded-xl text-[11px] font-semibold border transition ${modelMode === "together" ? "bg-[#EBF2FF] border-[#2B6EE8] text-[#2B6EE8]" : "bg-white border-[#E4E4E7] text-[#6B6B72]"}`}>Ensemble (max 3)</button>
+                </div>
+              )}
               <p className="text-[11px] text-[#A0A0A8] mt-1.5">
-                {modelIds.length > 1 ? `Les ${variants} variantes alternent entre les ${modelIds.length} mannequins cochés.` : modelIds.length === 1 ? "Toutes les variantes utilisent ce mannequin." : "Coche au moins un mannequin."}
+                {modelIds.length > 1 && modelMode === "together" ? `Les ${Math.min(3, modelIds.length)} mannequins sont ensemble sur chaque image.`
+                  : vtype === "carousel" ? "Le carrousel garde le même mannequin sur toutes les slides (le premier coché)."
+                  : vtype === "ba" ? "Chaque paire avant/après garde le même mannequin."
+                  : modelIds.length > 1 ? `Les ${variants} variantes alternent entre les ${modelIds.length} mannequins cochés.` : modelIds.length === 1 ? "Toutes les variantes utilisent ce mannequin." : "Coche au moins un mannequin."}
               </p>
             </>
           )}
@@ -248,12 +367,23 @@ export default function NewShootForm(p: Props) {
               {Object.entries(FORMATS).map(([k, v]) => <option key={k} value={k}>{v.short}</option>)}
             </select>
           </div>
-          <div>
-            <Label>Variantes</Label>
-            <select className={INPUT} value={variants} onChange={(e) => setVariants(+e.target.value)}>
-              {[2, 4, 6, 8, 10, 12].map((n) => <option key={n}>{n}</option>)}
-            </select>
-          </div>
+          {vtype === "carousel" ? (
+            <div><Label>Slides</Label><p className="text-sm font-semibold py-2">{slides.length} images</p></div>
+          ) : vtype === "ba" ? (
+            <div>
+              <Label>Paires avant/après</Label>
+              <select className={INPUT} value={pairs} onChange={(e) => setPairs(+e.target.value)}>
+                {[1, 2, 3].map((n) => <option key={n} value={n}>{n} ({n * 2} images)</option>)}
+              </select>
+            </div>
+          ) : (
+            <div>
+              <Label>Variantes</Label>
+              <select className={INPUT} value={variants} onChange={(e) => setVariants(+e.target.value)}>
+                {[2, 4, 6, 8, 10, 12].map((n) => <option key={n}>{n}</option>)}
+              </select>
+            </div>
+          )}
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
@@ -276,15 +406,22 @@ export default function NewShootForm(p: Props) {
 
         {p.quota.limit !== null && (
           <p className="text-[12px] text-[#6B6B72] flex items-center gap-2">
-            Quota du mois : <Badge tone={remaining < variants ? "amber" : "blue"}>{p.quota.used} / {p.quota.limit} images</Badge>
+            Quota du mois : <Badge tone={remaining < nImages ? "amber" : "blue"}>{p.quota.used} / {p.quota.limit} images</Badge>
           </p>
         )}
         {error && <div className="p-3 rounded-xl bg-red-50 border border-red-100 text-sm text-red-700">{error}</div>}
-        <Btn className="w-full" onClick={submit} disabled={busy || uploading > 0 || remaining < variants}>
-          {busy ? <><Spinner className="border-white/40 border-t-white" /> Préparation…</> : <><Wand2 size={15} /> Générer {variants} variantes</>}
+        <Btn className="w-full" onClick={submit} disabled={busy || uploading > 0 || remaining < nImages}>
+          {busy ? <><Spinner className="border-white/40 border-t-white" /> Préparation…</> : <><Wand2 size={15} /> Générer {nImages} images</>}
         </Btn>
-        {remaining < variants && <p className="text-[12px] text-[#E8444A]">Il ne te reste que {Math.max(0, remaining)} images ce mois-ci.</p>}
+        {remaining < nImages && <p className="text-[12px] text-[#E8444A]">Il ne te reste que {Math.max(0, remaining)} images ce mois-ci.</p>}
       </Card>
     </div>
+  );
+}
+
+function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button type="button" onClick={onClick}
+      className={`px-3 py-2 rounded-full text-xs font-semibold border transition ${on ? "bg-[#EBF2FF] border-[#2B6EE8] text-[#2B6EE8]" : "bg-white border-[#E4E4E7] text-[#0A0A0B] hover:bg-[#F4F4F5]"}`}>{children}</button>
   );
 }

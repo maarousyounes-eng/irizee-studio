@@ -9,9 +9,10 @@ import Comments from "./Comments";
 import CorrectionModal, { type NoteZone } from "./CorrectionModal";
 import { api, signUrls, useSignedUrls, usePipeline, useSupabase } from "@/lib/client";
 import { FORMATS, FORMAT_PACKS, type ImageRow, type Role } from "@/types";
+import { imageLabel, typeName } from "@/lib/visualTypes";
 
 interface Props {
-  shoot: { id: string; prompt: string; aspect: string; product_id: string; created_by: string; created_at: string; analysis: string | null; inspiration_paths: string[]; engine: string; size: string };
+  shoot: { id: string; prompt: string; aspect: string; product_id: string; created_by: string; created_at: string; analysis: string | null; inspiration_paths: string[]; engine: string; size: string; visual_type?: string | null; type_params?: { slides?: string[] } | null };
   productName: string;
   modelNames: string[];
   me: { id: string; name: string; role: Role };
@@ -67,9 +68,33 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
   useEffect(() => {
     const key = `run:${shoot.id}`;
     const raw = sessionStorage.getItem(key);
-    if (raw) { sessionStorage.removeItem(key); try { run(JSON.parse(raw)); } catch {} }
+    if (raw) {
+      sessionStorage.removeItem(key);
+      try {
+        const ids = JSON.parse(raw) as string[];
+        // Carrousel / avant-après : la slide 1 (ou l'« avant ») d'abord, les autres la reprennent ensuite
+        if (shoot.visual_type === "carousel" || shoot.visual_type === "ba") { waiting.current = ids; load(); } else run(ids);
+      } catch {}
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const waiting = useRef<string[]>([]);
+  useEffect(() => {
+    if (!waiting.current.length || !images.length) return;
+    const byId = new Map(images.map((i) => [i.id, i]));
+    const ready: string[] = [];
+    waiting.current = waiting.current.filter((id) => {
+      const im = byId.get(id);
+      if (!im) return true;
+      const anchorVi = shoot.visual_type === "carousel" ? (im.variant_index === 0 ? null : 0) : (im.variant_index % 2 === 0 ? null : im.variant_index - 1);
+      if (anchorVi === null) { ready.push(id); return false; }
+      const anc = images.find((x) => x.kind === "generated" && x.variant_index === anchorVi && !x.parent_id);
+      if (!anc || (anc.state === "done" && anc.path) || anc.state === "error") { ready.push(id); return false; }
+      return true;
+    });
+    if (ready.length) run(ready);
+  }, [images, run, shoot.visual_type]);
 
   // Contrôle qualité manquant (page rechargée en cours de route)
   useEffect(() => {
@@ -290,6 +315,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
             <h1 className="text-xl font-semibold tracking-tight">{productName}</h1>
             <p className="text-sm text-[#6B6B72] max-w-3xl mt-0.5">{shoot.prompt}</p>
             <div className="flex flex-wrap gap-1.5 mt-2">
+              {shoot.visual_type && shoot.visual_type !== "photo" && <Badge tone="blue">{typeName(shoot.visual_type)}</Badge>}
               <Badge tone="blue">{FORMATS[shoot.aspect]?.short ?? shoot.aspect}</Badge>
               <Badge>{modelNames.length ? `${modelNames.length > 1 ? "Mannequins" : "Mannequin"} : ${modelNames.join(", ")}` : "Mannequins variés (IA)"}</Badge>
               <Badge>{new Date(shoot.created_at).toLocaleDateString("fr-FR")}</Badge>
@@ -380,6 +406,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
                     <div className="flex flex-col gap-1 items-start">
                       {v ? <Badge tone={v.tone} className="bg-white/95">{v.label}</Badge> : <Badge tone="gray" className="bg-white/95"><Spinner className="w-3 h-3" /> Contrôle…</Badge>}
                       {(img.kind !== "generated" || img.version > 1) && <Badge tone="blue" className="bg-white/95">{img.kind === "format" ? `Format ${FORMATS[img.aspect ?? ""]?.short ?? img.aspect}` : img.params?.n > 1 ? `Proposition ${img.params.i}/${img.params.n}` : `Version ${img.version}`}</Badge>}
+                      {imageLabel(shoot.visual_type, img.variant_index) && <Badge tone="gray" className="bg-white/95">{imageLabel(shoot.visual_type, img.variant_index)}{shoot.visual_type === "carousel" && shoot.type_params?.slides?.[img.variant_index] ? ` · ${shoot.type_params.slides[img.variant_index].slice(0, 40)}` : ""}</Badge>}
                       {img.id === latestFixId && <Badge tone="blue" className="bg-white/95">★ Dernière corrigée</Badge>}
                       {img.params?.archived && <Badge tone="gray" className="bg-white/95">Écartée</Badge>}
                     </div>
