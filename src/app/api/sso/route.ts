@@ -5,7 +5,7 @@ import { verifySsoToken } from "@/lib/sso";
 
 export const dynamic = "force-dynamic";
 
-// GET /api/sso?token=...  — arrivée depuis l'accueil Irizée Brand.
+// GET /api/sso?token=...  — arrivée depuis le portail Irizée Tools.
 // Vérifie le jeton signé puis ouvre une session pour le compte existant ayant le même e-mail.
 export async function GET(request: NextRequest) {
   const fail = (reason: string) => {
@@ -14,12 +14,12 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(url);
   };
 
-  const secret = process.env.SSO_SHARED_SECRET;
+  const publicKey = process.env.SSO_PUBLIC_KEY;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!secret || !serviceKey) return fail("non-configure");
+  if (!publicKey || !serviceKey) return fail("non-configure");
 
   const token = request.nextUrl.searchParams.get("token") ?? "";
-  const claims = verifySsoToken(token, secret);
+  const claims = verifySsoToken(token, publicKey);
   if (!claims) return fail("lien-invalide");
 
   const admin = createAdmin(process.env.NEXT_PUBLIC_SUPABASE_URL!, serviceKey, {
