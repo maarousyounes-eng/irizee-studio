@@ -1,14 +1,22 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { MODELS, gemini, firstText } from "./gemini";
 import { slidesPlanPrompt } from "./prompts";
+import { brandRules, loadProduct } from "./generation";
+import { emptySlide, normalizeSlides, type Slide } from "./visualTypes";
 
-/** L'IA propose le contenu de chaque slide d'un carrousel (une phrase par slide). */
-export async function planSlides(sb: SupabaseClient, a: { idea: string; n: number; productIds: string[]; noProduct: boolean; people: boolean }) {
+/** L'IA propose le plan d'un carrousel : la photo, le titre, le texte et la mise en page de chaque slide. */
+export async function planSlides(sb: SupabaseClient, a: { idea: string; n: number; style: string; productIds: string[]; noProduct: boolean; people: boolean }): Promise<Slide[]> {
   const n = Math.min(10, Math.max(3, a.n));
-  const { data: prods } = a.noProduct || !a.productIds.length ? { data: [] as { name: string }[] } : await sb.from("products").select("name").in("id", a.productIds);
-  const r = await gemini(MODELS.text, [{ text: slidesPlanPrompt({ idea: a.idea, n, products: (prods ?? []).map((p) => p.name), people: a.people }) }], { purpose: "plan carrousel", json: true, timeoutMs: 50_000 });
+  const prods = a.noProduct ? [] : (await Promise.all(a.productIds.slice(0, 4).map((id) => loadProduct(sb, id).catch(() => null)))).filter(Boolean);
+  const products = prods.map((x) => {
+    const p = x!.product;
+    return [`"${p.name}"${p.look ? `: ${p.look}` : ""}`, p.real_size ? `Real size: ${p.real_size.replace(/\n/g, ", ")}.` : "", p.texts?.length ? `Printed on it: ${p.texts.join(" / ")}` : ""].filter(Boolean).join(" ");
+  }).join("\n");
+  const rules = [...(await brandRules(sb)), ...prods.flatMap((x) => x!.product.rules ?? [])];
+  const r = await gemini(MODELS.text, [{ text: slidesPlanPrompt({ idea: a.idea, n, style: a.style, products, rules, people: a.people }) }], { purpose: "plan carrousel", json: true, timeoutMs: 60_000 });
   const raw = JSON.parse(firstText(r).trim().replace(/^```json\s*|```$/g, "")) as { slides?: unknown[] };
-  const slides = (raw.slides ?? []).map((x) => String(x ?? "").trim().slice(0, 240)).filter(Boolean).slice(0, n);
-  while (slides.length < n) slides.push("");
+  const slides = normalizeSlides(raw.slides).slice(0, n);
+  if (slides[0]?.layout === "text") slides[0].layout = "overlay";
+  while (slides.length < n) slides.push(emptySlide());
   return slides;
 }

@@ -6,7 +6,7 @@ import { ImagePlus, X, Wand2 } from "lucide-react";
 import { Btn, Card, INPUT, Label, Spinner, Badge } from "@/components/ui";
 import { api, uploadImage, useSignedUrls, useSupabase } from "@/lib/client";
 import { FORMATS, type Role } from "@/types";
-import { VISUAL_TYPES, SOCIAL_STYLES, TEXT_ZONES, BA_CHANGES, type VisualType } from "@/lib/visualTypes";
+import { VISUAL_TYPES, SOCIAL_STYLES, TEXT_ZONES, BA_CHANGES, CAROUSEL_STYLES, SLIDE_LAYOUTS, SLIDE_ZONES, emptySlide, normalizeSlides, type Slide, type VisualType } from "@/lib/visualTypes";
 
 interface Props {
   role: Role;
@@ -49,7 +49,9 @@ export default function NewShootForm(p: Props) {
   const [modelMode, setModelMode] = useState<"split" | "together">(p.again?.modelMode === "together" ? "together" : "split");
   const [socialStyle, setSocialStyle] = useState<string>(tp0.socialStyle ?? "feed");
   const [textZone, setTextZone] = useState<string>(tp0.textZone ?? "top");
-  const [slides, setSlides] = useState<string[]>(Array.isArray(tp0.slides) && tp0.slides.length ? tp0.slides : ["", "", "", "", ""]);
+  const [slides, setSlides] = useState<Slide[]>(normalizeSlides(tp0.slides).length ? normalizeSlides(tp0.slides) : Array.from({ length: 5 }, emptySlide));
+  const [carouselStyle, setCarouselStyle] = useState<string>(tp0.carouselStyle ?? "edu");
+  const setSlide = (i: number, p: Partial<Slide>) => setSlides((all) => all.map((x, k) => (k === i ? { ...x, ...p } : x)));
   const [planning, setPlanning] = useState(false);
   const [baChange, setBaChange] = useState<string>(tp0.baChange ?? "terne");
   const [baBefore, setBaBefore] = useState<string>(tp0.baBefore ?? "");
@@ -112,7 +114,7 @@ export default function NewShootForm(p: Props) {
 
   const remaining = p.quota.limit === null ? Infinity : p.quota.limit - p.quota.used;
   const noPeople = peopleMode === "none";
-  const nImages = vtype === "carousel" ? slides.length : vtype === "ba" ? pairs * 2 : variants;
+  const nImages = vtype === "carousel" ? Math.max(1, slides.filter((x) => x.layout !== "text").length) : vtype === "ba" ? pairs * 2 : variants;
 
   function selectType(t: VisualType) {
     setVtype(t);
@@ -125,7 +127,7 @@ export default function NewShootForm(p: Props) {
     if (!prompt.trim()) return setError("Décris d'abord l'histoire du carrousel dans la consigne");
     setPlanning(true);
     try {
-      const r = await api<{ slides: string[] }>("/api/shoots/slides", { idea: prompt, n: slides.length, productIds: noProduct ? [] : [productId, ...extraIds.filter((x) => x !== productId)], noProduct, people: !noPeople });
+      const r = await api<{ slides: Slide[] }>("/api/shoots/slides", { idea: prompt, n: slides.length, style: carouselStyle, productIds: noProduct ? [] : [productId, ...extraIds.filter((x) => x !== productId)], noProduct, people: !noPeople });
       setSlides(r.slides);
     } catch (e) { setError(e instanceof Error ? e.message : "Erreur"); }
     setPlanning(false);
@@ -135,7 +137,8 @@ export default function NewShootForm(p: Props) {
     setError(null);
     if (!productId) return setError("Choisis un produit");
     if (!prompt.trim() && vtype !== "carousel" && vtype !== "ba") return setError("Écris une consigne");
-    if (vtype === "carousel" && !prompt.trim() && !slides.some((x) => x.trim())) return setError("Décris le carrousel dans la consigne, ou remplis les slides");
+    if (vtype === "carousel" && !prompt.trim() && !slides.some((x) => x.photo || x.title || x.body)) return setError("Décris le carrousel dans la consigne, ou remplis les slides");
+    if (vtype === "carousel" && !slides.some((x) => x.layout !== "text")) return setError("Il faut au moins une slide avec photo");
     if (vtype === "ba" && baChange === "autre" && (!baBefore.trim() || !baAfter.trim())) return setError("Décris l'avant et l'après");
     if (isCreator && !projectId) return setError("Choisis un projet");
     if (peopleMode === "models" && !modelIds.length) return setError("Coche au moins un mannequin, ou choisis « Varié » / « Sans personne »");
@@ -145,7 +148,7 @@ export default function NewShootForm(p: Props) {
         productId, productIds: [productId, ...extraIds.filter((x) => x !== productId)].slice(0, 4), productMode, projectId: projectId || null, modelIds: peopleMode === "models" ? modelIds : [],
         conceptId: conceptId || null, prompt, aspect, size, engine, variants, noPeople, noProduct, inspirationPaths: inspirations,
         visualType: vtype, modelMode, slideCount: slides.length, pairs,
-        typeParams: { socialStyle, textZone, slides, baChange, baBefore, baAfter },
+        typeParams: { socialStyle, textZone, slides, carouselStyle, baChange, baBefore, baAfter },
       });
       sessionStorage.setItem(`run:${r.shootId}`, JSON.stringify(r.imageIds));
       router.push(`/shoots/${r.shootId}`);
@@ -249,25 +252,45 @@ export default function NewShootForm(p: Props) {
         </div>
 
         {vtype === "carousel" && (
-          <div>
-            <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+          <div className="space-y-3">
+            <div>
+              <Label>Style de carrousel</Label>
+              <div className="flex flex-wrap gap-1.5">
+                {CAROUSEL_STYLES.map((x) => <Chip key={x.id} on={carouselStyle === x.id} onClick={() => setCarouselStyle(x.id)}>{x.label}</Chip>)}
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <Label>Les slides ({slides.length})</Label>
               <div className="flex items-center gap-1.5">
                 <Btn size="sm" variant="ghost" disabled={slides.length <= 3} onClick={() => setSlides(slides.slice(0, -1))}>− 1</Btn>
-                <Btn size="sm" variant="ghost" disabled={slides.length >= 10} onClick={() => setSlides([...slides, ""])}>+ 1</Btn>
-                <Btn size="sm" onClick={proposeSlides} disabled={planning}>{planning ? <Spinner className="border-white/40 border-t-white" /> : <Wand2 size={13} />} L&apos;IA propose l&apos;enchaînement</Btn>
+                <Btn size="sm" variant="ghost" disabled={slides.length >= 10} onClick={() => setSlides([...slides, emptySlide()])}>+ 1</Btn>
+                <Btn size="sm" onClick={proposeSlides} disabled={planning}>{planning ? <Spinner className="border-white/40 border-t-white" /> : <Wand2 size={13} />} L&apos;IA propose le plan et les textes</Btn>
               </div>
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               {slides.map((x, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <span className="w-14 shrink-0 text-xs font-semibold text-[#6B6B72]">Slide {i + 1}</span>
-                  <input className={INPUT} value={x} onChange={(e) => setSlides(slides.map((y, k) => (k === i ? e.target.value : y)))}
-                    placeholder={i === 0 ? "Couverture : le produit en grand" : "Ce que montre cette slide (laisser vide : l'IA décide)"} />
+                <div key={i} className="rounded-2xl border border-[#E4E4E7] bg-white p-3 space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-bold w-14 shrink-0">Slide {i + 1}</span>
+                    <select aria-label={`Mise en page de la slide ${i + 1}`} className={INPUT + " !w-auto !py-1.5 text-xs"} value={x.layout} onChange={(e) => setSlide(i, { layout: e.target.value as Slide["layout"] })}>
+                      {SLIDE_LAYOUTS.filter((l) => i > 0 || l.id !== "text").map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
+                    </select>
+                    <select aria-label={`Place du texte, slide ${i + 1}`} className={INPUT + " !w-auto !py-1.5 text-xs"} value={x.zone} onChange={(e) => setSlide(i, { zone: e.target.value as Slide["zone"] })}>
+                      {SLIDE_ZONES.map((z) => <option key={z.id} value={z.id}>{z.label}</option>)}
+                    </select>
+                  </div>
+                  {x.layout !== "text" && (
+                    <input className={INPUT} value={x.photo} onChange={(e) => setSlide(i, { photo: e.target.value })} aria-label={`Photo de la slide ${i + 1}`}
+                      placeholder={i === 0 ? "Photo : ex. le tube posé sur une pierre claire, lumière douce" : "Photo à créer (vide : l'IA décide)"} />
+                  )}
+                  <div className="grid sm:grid-cols-[1fr_1.4fr] gap-2">
+                    <input className={INPUT} value={x.title} maxLength={80} onChange={(e) => setSlide(i, { title: e.target.value })} aria-label={`Titre de la slide ${i + 1}`} placeholder="Titre" />
+                    <input className={INPUT} value={x.body} maxLength={220} onChange={(e) => setSlide(i, { body: e.target.value })} aria-label={`Texte de la slide ${i + 1}`} placeholder="Petit texte (facultatif)" />
+                  </div>
                 </div>
               ))}
             </div>
-            <p className="text-[11px] text-[#A0A0A8] mt-1">La slide 1 est créée d&apos;abord ; les suivantes reprennent la même personne, le même décor et la même lumière. Slides vides : l&apos;IA propose le plan au lancement.</p>
+            <p className="text-[11px] text-[#A0A0A8]">Les photos sont générées sans texte, avec de la place pour lui. Les textes sont posés ensuite, exactement comme écrits ici, avec « Habiller le carrousel » sur la page du shooting. Les slides texte seules ne coûtent rien. Slides vides : l&apos;IA propose le plan au lancement.</p>
           </div>
         )}
       </div>
@@ -368,7 +391,7 @@ export default function NewShootForm(p: Props) {
             </select>
           </div>
           {vtype === "carousel" ? (
-            <div><Label>Slides</Label><p className="text-sm font-semibold py-2">{slides.length} images</p></div>
+            <div><Label>Slides</Label><p className="text-sm font-semibold py-2">{slides.length} slides · {nImages} photo{nImages > 1 ? "s" : ""}</p></div>
           ) : vtype === "ba" ? (
             <div>
               <Label>Paires avant/après</Label>

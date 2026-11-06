@@ -3,7 +3,7 @@ import { analyzeInspirations, checkQuota } from "@/lib/generation";
 import { withAiCtx } from "@/lib/gemini";
 import { ANALYZE_PROMPT } from "@/lib/prompts";
 import { FORMATS } from "@/types";
-import { isVisualType, BA_CHANGES, SOCIAL_STYLES, TEXT_ZONES, type TypeParams } from "@/lib/visualTypes";
+import { isVisualType, BA_CHANGES, SOCIAL_STYLES, TEXT_ZONES, CAROUSEL_STYLES, normalizeSlides, emptySlide, type Slide, type TypeParams } from "@/lib/visualTypes";
 import { planSlides } from "@/lib/slides";
 
 export const maxDuration = 60;
@@ -21,16 +21,17 @@ export async function POST(req: Request) {
     if (vtype === "social") tp.socialStyle = SOCIAL_STYLES.some((x) => x.id === tpIn.socialStyle) ? tpIn.socialStyle : "feed";
     if (vtype === "ad") tp.textZone = TEXT_ZONES.some((x) => x.id === tpIn.textZone) ? tpIn.textZone : "top";
     if (vtype === "ba") { tp.baChange = BA_CHANGES.some((x) => x.id === tpIn.baChange) ? tpIn.baChange : "terne"; tp.baBefore = s(tpIn.baBefore); tp.baAfter = s(tpIn.baAfter); if (tp.baChange === "autre" && (!tp.baBefore || !tp.baAfter)) throw new HttpError(400, "Décris l'avant et l'après"); }
-    if (vtype === "carousel") tp.slides = (Array.isArray(tpIn.slides) ? tpIn.slides : []).map((x) => s(x, 240)).slice(0, 10);
+    let slides: Slide[] = [];
+    if (vtype === "carousel") { tp.carouselStyle = CAROUSEL_STYLES.some((x) => x.id === tpIn.carouselStyle) ? tpIn.carouselStyle : "edu"; slides = normalizeSlides(tpIn.slides); }
     let prompt = s(b.prompt, 4000);
     if (!prompt && (vtype === "carousel" || vtype === "ba")) prompt = vtype === "ba" ? "Natural beauty portrait." : "Showcase the product.";
     if (!prompt) throw new HttpError(400, "Écris une consigne");
     if (!FORMATS[b.aspect]) throw new HttpError(400, "Format invalide");
     let n = Math.min(12, Math.max(1, Number(b.variants) || 4));
-    if (vtype === "carousel") n = Math.min(10, Math.max(3, Number(b.slideCount) || tp.slides!.length || 5));
+    if (vtype === "carousel") n = Math.min(10, Math.max(3, Number(b.slideCount) || slides.length || 5));
     if (vtype === "ba") n = 2 * Math.min(3, Math.max(1, Number(b.pairs) || 1));
     if (profile.role === "creator" && !b.projectId) throw new HttpError(400, "Choisis un projet");
-    await checkQuota(sb, user.id, n);
+    await checkQuota(sb, user.id, vtype === "carousel" ? Math.max(1, slides.filter((x) => x.layout !== "text").length || n) : n);
 
     // Analyse de l'inspiration : réutilise celle du concept s'il y en a une
     let analysis: string | null = null;
@@ -40,13 +41,15 @@ export async function POST(req: Request) {
     }
     const modelIds: string[] = Array.isArray(b.modelIds) ? b.modelIds.filter((x: unknown) => typeof x === "string").slice(0, 12) : [];
     const paths: string[] = Array.isArray(b.inspirationPaths) ? b.inspirationPaths : [];
-    // Carrousel sans plan : l'IA propose le contenu de chaque slide
-    if (vtype === "carousel" && tp.slides!.filter(Boolean).length < n) {
-      const missing = tp.slides!.filter(Boolean).length === 0;
-      if (missing) {
-        try { tp.slides = await withAiCtx({ sb, userId: user.id }, () => planSlides(sb, { idea: prompt, n, productIds, noProduct: !!b.noProduct, people: !b.noPeople })); } catch { tp.slides = []; }
+    // Carrousel sans plan : l'IA propose la photo, les textes et la mise en page de chaque slide
+    if (vtype === "carousel") {
+      const filled = (x: Slide) => !!(x.photo || x.title || x.body);
+      if (!slides.some(filled)) {
+        try { slides = await withAiCtx({ sb, userId: user.id }, () => planSlides(sb, { idea: prompt, n, style: tp.carouselStyle!, productIds, noProduct: !!b.noProduct, people: !b.noPeople })); } catch { slides = []; }
       }
-      tp.slides = Array.from({ length: n }, (_, i) => tp.slides![i] ?? "");
+      slides = Array.from({ length: n }, (_, i) => slides[i] ?? emptySlide());
+      tp.slides = slides;
+      if (!slides.some((x) => x.layout !== "text")) throw new HttpError(400, "Il faut au moins une slide avec photo");
     }
     if (!analysis && paths.length) {
       try { analysis = await withAiCtx({ sb, userId: user.id }, () => analyzeInspirations(sb, paths, ANALYZE_PROMPT)); } catch { analysis = null; }
@@ -60,7 +63,9 @@ export async function POST(req: Request) {
     }).select("id").single();
     if (error || !shoot) throw new HttpError(400, error?.message ?? "Création impossible");
 
-    const rows = Array.from({ length: n }, (_, i) => ({
+    // Carrousel : pas d'image à générer pour les slides texte seules (elles sont faites dans l'éditeur Ads)
+    const indexes = vtype === "carousel" ? slides.map((x, i) => (x.layout === "text" ? -1 : i)).filter((i) => i >= 0) : Array.from({ length: n }, (_, i) => i);
+    const rows = indexes.map((i) => ({
       shoot_id: shoot.id, kind: "generated", variant_index: i, aspect: b.aspect, created_by: user.id,
       // Carrousel : le même mannequin sur toutes les slides ; avant/après : le même dans la paire ; ensemble : tous (lus sur le shooting)
       model_id: b.noPeople || !modelIds.length || (b.modelMode === "together" && modelIds.length > 1) ? null

@@ -9,10 +9,11 @@ import Comments from "./Comments";
 import CorrectionModal, { type NoteZone } from "./CorrectionModal";
 import { api, signUrls, useSignedUrls, usePipeline, useSupabase } from "@/lib/client";
 import { FORMATS, FORMAT_PACKS, type ImageRow, type Role } from "@/types";
-import { imageLabel, typeName } from "@/lib/visualTypes";
+import { imageLabel, normalizeSlides, typeName } from "@/lib/visualTypes";
+import { carouselToItems } from "@/components/ads3/fromCarousel";
 
 interface Props {
-  shoot: { id: string; prompt: string; aspect: string; product_id: string; created_by: string; created_at: string; analysis: string | null; inspiration_paths: string[]; engine: string; size: string; visual_type?: string | null; type_params?: { slides?: string[] } | null };
+  shoot: { id: string; prompt: string; aspect: string; product_id: string; created_by: string; created_at: string; analysis: string | null; inspiration_paths: string[]; engine: string; size: string; visual_type?: string | null; type_params?: { slides?: unknown } | null };
   productName: string;
   modelNames: string[];
   me: { id: string; name: string; role: Role };
@@ -64,6 +65,23 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
 
   const flash = (m: string) => { setToast(m); setTimeout(() => setToast(null), 4000); };
 
+  // Carrousel : le plan (photo + textes de chaque slide) et le passage vers l'éditeur Ads
+  const slideInfo = useMemo(() => normalizeSlides(shoot.type_params?.slides).map((x) => x.title || x.photo), [shoot.type_params]);
+  const [dressing, setDressing] = useState(false);
+  async function dressCarousel() {
+    setDressing(true);
+    try {
+      const { data: kit } = await sb.from("brand_kit").select("fonts, colors, logo_path").eq("id", 1).single();
+      const { items, missing } = await carouselToItems({ slides: shoot.type_params?.slides, images, kit: { fonts: kit?.fonts ?? "elegant", colors: kit?.colors ?? [], logo_path: kit?.logo_path ?? null }, aspect: shoot.aspect });
+      if (!items.length) { flash("Aucune photo prête pour l'instant."); setDressing(false); return; }
+      const fmt = ["4:5", "1:1", "9:16", "16:9"].includes(shoot.aspect) ? shoot.aspect : "4:5";
+      const { data, error } = await sb.from("ad_designs").insert({ name: `Carrousel · ${shoot.prompt.slice(0, 40)}`, items, fmt }).select("id").single();
+      if (error || !data) throw new Error(error?.message ?? "Création impossible");
+      if (missing.length) sessionStorage.setItem(`dress-missing:${data.id}`, missing.join(", "));
+      router.push(`/ads/d/${data.id}`);
+    } catch (e) { flash(e instanceof Error ? e.message : "Erreur"); setDressing(false); }
+  }
+
   // Lancement des générations demandées depuis le formulaire
   useEffect(() => {
     const key = `run:${shoot.id}`;
@@ -87,7 +105,8 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
     waiting.current = waiting.current.filter((id) => {
       const im = byId.get(id);
       if (!im) return true;
-      const anchorVi = shoot.visual_type === "carousel" ? (im.variant_index === 0 ? null : 0) : (im.variant_index % 2 === 0 ? null : im.variant_index - 1);
+      const firstVi = Math.min(...images.filter((x) => x.kind === "generated").map((x) => x.variant_index));
+      const anchorVi = shoot.visual_type === "carousel" ? (im.variant_index === firstVi ? null : firstVi) : (im.variant_index % 2 === 0 ? null : im.variant_index - 1);
       if (anchorVi === null) { ready.push(id); return false; }
       const anc = images.find((x) => x.kind === "generated" && x.variant_index === anchorVi && !x.parent_id);
       if (!anc || (anc.state === "done" && anc.path) || anc.state === "error") { ready.push(id); return false; }
@@ -323,11 +342,25 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
           </div>
           <div className="flex gap-2 flex-wrap">
             {approved.length > 0 && <Btn size="sm" variant="soft" onClick={() => downloadZip(approved)} disabled={zipping}>{zipping ? <Spinner /> : <Archive size={13} />} ZIP des approuvées ({approved.length})</Btn>}
+            {isStaff && shoot.visual_type === "carousel" && <Btn size="sm" onClick={dressCarousel} disabled={dressing}>{dressing ? <Spinner className="border-white/40 border-t-white" /> : <Type size={13} />} Habiller le carrousel</Btn>}
             <Link href={`/studio?again=${shoot.id}`}><Btn size="sm" variant="soft"><RotateCcw size={13} /> Recommencer</Btn></Link>
             {isStaff && <Btn size="sm" variant="ghost" onClick={() => setShowConcept(true)}><BookmarkPlus size={13} /> Enregistrer comme concept</Btn>}
             {isStaff && <Btn size="sm" variant="danger" onClick={deleteShoot}><Trash2 size={13} /></Btn>}
           </div>
         </div>
+        {shoot.visual_type === "carousel" && normalizeSlides(shoot.type_params?.slides).length > 0 && (
+          <details className="mt-3 bg-white border border-[#E4E4E7] rounded-2xl px-4 py-3">
+            <summary className="text-sm font-semibold cursor-pointer">Plan du carrousel ({normalizeSlides(shoot.type_params?.slides).length} slides)</summary>
+            <ol className="mt-2 space-y-1.5 text-xs">
+              {normalizeSlides(shoot.type_params?.slides).map((x, i) => (
+                <li key={i} className="flex gap-2">
+                  <span className="font-bold w-14 shrink-0">Slide {i + 1}</span>
+                  <span className="min-w-0"><b>{x.title || "—"}</b>{x.body ? ` · ${x.body}` : ""}<span className="block text-[#6B6B72]">{x.layout === "text" ? "Slide texte seule (faite dans l'éditeur, sans photo)" : `Photo : ${x.photo || "au choix de l'IA"}`}</span></span>
+                </li>
+              ))}
+            </ol>
+          </details>
+        )}
         {inspUrls && shoot.inspiration_paths.length > 0 && (
           <div className="flex gap-2 mt-3">
             {shoot.inspiration_paths.map((p) => inspUrls[p] && /* eslint-disable-next-line @next/next/no-img-element */ <img key={p} src={inspUrls[p]} alt="Inspiration" onClick={() => setZoom(inspUrls[p])} className="w-12 h-14 rounded-lg object-cover border border-[#E4E4E7] cursor-zoom-in" />)}
@@ -406,7 +439,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
                     <div className="flex flex-col gap-1 items-start">
                       {v ? <Badge tone={v.tone} className="bg-white/95">{v.label}</Badge> : <Badge tone="gray" className="bg-white/95"><Spinner className="w-3 h-3" /> Contrôle…</Badge>}
                       {(img.kind !== "generated" || img.version > 1) && <Badge tone="blue" className="bg-white/95">{img.kind === "format" ? `Format ${FORMATS[img.aspect ?? ""]?.short ?? img.aspect}` : img.params?.n > 1 ? `Proposition ${img.params.i}/${img.params.n}` : `Version ${img.version}`}</Badge>}
-                      {imageLabel(shoot.visual_type, img.variant_index) && <Badge tone="gray" className="bg-white/95">{imageLabel(shoot.visual_type, img.variant_index)}{shoot.visual_type === "carousel" && shoot.type_params?.slides?.[img.variant_index] ? ` · ${shoot.type_params.slides[img.variant_index].slice(0, 40)}` : ""}</Badge>}
+                      {imageLabel(shoot.visual_type, img.variant_index) && <Badge tone="gray" className="bg-white/95">{imageLabel(shoot.visual_type, img.variant_index)}{shoot.visual_type === "carousel" && slideInfo[img.variant_index] ? ` · ${slideInfo[img.variant_index].slice(0, 40)}` : ""}</Badge>}
                       {img.id === latestFixId && <Badge tone="blue" className="bg-white/95">★ Dernière corrigée</Badge>}
                       {img.params?.archived && <Badge tone="gray" className="bg-white/95">Écartée</Badge>}
                     </div>

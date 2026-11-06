@@ -36,10 +36,45 @@ export const BA_CHANGES: { id: string; label: string; before: string; after: str
   { id: "autre", label: "Autre (à décrire)", before: "", after: "" },
 ];
 
+export const CAROUSEL_STYLES: { id: string; label: string; en: string }[] = [
+  { id: "edu", label: "Éducatif (les bienfaits)", en: "educational: a cover with a strong promise, then one benefit or key fact per slide, then a closing slide with a call to action" },
+  { id: "routine", label: "Routine étape par étape", en: "step-by-step routine: a cover, then one step of the routine per slide (how to use the product), then a closing slide" },
+  { id: "ingredient", label: "Ingrédient star", en: "star ingredient: a cover, then what the ingredient is, where it comes from, what it does in the product, then a closing slide" },
+  { id: "myths", label: "Idées reçues / vérités", en: "myths vs truths: a cover, then one common misconception per slide with the truth, then a closing slide" },
+  { id: "mood", label: "Ambiance (photos, peu de texte)", en: "mood / aesthetic: mostly photos telling a visual story, very short text or none" },
+];
+
+export type SlideLayout = "overlay" | "band" | "text";
+export type SlideZone = "top" | "bottom" | "center";
+export interface Slide { photo: string; title: string; body: string; layout: SlideLayout; zone: SlideZone }
+export const SLIDE_LAYOUTS: { id: SlideLayout; label: string }[] = [
+  { id: "overlay", label: "Texte sur la photo" },
+  { id: "band", label: "Photo + bandeau de couleur" },
+  { id: "text", label: "Slide texte seule (sans photo)" },
+];
+export const SLIDE_ZONES: { id: SlideZone; label: string; en: string }[] = [
+  { id: "top", label: "Texte en haut", en: "the top third" },
+  { id: "bottom", label: "Texte en bas", en: "the bottom third" },
+  { id: "center", label: "Texte au centre", en: "the centre" },
+];
+export const emptySlide = (): Slide => ({ photo: "", title: "", body: "", layout: "overlay", zone: "top" });
+
+/** Accepte l'ancien format (une phrase par slide) et le nouveau (photo + textes + mise en page). */
+export function normalizeSlides(raw: unknown): Slide[] {
+  if (!Array.isArray(raw)) return [];
+  const cut = (x: unknown, n: number) => String(x ?? "").trim().slice(0, n);
+  return raw.slice(0, 10).map((x: any) => typeof x === "string" ? { ...emptySlide(), photo: cut(x, 300) } : {
+    photo: cut(x?.photo, 300), title: cut(x?.title, 80), body: cut(x?.body, 220),
+    layout: (SLIDE_LAYOUTS.some((l) => l.id === x?.layout) ? x.layout : "overlay") as SlideLayout,
+    zone: (SLIDE_ZONES.some((z) => z.id === x?.zone) ? x.zone : "top") as SlideZone,
+  });
+}
+
 export interface TypeParams {
   socialStyle?: string;
   textZone?: string;
-  slides?: string[];
+  carouselStyle?: string;
+  slides?: Slide[] | string[];
   baChange?: string;
   baBefore?: string;
   baAfter?: string;

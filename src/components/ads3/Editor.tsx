@@ -8,7 +8,7 @@ import { toJpeg } from "html-to-image";
 import { Copy, Download, Trash2, Wand2 } from "lucide-react";
 import { Btn, Spinner } from "@/components/ui";
 import { api, imgUrl, useSupabase } from "@/lib/client";
-import AdCanvas, { AD_FMTS, type AdEl, type AdItem, type ElKind, type Kit } from "./AdCanvas";
+import AdCanvas, { AD_FMTS, onColor, type AdEl, type AdItem, type ElKind, type Kit } from "./AdCanvas";
 import { newEl } from "./defaults";
 
 interface Design { id: string; name: string; fmt: string; items: AdItem[] }
@@ -40,8 +40,14 @@ export default function Editor({ design, kit, formats }: { design: Design; kit: 
   const palette = useMemo(() => Array.from(new Set([...(kit.colors ?? []), "#0A0A0B", "#FFFFFF"].map((c) => c.toUpperCase()))), [kit.colors]);
 
   // L'image à utiliser pour un format : l'image elle-même si elle est déjà à ce format, sinon sa déclinaison faite dans Shooting, sinon un recadrage
-  const srcFor = useCallback((it: AdItem, f: string) => (it.aspect === f ? it.path : formats[it.image_id]?.[f] ?? it.path), [formats]);
-  const cropped = item ? item.aspect !== fmt && !formats[item.image_id]?.[fmt] : false;
+  const srcFor = useCallback((it: AdItem, f: string) => (!it.path ? null : it.aspect === f ? it.path : formats[it.image_id]?.[f] ?? it.path), [formats]);
+  const cropped = item?.path ? item.aspect !== fmt && !formats[item.image_id]?.[fmt] : false;
+
+  useEffect(() => {
+    const k = `dress-missing:${design.id}`;
+    const m = sessionStorage.getItem(k);
+    if (m) { sessionStorage.removeItem(k); setMsg(`Slide(s) ${m} : pas encore de photo prête, elles ne sont pas dans la pub. Ajoutez-les plus tard ou remplacez-les par une slide texte.`); }
+  }, [design.id]);
 
   // Enregistrement automatique
   const first = useRef(true);
@@ -56,6 +62,29 @@ export default function Editor({ design, kit, formats }: { design: Design; kit: 
   }, [items, fmt, name, sb, design.id]);
 
   const setEls = (fn: (els: AdEl[]) => AdEl[]) => setItems((all) => all.map((it, i) => (i === Math.min(cur, all.length - 1) ? { ...it, els: fn(it.els) } : it)));
+  const patchItem = (p: Partial<AdItem>) => setItems((all) => all.map((it, i) => (i === Math.min(cur, all.length - 1) ? { ...it, ...p } : it)));
+  function addTextSlide() {
+    const key = `t-${Date.now().toString(36)}`;
+    const bg = palette.find((c) => c !== "#FFFFFF") ?? "#0A0A0B";
+    const ink = onColor(bg);
+    const it: AdItem = { key, image_id: "", path: "", aspect: fmt, label: "Slide texte", bg, els: [
+      { id: `${key}-t`, kind: "title", text: "Votre titre", x: 8, y: 30, size: 40, font: "title", color: ink },
+      { id: `${key}-b`, kind: "sub", text: "Votre texte", x: 8, y: 48, size: 18, font: "body", color: ink },
+    ] };
+    setItems((all) => [...all.slice(0, cur + 1), it, ...all.slice(cur + 1)]);
+    setCur(cur + 1); setSel(null);
+  }
+  function moveItem(d: -1 | 1) {
+    const j = cur + d;
+    if (j < 0 || j >= items.length) return;
+    setItems((all) => { const a = [...all]; [a[cur], a[j]] = [a[j], a[cur]]; return a; });
+    setCur(j);
+  }
+  function removeItem() {
+    if (items.length < 2 || !confirm("Retirer cette image de la pub ?")) return;
+    setItems((all) => all.filter((_, i) => i !== cur));
+    setCur(Math.max(0, cur - 1)); setSel(null);
+  }
   const patch = (p: Partial<AdEl>) => sel && setEls((list) => list.map((e) => (e.id === sel ? { ...e, ...p } : e)));
 
   function onDown(id: string, ev: PointerEvent<HTMLDivElement>) {
@@ -89,6 +118,7 @@ export default function Editor({ design, kit, formats }: { design: Design; kit: 
 
   async function loadIdeas() {
     if (!item) return;
+    if (!item.path) return setMsg("Les idées IA regardent une photo : choisissez une image avec photo.");
     setIdeasBusy(true); setMsg(null);
     try { const r = await api<{ ideas: string[] }>("/api/ads3/ideas", { path: item.path, kind: selEl?.kind === "sub" ? "sub" : "title" }); setIdeas(r.ideas); }
     catch (e) { setMsg(e instanceof Error ? e.message : "Erreur"); }
@@ -181,25 +211,31 @@ export default function Editor({ design, kit, formats }: { design: Design; kit: 
       <div className="flex flex-wrap gap-4 items-start">
         <div className="flex-[999_1_560px] min-w-0 space-y-3">
           <div className="bg-[#E4E4E7] rounded-2xl p-4 sm:p-6 overflow-x-auto flex justify-center">
-            <AdCanvas src={srcFor(item, fmt)} w={F.view[0]} h={F.view[1]} els={els} kit={kit} sel={sel}
+            <AdCanvas src={srcFor(item, fmt)} w={F.view[0]} h={F.view[1]} els={els} kit={kit} sel={sel} bg={item.bg} band={item.band}
               onElDown={onDown} onElMove={onMove} onElUp={onUp} onBg={() => setSel(null)} />
           </div>
           <p className="text-xs text-[#52525B] text-center">
             Glissez les textes à la souris. Ils gardent leur place relative dans tous les formats.
             {cropped ? " Ce format n'a pas de déclinaison dans le shooting : l'image est recadrée. Pour un cadrage refait par l'IA, créez la déclinaison dans le shooting." : ""}
           </p>
-          {items.length > 1 && (
-            <div className="flex gap-2 overflow-x-auto pb-1">
-              {items.map((it, i) => (
-                <button key={it.key} type="button" onClick={() => { setCur(i); setSel(null); setIdeas(null); }}
-                  className={`shrink-0 w-24 text-left bg-white rounded-xl p-1 border-2 ${i === cur ? "border-[#2B6EE8]" : "border-transparent"}`}>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={imgUrl(it.path)} alt="" className="w-full aspect-[4/5] object-cover rounded-lg" loading="lazy" />
-                  <span className="block text-[11px] mt-1 px-0.5 truncate">{i + 1}. {it.label}</span>
-                </button>
-              ))}
-            </div>
-          )}
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {items.map((it, i) => (
+              <button key={it.key} type="button" onClick={() => { setCur(i); setSel(null); setIdeas(null); }}
+                className={`shrink-0 w-24 text-left bg-white rounded-xl p-1 border-2 ${i === cur ? "border-[#2B6EE8]" : "border-transparent"}`}>
+                {it.path
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  ? <img src={imgUrl(it.path)} alt="" className="w-full aspect-[4/5] object-cover rounded-lg" loading="lazy" />
+                  : <div className="w-full aspect-[4/5] rounded-lg flex items-center justify-center text-[10px] font-bold p-1 text-center" style={{ background: it.bg || "#F3EDE4", color: onColor(it.bg || "#F3EDE4") }}>{it.els.find((e) => e.kind === "title")?.text.slice(0, 30) || "Texte"}</div>}
+                <span className="block text-[11px] mt-1 px-0.5 truncate">{i + 1}. {it.label}</span>
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Btn size="sm" variant="ghost" onClick={addTextSlide}>+ Slide texte après celle-ci</Btn>
+            <Btn size="sm" variant="ghost" onClick={() => moveItem(-1)} disabled={cur === 0}>← Déplacer</Btn>
+            <Btn size="sm" variant="ghost" onClick={() => moveItem(1)} disabled={cur >= items.length - 1}>Déplacer →</Btn>
+            <Btn size="sm" variant="ghost" onClick={removeItem} disabled={items.length < 2}>Retirer cette image</Btn>
+          </div>
         </div>
 
         <div className="flex-[1_1_320px] min-w-0 space-y-3">
@@ -215,6 +251,32 @@ export default function Editor({ design, kit, formats }: { design: Design; kit: 
               <div className="space-y-1.5 border-t border-[#E4E4E7] pt-3">
                 <p className="text-[11px] text-[#52525B]">Cliquez pour l&apos;utiliser{selEl && (selEl.kind === "title" || selEl.kind === "sub") ? ` dans le ${KIND[selEl.kind].toLowerCase()} sélectionné` : " dans le titre"}, puis modifiez-la si besoin.</p>
                 {ideas.map((t) => <button key={t} type="button" onClick={() => pickIdea(t)} className="w-full text-left text-sm px-3 py-2 rounded-xl border border-[#E4E4E7] bg-[#FAFAFA] hover:bg-[#F4F4F5]">{t}</button>)}
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white border border-[#E4E4E7] rounded-2xl p-4 space-y-3">
+            <h2 className="text-sm font-semibold">{item.path ? "Bandeau de couleur" : "Fond de la slide"}</h2>
+            {item.path ? (
+              <div className="flex flex-wrap gap-1.5">
+                {([["", "Aucun"], ["top", "En haut"], ["bottom", "En bas"], ["center", "Au centre"]] as const).map(([z, l]) => (
+                  <button key={z} type="button" className={chip((item.band?.zone ?? "") === z)} onClick={() => patchItem({ band: z ? { zone: z, color: item.band?.color ?? palette[0] ?? "#0A0A0B", h: item.band?.h ?? 30 } : null })}>{l}</button>
+                ))}
+              </div>
+            ) : null}
+            {item.band && item.path ? (
+              <div>
+                <label htmlFor="bandh" className="text-xs font-semibold">Hauteur : {item.band.h} %</label>
+                <input id="bandh" type="range" min={10} max={70} value={item.band.h} onChange={(e) => patchItem({ band: { ...item.band!, h: Number(e.target.value) } })} className="w-full" />
+              </div>
+            ) : null}
+            {(!item.path || item.band) && (
+              <div className="flex flex-wrap gap-2">
+                {palette.map((c) => {
+                  const on = (item.path ? item.band?.color : item.bg || "#F3EDE4")?.toUpperCase() === c;
+                  return <button key={c} type="button" aria-label={`Couleur ${c}`} onClick={() => (item.path ? patchItem({ band: { ...item.band!, color: c } }) : patchItem({ bg: c }))}
+                    className={`w-10 h-10 rounded-full ${on ? "ring-2 ring-offset-2 ring-[#2B6EE8]" : "border border-[#D4D4D8]"}`} style={{ background: c }} />;
+                })}
               </div>
             )}
           </div>
@@ -291,7 +353,7 @@ export default function Editor({ design, kit, formats }: { design: Design; kit: 
 
       {/* Rendu d'export, hors écran */}
       <div aria-hidden="true" style={{ position: "fixed", left: -100000, top: 0, pointerEvents: "none" }}>
-        {exportJob && <AdCanvas ref={exportRef} src={srcFor(exportJob.item, exportJob.f.key)} w={exportJob.f.out[0]} h={exportJob.f.out[1]} els={exportJob.item.els} kit={kit} />}
+        {exportJob && <AdCanvas ref={exportRef} src={srcFor(exportJob.item, exportJob.f.key)} w={exportJob.f.out[0]} h={exportJob.f.out[1]} els={exportJob.item.els} kit={kit} bg={exportJob.item.bg} band={exportJob.item.band} />}
       </div>
     </div>
   );

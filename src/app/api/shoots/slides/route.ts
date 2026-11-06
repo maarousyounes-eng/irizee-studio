@@ -11,7 +11,7 @@ export async function POST(req: Request) {
     const b = await req.json();
     const productIds: string[] = (Array.isArray(b.productIds) ? b.productIds : []).filter((x: unknown) => typeof x === "string").slice(0, 4);
     if (!String(b.idea ?? "").trim()) throw new HttpError(400, "Décris l'histoire du carrousel");
-    const slides = await withAiCtx({ sb, userId: user.id }, () => planSlides(sb, { idea: String(b.idea), n: Number(b.n) || 5, productIds, noProduct: !!b.noProduct, people: !!b.people }));
+    const slides = await withAiCtx({ sb, userId: user.id }, () => planSlides(sb, { idea: String(b.idea), n: Number(b.n) || 5, style: String(b.style ?? "edu"), productIds, noProduct: !!b.noProduct, people: !!b.people }));
     return { slides };
   });
 }

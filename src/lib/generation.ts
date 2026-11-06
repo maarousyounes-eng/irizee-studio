@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { MODELS, gemini, imgPart, firstImage, firstText, noImageReason, parseJson, withAiCtx, type Part } from "./gemini";
 import sharp from "sharp";
 import { baAfterPrompt, typeLine, REALISM_NATURAL, buildPrompt, correctionPrompt, qcPromptNoProduct, sizeLine, formatPrompt, interpretPrompt, localEditPrompt, LOCATE_PRODUCT_PROMPT, READ_LABEL_PROMPT, qcPrompt, variationHint } from "./prompts";
-import type { TypeParams } from "./visualTypes";
+import { normalizeSlides, type TypeParams } from "./visualTypes";
 import { cropBoxFor, cropImage, pasteBack, unionZones, zoneFromBox, zonesFromBoxes, type CropBox, type Zone } from "./localedit";
 import type { ImageRow, Product, QC } from "@/types";
 
@@ -256,13 +256,14 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
         const { data: m } = await sb.from("models").select("name, path, description").eq("id", mid).single();
         if (m?.path) { modelRefs.push(await download(sb, m.path)); if (m.description) descs.push(together ? `${m.name}: ${m.description}` : m.description); }
       }
-      // Carrousel : les slides suivantes reprennent la slide 1 (même personne, décor, lumière)
+      // Carrousel : les slides suivantes reprennent la première photo du carrousel (même personne, décor, lumière)
       let series: { buf: Buffer; mime: string } | null = null;
-      if (vtype === "carousel" && image.variant_index > 0) {
-        const { data: s0 } = await sb.from("images").select("path").eq("shoot_id", shoot.id).eq("kind", "generated").eq("variant_index", 0).is("deleted_at", null).not("path", "is", null).order("created_at", { ascending: true }).limit(1).maybeSingle();
-        if (s0?.path) series = await download(sb, s0.path).catch(() => null);
+      if (vtype === "carousel") {
+        const { data: firsts } = await sb.from("images").select("variant_index, path").eq("shoot_id", shoot.id).eq("kind", "generated").is("deleted_at", null).order("variant_index", { ascending: true }).order("created_at", { ascending: true }).limit(1);
+        const a0 = firsts?.[0];
+        if (a0 && a0.variant_index < image.variant_index && a0.path) series = await download(sb, a0.path).catch(() => null);
       }
-      const nSlides = (tp.slides ?? []).length || 1;
+      const nSlides = normalizeSlides(tp.slides).length || 1;
       const prompt = buildPrompt({
         product, rules, userPrompt: shoot.prompt, aspect, analysis: analysisFor,
         others: others.map((o) => ({ product: o.product, n: 1 })), variation: variationHint(image.variant_index, shoot.no_people), nProductImages: imagePaths.length,

@@ -1,5 +1,5 @@
 import type { Product } from "@/types";
-import { SOCIAL_STYLES, TEXT_ZONES, BA_CHANGES, type TypeParams } from "./visualTypes";
+import { SOCIAL_STYLES, TEXT_ZONES, BA_CHANGES, CAROUSEL_STYLES, SLIDE_ZONES, normalizeSlides, type TypeParams } from "./visualTypes";
 
 const VARIATIONS = [
   "a young woman with a sharp black bob and fringe",
@@ -269,8 +269,16 @@ export function typeLine(type: string, tp: TypeParams, vi: number, nSlides: numb
     ].filter(Boolean).join(" ");
   }
   if (type === "carousel") {
-    const desc = (tp.slides ?? [])[vi] ?? "";
-    return `CAROUSEL: this image is slide ${vi + 1} of ${nSlides} of an Instagram carousel. All slides share the same person, outfit, set, lighting, colour palette and photographic style, but each slide is a different shot.${desc ? ` This slide shows: ${desc}` : ""}`;
+    const sl = normalizeSlides(tp.slides)[vi];
+    const z = SLIDE_ZONES.find((x) => x.id === sl?.zone)?.en ?? "the top third";
+    const hasText = !!sl && (sl.title || sl.body);
+    return [
+      `CAROUSEL: this image is slide ${vi + 1} of ${nSlides} of an Instagram carousel. All slides share the same person, outfit, set, lighting, colour palette and photographic style, but each slide is a different shot.`,
+      sl?.photo ? `This slide shows: ${sl.photo}` : "",
+      hasText && sl!.layout === "band" ? `A solid colour band will cover ${z} of the frame later: keep the main subject and the whole product out of ${z}.` : "",
+      hasText && sl!.layout !== "band" ? `A headline will be added later in ${z}: keep that area calm and simple (plain background, no face, no product, no important detail). Do not write anything there.` : "",
+      "Show the product at a natural distance: never an extreme close-up of its label unless the slide asks for it.",
+    ].filter(Boolean).join(" ");
   }
   if (type === "ba") {
     const c = BA_CHANGES.find((x) => x.id === tp.baChange) ?? BA_CHANGES[0];
@@ -298,15 +306,24 @@ export function baAfterPrompt(a: { tp: TypeParams; rules: string[]; hasProduct: 
   ].filter(Boolean).join("\n");
 }
 
-/** Plan d'un carrousel : l'IA propose le contenu de chaque slide. */
-export function slidesPlanPrompt(a: { idea: string; n: number; products: string[]; people: boolean }) {
+/** Plan d'un carrousel : pour chaque slide, la photo à créer, ses textes et sa mise en page. */
+export function slidesPlanPrompt(a: { idea: string; n: number; style: string; products: string; rules: string[]; people: boolean }) {
+  const st = CAROUSEL_STYLES.find((x) => x.id === a.style) ?? CAROUSEL_STYLES[0];
   return [
-    "You are the creative director of a French cosmetics brand (Irizée) planning an Instagram carousel made of photos only (texts are added later).",
+    "You are the creative director and copywriter of the French cosmetics brand Irizée, planning an Instagram carousel.",
     `Carousel idea from the client: "${a.idea || "showcase the product"}".`,
-    a.products.length ? `Products: ${a.products.join(", ")}.` : "No product appears in this carousel.",
-    a.people ? "A model (always the same person) can appear." : "No person appears.",
-    `Plan exactly ${a.n} slides that tell a coherent story from a strong cover to a closing slide, each a clearly different shot (framing, gesture, detail) in the same set and style.`,
-    "No medical claim, no invented result.",
-    'For each slide write one short French sentence (max 18 words) describing the photo to shoot. Return JSON only: {"slides": [str]}',
-  ].join("\n");
+    `Carousel style: ${st.en}.`,
+    a.products ? `PRODUCTS (describe them exactly as they are, never invent another packaging, shape, colour or accessory):\n${a.products}` : "No product appears in this carousel.",
+    a.rules.length ? `Brand rules:\n${numbered(a.rules)}` : "",
+    a.people ? "A model (always the same person) can appear in some photos." : "No person appears in the photos.",
+    `Plan exactly ${a.n} slides: slide 1 is the cover (strong, short promise), the last slide closes with a soft call to action. Each photo slide is a clearly different shot (framing, gesture, detail, texture, model) in the same set and style; avoid extreme close-ups of the product label.`,
+    "For each slide give:",
+    "- photo: French, max 30 words, the photo to shoot (setting, framing, what is visible). Empty string if layout is \"text\".",
+    "- title: French headline, max 40 characters (" + (st.id === "mood" ? "can be empty" : "required") + ").",
+    "- body: French short text, max 110 characters (can be empty, always empty on the cover).",
+    "- layout: \"overlay\" (text on the photo), \"band\" (photo with a solid colour band behind the text) or \"text\" (text-only slide on a plain brand colour, no photo; use it for dense explanations, at most a third of the slides, never the cover).",
+    "- zone: where the text goes: \"top\", \"bottom\" or \"center\".",
+    "COMPLIANCE (French cosmetics advertising law): no medical or therapeutic claim (never 'soigne', 'guérit', 'traite'), no guaranteed or quantified result, no before/after promise; never invent a number, percentage, study, price or customer review. Use cosmetic wording ('aide à', 'contribue à', 'peau d'apparence plus lumineuse').",
+    'Return JSON only: {"slides": [{"photo": str, "title": str, "body": str, "layout": str, "zone": str}]}',
+  ].filter(Boolean).join("\n");
 }

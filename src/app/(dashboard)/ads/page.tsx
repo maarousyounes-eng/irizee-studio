@@ -37,7 +37,7 @@ export default async function AdsPage({ searchParams }: { searchParams: { code?:
             return (
               <Link key={d.id} href={`/ads/d/${d.id}`} className="bg-white border border-[#E4E4E7] rounded-2xl overflow-hidden hover:border-[#2B6EE8] transition">
                 <div className="relative aspect-[4/5] bg-[#F4F4F5]">
-                  {its[0]?.path ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={imgUrl(its[0].path)} alt="" loading="lazy" className="w-full h-full object-cover" /> : null}
+                  {its.find((x) => x.path)?.path ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={imgUrl(its.find((x) => x.path)!.path)} alt="" loading="lazy" className="w-full h-full object-cover" /> : null}
                   {its.length > 1 && <span className="absolute top-2 right-2 text-[11px] font-bold bg-white rounded-md px-1.5 py-0.5">{its.length} images</span>}
                 </div>
                 <div className="p-2.5">
