@@ -280,6 +280,7 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
       const redoBrief = redo ? `\n\nTHIS IS A NEW TAKE replacing a previous attempt the client rejected. Client's remarks to apply: ${String(prm0.instruction || image.feedback || "")}${prev ? " The LAST image is that rejected previous attempt: do NOT copy its composition, pose or framing where the client asked for a change; keep only what the client did not criticise (same person, same product, same style)." : ""}` : "";
       const prompt = buildPrompt({
         product, rules, userPrompt: shoot.prompt + redoBrief, aspect, analysis: analysisFor, hasTexture: !!texture,
+        shot: (tp.shots ?? [])[image.variant_index] || undefined,
         others: others.map((o) => ({ product: o.product, n: 1 })), variation: variationHint(image.variant_index, shoot.no_people), nProductImages: imagePaths.length,
         hasModelRef: modelRefs.length > 0, nModelRefs: modelRefs.length, modelDescription: descs.join(" / "), noPeople: shoot.no_people, noProduct,
         ...(vtype === "photo" ? {} : { typeLine: typeLine(vtype, tp, image.variant_index, nSlides), seriesRef: !!series, hasStyleRef: inspirations.length > 0, realism: vtype === "ba" ? REALISM_NATURAL : undefined }),

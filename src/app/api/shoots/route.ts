@@ -5,8 +5,9 @@ import { ANALYZE_PROMPT } from "@/lib/prompts";
 import { FORMATS } from "@/types";
 import { isVisualType, BA_CHANGES, SOCIAL_STYLES, TEXT_ZONES, CAROUSEL_STYLES, normalizeSlides, emptySlide, type Slide, type TypeParams } from "@/lib/visualTypes";
 import { planSlides } from "@/lib/slides";
+import { planShots } from "@/lib/shots";
 
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 export async function POST(req: Request) {
   return handle(async () => {
@@ -55,6 +56,10 @@ export async function POST(req: Request) {
       try { analysis = await withAiCtx({ sb, userId: user.id }, () => analyzeInspirations(sb, paths, ANALYZE_PROMPT)); } catch { analysis = null; }
     }
 
+    // Le photographe prépare une prise de vue précise par image (sauf carrousel et avant/après, qui ont leur propre plan)
+    if (vtype !== "carousel" && vtype !== "ba") {
+      try { tp.shots = await withAiCtx({ sb, userId: user.id }, () => planShots(sb, { brief: prompt, analysis: analysis ?? "", n, type: vtype, productIds, noProduct: !!b.noProduct, people: b.noPeople ? 0 : b.modelMode === "together" ? Math.min(3, modelIds.length) : 1 })); } catch { /* sans plan : la consigne seule */ }
+    }
     const { data: shoot, error } = await sb.from("shoots").insert({
       project_id: b.projectId || null, product_id: productIds[0], product_ids: productIds.length > 1 ? productIds : null, product_mode: productIds.length > 1 ? (["together", "split", "mix"].includes(b.productMode) ? b.productMode : "mix") : null, model_id: modelIds[0] ?? null, model_ids: modelIds, concept_id: b.conceptId || null,
       prompt, visual_type: vtype, type_params: tp, model_mode: b.modelMode === "together" && modelIds.length > 1 ? "together" : "split", aspect: b.aspect, size: ["1K", "2K", "4K"].includes(b.size) ? b.size : "2K",

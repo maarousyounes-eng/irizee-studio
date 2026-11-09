@@ -23,9 +23,12 @@ export function variationHint(i: number, noPeople: boolean) {
 
 /** Qualité peau & détails : rendu campagne beauté/mode glamour, mais peau réelle (pas de lissage « IA »). */
 export const REALISM =
-  "SKIN & DETAIL QUALITY: high-end beauty and fashion editorial photograph with professional retouching: polished, glamorous and luminous, BUT real skin: fine pores and natural skin texture stay visible, with dimensional highlights and soft shadows. " +
-  "Never plastic, waxy, blurred or over-smoothed (no beauty-filter look, no AI-smooth skin). Natural freckles and peach fuzz where described. " +
-  "Eyebrows groomed and sharply defined, built from individual hair strokes (visible hair direction, slightly feathered edges), never painted-on, flat or uniformly smooth. Lips with real texture and specular gloss. Crisp individual eyelashes and hair strands. " +
+  "PHOTOGRAPHIC QUALITY: this must be indistinguishable from a real photograph taken by an expert commercial beauty photographer on a real set, with a full-frame camera and a prime lens (35, 50, 85 or 100 mm macro as the shot requires), real light sources (window light, large softbox, bounce, a subtle rim light) and correct exposure. " +
+  "Natural depth of field and focus fall-off, true-to-life colours with a subtle editorial colour grade, fine natural grain, physically correct shadows, contact shadows and reflections. " +
+  "REAL SKIN: visible pores, fine texture, natural micro-imperfections, slight unevenness and peach fuzz, only the light retouch a professional retoucher would do; never plastic, waxy, airbrushed, overly glossy or doll-like; no beauty filter; natural asymmetry of a real face. " +
+  "Eyebrows built from individual hairs, real eyelashes and flyaway hair strands, real fabric weave and folds. " +
+  "THE PRODUCT IS PHYSICALLY IN THE SCENE: lit by the same light as everything around it, with matching reflections, correct perspective and contact shadows, held with real pressure by the fingers; it must never look pasted, floating, cut out or composited. " +
+  "AVOID EVERY AI TELL: over-smoothed skin, oversaturated glow, HDR look, perfect symmetry, melted details, warped hands, objects merging, glossy CGI rendering. " +
   "Keep every styling detail exactly as described: makeup, hairstyle, jewelry, nails, eyewear, outfit.";
 
 /** Le texte imprimé ne doit jamais sortir à l'envers (effet miroir des selfies). */
@@ -39,7 +42,7 @@ const textsBlock = (p: Product) => (p.texts ?? []).map((t) => `- ${t}`).join("\n
 export function buildPrompt(a: {
   product: Product; rules: string[]; userPrompt: string; aspect: string; analysis: string;
   others?: { product: Product; n: number }[]; variation: string; nProductImages: number; hasModelRef: boolean; modelDescription?: string; noPeople: boolean; noProduct?: boolean;
-  nModelRefs?: number; seriesRef?: boolean; typeLine?: string; realism?: string; hasStyleRef?: boolean; hasTexture?: boolean;
+  nModelRefs?: number; seriesRef?: boolean; typeLine?: string; realism?: string; hasStyleRef?: boolean; hasTexture?: boolean; shot?: string;
 }) {
   const nModels = a.hasModelRef ? Math.max(1, a.nModelRefs ?? 1) : 0;
   // Version courte et cohérente : chaque consigne n'apparaît qu'une fois, sans ordres contradictoires.
@@ -67,7 +70,7 @@ export function buildPrompt(a: {
       ? `PERSON: exactly the person of the MODEL REFERENCE (same face, skin tone, hair colour and hairstyle)${a.modelDescription ? `: ${a.modelDescription}` : ""}. Take only the pose, gesture and expression from the style reference, never the face or hair of the person shown there.`
       : `PERSON: ${a.variation}`;
   return [
-    "Create a photorealistic high-end advertising photo for the cosmetics brand Irizée.",
+    "You are an expert commercial beauty photographer shooting for the cosmetics brand Irizée. Create the photograph exactly as you would shoot it on a real professional set: real camera, real lens, real light, real model.",
     roles,
     "",
     "BRAND RULES:", numbered([...a.rules, ...products.flatMap((p) => p.rules ?? [])]),
@@ -87,6 +90,7 @@ export function buildPrompt(a: {
     "",
     `CLIENT BRIEF (priority over the style reference when they differ): ${a.userPrompt}`,
     a.typeLine ? `\n${a.typeLine}` : "",
+    a.shot ? `\nPHOTOGRAPHER'S SHOT SPEC for this image (follow it precisely, it overrides the style reference for framing, lens, light and pose): ${a.shot}` : "",
     "",
     person,
     a.noPeople ? "" : a.noProduct ? "Hands are anatomically correct: five fingers per hand, natural joints." : "Hands are anatomically correct: five fingers per hand, natural joints and a firm, plausible grip on the product.",
@@ -159,6 +163,7 @@ export function qcPromptNoProduct(correction?: { instruction: string; refCount?:
     "foreign_logo = true if ANY product, packaging, brand name or logo is visible in image 1.",
     "TOLERANCE: judge like a professional photo editor: shallow depth of field, shadows, cropping and natural skin texture are normal. Only flag what a client would call an error.",
     "HUMAN CHECK (if a person is visible; otherwise human.present=false and every other human field true): exactly 5 fingers per visible hand with natural joints, symmetric natural face, eyes, lips and teeth, no extra or missing limb, plausible body, coherent hair, jewellery and clothing. artifacts_ok = false if you see melted textures, merged or floating objects or strange shapes.",
+    "REALISM (be very demanding): realism_0_10 = would an expert photo editor believe this is a REAL photograph shot by a professional photographer? Give 8+ only if nothing betrays AI; give 5 or less for plastic, waxy or airbrushed skin, doll-like faces, an over-glossy CGI look, oversaturated glow, perfect symmetry, a product that looks pasted, floating or wrongly lit, missing contact shadows, or melted details. skin_natural = false if the skin has no visible pores and texture.",
     `Return JSON only: {"foreign_logo":bool,"added_text":bool,"anatomy_ok":bool,"skin_natural":bool,"human":{"present":bool,"hands_ok":bool,"fingers_count_ok":bool,"grip_ok":bool,"face_ok":bool,"limbs_ok":bool,"body_ok":bool,"accessories_ok":bool},"artifacts_ok":bool,"issues":[str] (short French sentences, max 5, empty if none)${opts?.modelRef ? ',"face_matches_model":bool' : ""},"realism_0_10":int,"comment":str (one short sentence in French)${correction ? ',"instruction_followed":bool,"unwanted_changes":str,"ghost_or_duplicate":bool,"edit_quality_0_10":int,"edit_defects":str' : ""}}`,
   ].filter(Boolean).join("\n");
 }
@@ -177,6 +182,7 @@ export function qcPrompt(p: Product, correction?: { instruction: string; refCoun
     p.look ? `Expected look: ${p.look}` : "",
     "Judge the texts ONLY on the largest, most prominent product of image 2 (the hero product): ignore small, distant, blurred or partially hidden copies for the text check. For each expected text, answer: 'ok' (visible and exactly right), 'wrong' (visible and legible but misspelled, garbled, mirrored or different), 'unreadable' (visible but too small or blurred to read), or 'hidden' (that part of the label is NOT visible in the photo, which is NORMAL and must never count against the image: covered by a hand, finger, hair or object, turned away from the camera, wrapped around the curve of the tube or bottle, cut by the edge of the frame, or lost in shadow or glare). Only a visible and legible text that is spelled differently counts as 'wrong'. Ignore differences of capitalization (upper/lower case), line breaks, spacing, hyphenation and apostrophe style when comparing with the expected text: only different, missing or invented letters or words count, and never report capitalization as an issue. Never mark 'wrong' a text you simply cannot see.",
     "added_text = true if the image contains text, letters, typography, a big logo or graphic shapes that are NOT printed on a real product label (slogans, giant brand letters, captions, watermarks). Also judge: color/material/shape/cap versus the real packshot (shape_ok must be false if the bottle, cap, neck, collar or pipette differ from the packshot, for example a different cap shape, a transparent neck where the packshot is opaque, or a redesigned bottle: then say so in issues); count how many product instances (bottles/tubes) are visible in total, and whether the other instances are faithful copies: set all_copies_exact to false ONLY if a copy has a clearly different silhouette, color, cap or logo layout than the real packshot; illegible or tiny text on small, blurred or background decorative copies is acceptable and must NOT cause a failure; whether the printed text direction on the product matches the packshot (not rotated or restyled); any foreign brand logo; natural anatomy of hands/fingers/face; whether the skin looks like real photographed skin (fine pores and texture still visible, brows with individual hair strokes, even with glamorous makeup and polished retouching) rather than plastic, blurred or AI-smooth skin; and composition (product height as % of the image height, product is a hero in the foreground, realistic scale versus hand/body, natural perspective).",
+    "REALISM (be very demanding): realism_0_10 = would an expert photo editor believe this is a REAL photograph shot by a professional photographer? Give 8+ only if nothing betrays AI; give 5 or less for plastic, waxy or airbrushed skin, doll-like faces, an over-glossy CGI look, oversaturated glow, perfect symmetry, a product that looks pasted, floating or wrongly lit, missing contact shadows, or melted details. skin_natural = false if the skin has no visible pores and texture.",
     `Return JSON only: {"texts":[{"expected":str,"status":"ok|wrong|unreadable|hidden","read":str}],"color_ok":bool,"shape_ok":bool,"foreign_logo":bool,"anatomy_ok":bool,"skin_natural":bool,"product_count":int,"all_copies_exact":bool,"label_orientation_ok":bool,"product_height_pct":int,"hero_foreground":bool,"proportion_ok":bool,"angle_ok":bool,"human":{"present":bool,"hands_ok":bool,"fingers_count_ok":bool,"grip_ok":bool,"face_ok":bool,"limbs_ok":bool,"body_ok":bool,"accessories_ok":bool},"artifacts_ok":bool,"issues":[str] (every visible defect you found about the texts, proportions, anatomy, artifacts or product, as short French sentences, max 5, empty array if none)${opts?.modelRef ? ",\"face_matches_model\":bool" : ""},"realism_0_10":int,"comment":str (one short sentence in French)${correction ? ",\"instruction_followed\":bool,\"unwanted_changes\":str,\"ghost_or_duplicate\":bool,\"edit_quality_0_10\":int,\"edit_defects\":str" + (correction.refCount ? ",\"matches_reference\":bool" : "") : ""}}`,
   ].filter(Boolean).join("\n");
 }
@@ -339,5 +345,20 @@ export function slidesPlanPrompt(a: { idea: string; n: number; style: string; pr
     "- zone: where the text goes: \"top\", \"bottom\" or \"center\".",
     "COMPLIANCE (French cosmetics advertising law): no medical or therapeutic claim (never 'soigne', 'guérit', 'traite'), no guaranteed or quantified result, no before/after promise; never invent a number, percentage, study, price or customer review. Use cosmetic wording ('aide à', 'contribue à', 'peau d'apparence plus lumineuse').",
     'Return JSON only: {"slides": [{"photo": str, "title": str, "body": str, "layout": str, "zone": str}]}',
+  ].filter(Boolean).join("\n");
+}
+
+/** Le « photographe » : un plan de prises de vue (une par image) avant toute génération. */
+export function shotListPrompt(a: { brief: string; analysis: string; n: number; type: string; products: string; people: number; noProduct: boolean }) {
+  return [
+    "You are an award-winning commercial beauty photographer and art director preparing the SHOT LIST of a professional photo shoot for the French cosmetics brand Irizée.",
+    `Client brief (in French): "${a.brief}"`,
+    a.analysis ? `Mood / style reference described:\n${a.analysis}` : "",
+    a.noProduct ? "No product appears in these photos." : `Product(s) to feature, exactly as they are:\n${a.products}`,
+    a.people ? `Model(s): ${a.people} real person(s) (identity given separately), directed like a professional model.` : "No person in these photos.",
+    a.type === "social" ? "Use: organic Instagram posts, natural and authentic." : a.type === "ad" ? "Use: paid social ads, the product is the hero." : "",
+    `Write ${a.n} shots that together form a coherent, varied professional series (vary framing: wide / medium / close-up / detail; vary angles and gestures), all in the same set, light and colour mood.`,
+    "For each shot write ONE dense English paragraph (60-90 words) a photographer would follow: framing and camera angle, lens and aperture (e.g. 85mm f/2.8), light setup (key light type and direction, fill, rim, natural window light...), set and props, exact pose and gesture direction for the model (where the hands are, how the product is held so the label faces the camera at a natural angle and realistic size), expression, styling, colour grade. Physically plausible, never an extreme close-up of the label unless the brief asks.",
+    'Return JSON only: {"shots": [str]}',
   ].filter(Boolean).join("\n");
 }

@@ -75,6 +75,7 @@ export interface TypeParams {
   textZone?: string;
   carouselStyle?: string;
   slides?: Slide[] | string[];
+  shots?: string[];
   baChange?: string;
   baBefore?: string;
   baAfter?: string;
