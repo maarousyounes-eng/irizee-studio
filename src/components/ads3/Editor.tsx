@@ -268,6 +268,12 @@ export default function Editor({ design, kit, formats }: { design: Design; kit: 
               <div>
                 <label htmlFor="bandh" className="text-xs font-semibold">Hauteur : {item.band.h} %</label>
                 <input id="bandh" type="range" min={10} max={70} value={item.band.h} onChange={(e) => patchItem({ band: { ...item.band!, h: Number(e.target.value) } })} className="w-full" />
+                <label htmlFor="bando" className="text-xs font-semibold">Opacité : {item.band.opacity ?? 100} %{(item.band.opacity ?? 100) === 0 ? " (transparent)" : ""}</label>
+                <input id="bando" type="range" min={0} max={100} step={5} value={item.band.opacity ?? 100} onChange={(e) => patchItem({ band: { ...item.band!, opacity: Number(e.target.value) } })} className="w-full" />
+                <div className="flex flex-wrap gap-1.5 mt-1">
+                  <button type="button" className={chip(!item.band.fade)} onClick={() => patchItem({ band: { ...item.band!, fade: false } })}>Plein</button>
+                  <button type="button" className={chip(!!item.band.fade)} onClick={() => patchItem({ band: { ...item.band!, fade: true } })}>Dégradé vers la photo</button>
+                </div>
               </div>
             ) : null}
             {(!item.path || item.band) && (
@@ -306,6 +312,19 @@ export default function Editor({ design, kit, formats }: { design: Design; kit: 
                 <label htmlFor="elsize" className="text-xs font-semibold">Taille : {selEl.size}</label>
                 <input id="elsize" type="range" min={8} max={110} value={selEl.size} onChange={(e) => patch({ size: Number(e.target.value) })} className="w-full" />
               </div>
+              {selEl.kind !== "logo" && (
+                <div className="space-y-1">
+                  <label htmlFor="ellh" className="text-xs font-semibold">Interligne : {(selEl.lh ?? 1.1).toFixed(2)}</label>
+                  <input id="ellh" type="range" min={0.8} max={2.2} step={0.05} value={selEl.lh ?? 1.1} onChange={(e) => patch({ lh: Number(e.target.value) })} className="w-full" />
+                  <label htmlFor="ells" className="text-xs font-semibold">Espacement des lettres : {selEl.ls ?? (selEl.kind === "title" ? -1 : 0)}</label>
+                  <input id="ells" type="range" min={-8} max={40} step={1} value={selEl.ls ?? (selEl.kind === "title" ? -1 : 0)} onChange={(e) => patch({ ls: Number(e.target.value) })} className="w-full" />
+                  {selEl.kind !== "badge" && selEl.kind !== "cta" && <>
+                    <label htmlFor="elw" className="text-xs font-semibold">Largeur du bloc : {selEl.w ? `${selEl.w} %` : "auto"}</label>
+                    <input id="elw" type="range" min={15} max={100} step={1} value={selEl.w ?? Math.max(20, 98 - selEl.x)} onChange={(e) => patch({ w: Number(e.target.value) })} className="w-full" />
+                  </>}
+                  <button type="button" className="text-[11px] text-[#2B6EE8] font-semibold" onClick={() => patch({ lh: undefined, ls: undefined, w: undefined })}>Réinitialiser l&apos;espacement</button>
+                </div>
+              )}
               {(selEl.kind === "title" || selEl.kind === "sub" || selEl.kind === "badge") && (
                 <div>
                   <span className="text-xs font-semibold">Police</span>
