@@ -8,7 +8,7 @@ import { toJpeg } from "html-to-image";
 import { Copy, Download, Trash2, Wand2 } from "lucide-react";
 import { Btn, Spinner } from "@/components/ui";
 import { api, imgUrl, useSupabase } from "@/lib/client";
-import AdCanvas, { AD_FMTS, onColor, type AdEl, type AdItem, type ElKind, type Kit } from "./AdCanvas";
+import AdCanvas, { AD_FMTS, bandTop, onColor, type AdEl, type AdItem, type ElKind, type Kit } from "./AdCanvas";
 import { newEl } from "./defaults";
 
 interface Design { id: string; name: string; fmt: string; items: AdItem[] }
@@ -117,6 +117,22 @@ export default function Editor({ design, kit, formats }: { design: Design; kit: 
     setEls((list) => list.map((e) => (e.id === d.id ? { ...e, x, y } : e)));
   }
   const onUp = () => { drag.current = null; };
+  // Bandeau : on le glisse verticalement
+  const bandDrag = useRef<{ sy: number; oy: number; h: number } | null>(null);
+  function onBandDown(ev: PointerEvent<HTMLDivElement>) {
+    const box = ev.currentTarget.parentElement?.getBoundingClientRect();
+    if (!item?.band || !box) return;
+    try { ev.currentTarget.setPointerCapture(ev.pointerId); } catch { /* */ }
+    bandDrag.current = { sy: ev.clientY, oy: bandTop(item.band), h: box.height };
+    setSel(null);
+  }
+  function onBandMove(ev: PointerEvent<HTMLDivElement>) {
+    const d = bandDrag.current;
+    if (!d || !item?.band) return;
+    const y = Math.round(Math.max(0, Math.min(100 - item.band.h, d.oy + ((ev.clientY - d.sy) / d.h) * 100)) * 10) / 10;
+    patchItem({ band: { ...item.band, y } });
+  }
+  const onBandUp = () => { bandDrag.current = null; };
 
   function add(kind: ElKind) {
     const e = newEl(kind, palette[0] ?? "#0A0A0B");
@@ -226,7 +242,8 @@ export default function Editor({ design, kit, formats }: { design: Design; kit: 
         <div className="flex-[999_1_560px] min-w-0 space-y-3">
           <div className="bg-[#E4E4E7] rounded-2xl p-4 sm:p-6 overflow-x-auto flex justify-center">
             <AdCanvas src={srcFor(item, fmt)} w={F.view[0]} h={F.view[1]} els={els} kit={kit} sel={sel} bg={item.bg} band={item.band}
-              onElDown={onDown} onElMove={onMove} onElUp={onUp} onBg={() => setSel(null)} />
+              onElDown={onDown} onElMove={onMove} onElUp={onUp} onBg={() => setSel(null)}
+              onBandDown={onBandDown} onBandMove={onBandMove} onBandUp={onBandUp} />
           </div>
           <p className="text-xs text-[#52525B] text-center">
             Glissez les textes à la souris. Ils gardent leur place relative dans tous les formats.
@@ -274,7 +291,7 @@ export default function Editor({ design, kit, formats }: { design: Design; kit: 
             {item.path ? (
               <div className="flex flex-wrap gap-1.5">
                 {([["", "Aucun"], ["top", "En haut"], ["bottom", "En bas"], ["center", "Au centre"]] as const).map(([z, l]) => (
-                  <button key={z} type="button" className={chip((item.band?.zone ?? "") === z)} onClick={() => patchItem({ band: z ? { zone: z, color: item.band?.color ?? palette[0] ?? "#0A0A0B", h: item.band?.h ?? 30 } : null })}>{l}</button>
+                  <button key={z} type="button" className={chip((item.band?.zone ?? "") === z)} onClick={() => patchItem({ band: z ? { zone: z, color: item.band?.color ?? palette[0] ?? "#0A0A0B", h: item.band?.h ?? 30, opacity: item.band?.opacity, fade: item.band?.fade } : null })}>{l}</button>
                 ))}
               </div>
             ) : null}
@@ -282,6 +299,8 @@ export default function Editor({ design, kit, formats }: { design: Design; kit: 
               <div>
                 <label htmlFor="bandh" className="text-xs font-semibold">Hauteur : {item.band.h} %</label>
                 <input id="bandh" type="range" min={10} max={70} value={item.band.h} onChange={(e) => patchItem({ band: { ...item.band!, h: Number(e.target.value) } })} className="w-full" />
+                <label htmlFor="bandy" className="text-xs font-semibold">Position : {Math.round(bandTop(item.band))} % du haut <span className="font-normal text-[#6B6B72]">(ou glissez le bandeau dans l&apos;image)</span></label>
+                <input id="bandy" type="range" min={0} max={100 - item.band.h} step={1} value={bandTop(item.band)} onChange={(e) => patchItem({ band: { ...item.band!, y: Number(e.target.value) } })} className="w-full" />
                 <label htmlFor="bando" className="text-xs font-semibold">Opacité : {item.band.opacity ?? 100} %{(item.band.opacity ?? 100) === 0 ? " (transparent)" : ""}</label>
                 <input id="bando" type="range" min={0} max={100} step={5} value={item.band.opacity ?? 100} onChange={(e) => patchItem({ band: { ...item.band!, opacity: Number(e.target.value) } })} className="w-full" />
                 <div className="flex flex-wrap gap-1.5 mt-1">

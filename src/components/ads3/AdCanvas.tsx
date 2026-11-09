@@ -14,7 +14,9 @@ import { imgUrl } from "@/lib/client";
 
 export type ElKind = "title" | "sub" | "cta" | "badge" | "logo";
 export interface AdEl { id: string; kind: ElKind; text: string; x: number; y: number; size: number; font: "title" | "body" | "impact"; color: string; align?: "left" | "center" | "right"; lh?: number; ls?: number; w?: number }
-export interface Band { zone: "top" | "bottom" | "center"; color: string; h: number; opacity?: number; fade?: boolean }
+export interface Band { zone: "top" | "bottom" | "center"; color: string; h: number; opacity?: number; fade?: boolean; y?: number }
+/** Position du haut du bandeau, en % de la hauteur de l'image (déplacé à la main, ou selon sa zone). */
+export const bandTop = (b: Band) => b.y != null ? Math.max(0, Math.min(b.y, 100 - b.h)) : (b.zone === "top" ? 0 : b.zone === "bottom" ? 100 - b.h : 50 - b.h / 2);
 
 const rgba = (hex: string, a: number) => {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
@@ -69,13 +71,15 @@ export function elStyle(e: AdEl, k: number, kit: Kit, selected: boolean): CSSPro
 const AdCanvas = forwardRef<HTMLDivElement, {
   src: string | null; w: number; h: number; els: AdEl[]; kit: Kit; sel?: string | null; bg?: string; band?: Band | null;
   onElDown?: (id: string, e: PointerEvent<HTMLDivElement>) => void; onElMove?: (e: PointerEvent<HTMLDivElement>) => void; onElUp?: () => void; onBg?: () => void;
-}>(function AdCanvas({ src, w, h, els, kit, sel, bg, band, onElDown, onElMove, onElUp, onBg }, ref) {
+  onBandDown?: (e: PointerEvent<HTMLDivElement>) => void; onBandMove?: (e: PointerEvent<HTMLDivElement>) => void; onBandUp?: () => void;
+}>(function AdCanvas({ src, w, h, els, kit, sel, bg, band, onElDown, onElMove, onElUp, onBg, onBandDown, onBandMove, onBandUp }, ref) {
   const k = Math.min(w, h) / 480;
   return (
     <div ref={ref} onPointerDown={onBg} style={{ width: w, height: h, position: "relative", overflow: "hidden", background: src ? "#E4E4E7" : bg || "#F3EDE4", flex: "none" }}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       {src ? <img src={imgUrl(src)} alt="" crossOrigin="anonymous" draggable={false} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", pointerEvents: "none" }} /> : null}
-      {band ? <div style={{ position: "absolute", left: 0, right: 0, height: `${band.h}%`, background: bandBackground(band), pointerEvents: "none", ...(band.zone === "top" ? { top: 0 } : band.zone === "bottom" ? { bottom: 0 } : { top: `${50 - band.h / 2}%` }) }} /> : null}
+      {band ? <div style={{ position: "absolute", left: 0, right: 0, height: `${band.h}%`, top: `${bandTop(band)}%`, background: bandBackground(band), pointerEvents: onBandDown ? "auto" : "none", cursor: onBandDown ? "ns-resize" : undefined, touchAction: "none" }}
+        onPointerDown={onBandDown ? (ev) => { ev.stopPropagation(); onBandDown(ev); } : undefined} onPointerMove={onBandMove} onPointerUp={onBandUp} onPointerCancel={onBandUp} /> : null}
       {els.map((e) => (
         <div key={e.id} style={elStyle(e, k, kit, sel === e.id)}
           onPointerDown={onElDown ? (ev) => { ev.stopPropagation(); onElDown(e.id, ev); } : undefined}
