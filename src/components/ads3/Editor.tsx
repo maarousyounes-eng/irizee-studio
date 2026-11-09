@@ -49,6 +49,20 @@ export default function Editor({ design, kit, formats }: { design: Design; kit: 
     if (m) { sessionStorage.removeItem(k); setMsg(`Slide(s) ${m} : pas encore de photo prête, elles ne sont pas dans la pub. Ajoutez-les plus tard ou remplacez-les par une slide texte.`); }
   }, [design.id]);
 
+  // Touche Suppr (ou retour arrière) : supprime l'élément sélectionné, sauf pendant la saisie d'un texte
+  useEffect(() => {
+    const onKey = (ev: KeyboardEvent) => {
+      if (!sel || (ev.key !== "Delete" && ev.key !== "Backspace")) return;
+      const t = ev.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      ev.preventDefault();
+      setItems((all) => all.map((it, i) => (i === Math.min(cur, all.length - 1) ? { ...it, els: it.els.filter((x) => x.id !== sel) } : it)));
+      setSel(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [sel, cur]);
+
   // Enregistrement automatique
   const first = useRef(true);
   useEffect(() => {
@@ -291,11 +305,17 @@ export default function Editor({ design, kit, formats }: { design: Design; kit: 
             <h2 className="text-sm font-semibold">Éléments de cette image</h2>
             {!els.length && <p className="text-xs text-[#52525B]">Aucun texte : l&apos;image sera exportée telle quelle.</p>}
             {els.map((e) => (
-              <button key={e.id} type="button" onClick={() => setSel(e.id)}
-                className={`w-full flex items-center gap-2 min-h-11 px-3 rounded-xl border text-left ${e.id === sel ? "border-[#2B6EE8] bg-[#EBF2FF]" : "border-[#E4E4E7] bg-white"}`}>
-                <span className="w-16 shrink-0 text-[11px] font-bold text-[#52525B]">{KIND[e.kind]}</span>
-                <span className="text-sm truncate">{e.kind === "logo" ? (kit.logo_path ? "Logo de la charte" : e.text) : e.text}</span>
-              </button>
+              <div key={e.id} className={`flex items-center rounded-xl border ${e.id === sel ? "border-[#2B6EE8] bg-[#EBF2FF]" : "border-[#E4E4E7] bg-white"}`}>
+                <button type="button" onClick={() => setSel(e.id)} className="flex-1 min-w-0 flex items-center gap-2 min-h-11 pl-3 text-left">
+                  <span className="w-16 shrink-0 text-[11px] font-bold text-[#52525B]">{KIND[e.kind]}</span>
+                  <span className="text-sm truncate">{e.kind === "logo" ? (kit.logo_path ? "Logo de la charte" : e.text) : e.text}</span>
+                </button>
+                <button type="button" aria-label={`Supprimer : ${KIND[e.kind]}`} title="Supprimer"
+                  onClick={() => { setEls((list) => list.filter((x) => x.id !== e.id)); if (sel === e.id) setSel(null); }}
+                  className="shrink-0 w-11 h-11 flex items-center justify-center rounded-xl text-[#A0A0A8] hover:text-[#E8444A] hover:bg-red-50">
+                  <Trash2 size={15} />
+                </button>
+              </div>
             ))}
           </div>
 
