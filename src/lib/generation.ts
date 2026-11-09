@@ -155,13 +155,13 @@ function splitTasks(text: string): string[] {
   return text.split(/\n+/).map((l) => l.replace(/^\s*(?:[-–•*]|\d+[.)])\s*/, "").trim()).filter((l) => l.length > 2).slice(0, 5);
 }
 
-export interface Interpretation { instruction: string; understood: string; region: Zone | null; intent: "edit" | "label"; useOriginal: boolean }
+export interface Interpretation { instruction: string; understood: string; region: Zone | null; intent: "edit" | "label"; useOriginal: boolean; redo: boolean; clarify: string }
 
 /** Comprend la demande : instruction précise, phrase « Compris », zone à retoucher (zone entourée + éléments concernés). */
 export async function interpretCorrection(prev: { buf: Buffer; mime: string }, feedback: string, userZone: Zone | null, avoid?: string, refs: { buf: Buffer; mime: string }[] = [], original: { buf: Buffer; mime: string } | null = null, realSize?: string): Promise<Interpretation> {
   const meta = await sharp(prev.buf).metadata();
   const W = meta.width ?? 0, H = meta.height ?? 0;
-  let instruction = feedback, understood = "", region: Zone | null = userZone, intent: "edit" | "label" = "edit", useOriginal = false;
+  let instruction = feedback, understood = "", region: Zone | null = userZone, intent: "edit" | "label" = "edit", useOriginal = false, redo = false, clarify = "";
   try {
     const zoneCrop = userZone && W && H ? await sharp(prev.buf).extract({
       left: Math.round(Math.max(0, userZone.x * W)), top: Math.round(Math.max(0, userZone.y * H)),
@@ -171,6 +171,8 @@ export async function interpretCorrection(prev: { buf: Buffer; mime: string }, f
     const it = parseJson<{ instruction?: string; understood?: string; scope?: string; intent?: string; boxes?: unknown; box?: unknown }>(firstText(r));
     if (it.intent === "label") intent = "label";
     useOriginal = (it as { use_original?: unknown }).use_original === true;
+    redo = (it as { redo?: unknown }).redo === true && !userZone;
+    clarify = String((it as { clarify?: unknown }).clarify ?? "").trim().slice(0, 300);
     if (it.instruction) instruction = it.instruction;
     if (it.understood) understood = it.understood;
     if (it.scope === "local") {
@@ -180,7 +182,7 @@ export async function interpretCorrection(prev: { buf: Buffer; mime: string }, f
       region = u && u.w * u.h <= 0.45 ? u : null;
     } else region = null;
   } catch { /* on garde la demande telle quelle */ }
-  return { instruction, understood, region, intent, useOriginal };
+  return { instruction, understood, region, intent, useOriginal, redo, clarify };
 }
 
 /**
@@ -229,12 +231,15 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
   let nInsp = 0;
   let skipChangeCheck = false; // réparation d'étiquette : le texte ne change que quelques pixels, c'est normal
 
-  if (image.kind === "generated") {
+  const prm0 = (image.params ?? {}) as Record<string, any>;
+  // « Refaire la photo » : une correction qui change la pose, l'angle, le cadrage ou le décor est une nouvelle prise de vue
+  const redo = image.kind === "correction" && prm0.redo === true;
+  if (image.kind === "generated" || redo) {
     model = shoot.engine === "openai" ? "openai:auto" : shoot.engine === "pro" ? MODELS.pro : shoot.engine === "flash" ? MODELS.flash : (image.variant_index % 2 === 0 ? MODELS.flash : MODELS.pro);
     const vtype = String(shoot.visual_type ?? "photo");
     const tp = (shoot.type_params ?? {}) as TypeParams;
     // Avant / après : l'« après » est la même photo que l'« avant », seule la peau change
-    if (vtype === "ba" && image.variant_index % 2 === 1) {
+    if (vtype === "ba" && image.variant_index % 2 === 1 && !redo) {
       const { data: bef } = await sb.from("images").select("path").eq("shoot_id", shoot.id).eq("kind", "generated").eq("variant_index", image.variant_index - 1).is("deleted_at", null).not("path", "is", null).order("created_at", { ascending: false }).limit(1).maybeSingle();
       if (!bef?.path) throw new Error("La photo « avant » de cette paire n'est pas encore prête : relance « après » une fois l'avant terminé");
       const before = await download(sb, bef.path);
@@ -264,14 +269,24 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
         if (a0 && a0.variant_index < image.variant_index && a0.path) series = await download(sb, a0.path).catch(() => null);
       }
       const nSlides = normalizeSlides(tp.slides).length || 1;
+      // Photo de la texture du soin (couleur, rendu sur la peau)
+      const texture = !noProduct && product.texture_path ? await download(sb, product.texture_path).catch(() => null) : null;
+      // Refaire la photo : la consigne du shooting + les remarques du client ; la photo précédente n'est montrée que comme « à ne pas refaire »
+      let prev: { buf: Buffer; mime: string } | null = null;
+      if (redo && image.parent_id) {
+        const { data: par } = await sb.from("images").select("path").eq("id", image.parent_id).single();
+        if (par?.path) prev = await download(sb, par.path).catch(() => null);
+      }
+      const redoBrief = redo ? `\n\nTHIS IS A NEW TAKE replacing a previous attempt the client rejected. Client's remarks to apply: ${String(prm0.instruction || image.feedback || "")}${prev ? " The LAST image is that rejected previous attempt: do NOT copy its composition, pose or framing where the client asked for a change; keep only what the client did not criticise (same person, same product, same style)." : ""}` : "";
       const prompt = buildPrompt({
-        product, rules, userPrompt: shoot.prompt, aspect, analysis: analysisFor,
+        product, rules, userPrompt: shoot.prompt + redoBrief, aspect, analysis: analysisFor, hasTexture: !!texture,
         others: others.map((o) => ({ product: o.product, n: 1 })), variation: variationHint(image.variant_index, shoot.no_people), nProductImages: imagePaths.length,
         hasModelRef: modelRefs.length > 0, nModelRefs: modelRefs.length, modelDescription: descs.join(" / "), noPeople: shoot.no_people, noProduct,
         ...(vtype === "photo" ? {} : { typeLine: typeLine(vtype, tp, image.variant_index, nSlides), seriesRef: !!series, hasStyleRef: inspirations.length > 0, realism: vtype === "ba" ? REALISM_NATURAL : undefined }),
       });
       nInsp = inspirations.length;
-      parts = [{ text: prompt }, ...packshots.map((p) => imgPart(p.buf, p.mime)), ...modelRefs.map((r) => imgPart(r.buf, r.mime)), ...(series ? [imgPart(series.buf, series.mime)] : []), ...inspirations.map((p) => imgPart(p.buf, p.mime))];
+      parts = [{ text: prompt + (prev ? "\n(The very last image after the style reference is the rejected previous attempt.)" : "") }, ...packshots.map((p) => imgPart(p.buf, p.mime)), ...(texture ? [imgPart(texture.buf, texture.mime)] : []), ...modelRefs.map((r) => imgPart(r.buf, r.mime)), ...(series ? [imgPart(series.buf, series.mime)] : []), ...inspirations.map((p) => imgPart(p.buf, p.mime)), ...(prev ? [imgPart(prev.buf, prev.mime)] : [])];
+      if (prev) nInsp = 0; // le repli « sans inspiration » retirerait la photo précédente
     }
   } else {
     if (!image.parent_id) throw new Error("Image parente manquante");
@@ -304,7 +319,14 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
 
     // Plusieurs zones : chacune est comprise et retouchée séparément (en parallèle), puis recollée sur l'image d'origine
     // Plusieurs demandes (une par ligne) : chacune est traitée à sa manière, puis recollées sur la même image
-    const tasks = image.kind === "correction" && zonesIn.length === 0 ? splitTasks(image.feedback ?? "") : [];
+    // Interprétation déjà validée par le client avant de payer : on l'applique telle quelle
+    const pre = prm.pre as Interpretation | undefined;
+    if (pre && image.kind === "correction") {
+      instruction = pre.instruction; region = pre.region ?? null;
+      if (!pre.useOriginal) { original = null; origImg = null; }
+      if (pre.intent === "label") { editMode = "label"; skipChangeCheck = true; region = await locateProduct(prev); }
+    }
+    const tasks = image.kind === "correction" && zonesIn.length === 0 && !pre ? splitTasks(image.feedback ?? "") : [];
     if (tasks.length >= 2 && W && H) {
       const its = await Promise.all(tasks.map((t) => interpretCorrection(prev, t, null, prm.avoid, refs, original, product.real_size)));
       const items = its.map((it, k) => ({ it, k }));
@@ -352,7 +374,7 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
       }
     }
 
-    if (image.kind === "correction" && zonesIn.length >= 2 && W && H && !buf) {
+    if (image.kind === "correction" && zonesIn.length >= 2 && W && H && !buf && !pre) {
       const outs = await Promise.all(zonesIn.slice(0, 5).map(async (z) => {
         const it = await interpretCorrection(prev, (z.note ?? "").trim() || image.feedback || "", z, prm.avoid, refs, original, product.real_size);
         const reg: Zone = it.region ?? z;
@@ -371,7 +393,7 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
       }
     }
 
-    if (image.kind === "correction" && !prm.instruction && !buf) {
+    if (image.kind === "correction" && !prm.instruction && !pre && !buf) {
       // Filet de sécurité : demande non interprétée à la création
       const it = await interpretCorrection(prev, image.feedback ?? "", zonesIn[0] ?? null, prm.avoid, refs, original, product.real_size);
       instruction = it.instruction; region = it.region;
@@ -518,7 +540,8 @@ async function qualityCheckInner(sb: SupabaseClient, image: ImageRow) {
   const gen = await download(sb, image.path);
   let before: { buf: Buffer; mime: string } | null = null;
   const instr = (image.params as any)?.instruction as string | undefined;
-  if (image.kind === "correction" && image.parent_id && instr) {
+  // Photo refaite : contrôlée comme une nouvelle photo (tout a changé volontairement)
+  if (image.kind === "correction" && image.parent_id && instr && !(image.params as any)?.redo) {
     const { data: par } = await sb.from("images").select("path").eq("id", image.parent_id).single();
     if (par?.path) before = await download(sb, par.path);
   }

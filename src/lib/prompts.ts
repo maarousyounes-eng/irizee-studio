@@ -28,13 +28,18 @@ export const REALISM =
   "Eyebrows groomed and sharply defined, built from individual hair strokes (visible hair direction, slightly feathered edges), never painted-on, flat or uniformly smooth. Lips with real texture and specular gloss. Crisp individual eyelashes and hair strands. " +
   "Keep every styling detail exactly as described: makeup, hairstyle, jewelry, nails, eyewear, outfit.";
 
+/** Le texte imprimé ne doit jamais sortir à l'envers (effet miroir des selfies). */
+export const NO_MIRROR = "Every text printed on the product reads normally, left to right, NEVER mirrored or reversed, even in a selfie, a front-camera shot or a mirror reflection.";
+/** Pendant une retouche, le produit ne change jamais. */
+const PRODUCT_LOCK = "The product keeps exactly its packshot design and colours: the logo, the printed texts, the tube and the cap colours never change (a black logo stays black).";
+
 const numbered = (rules: string[]) => rules.map((r, i) => `${i + 1}. ${r}`).join("\n");
 const textsBlock = (p: Product) => (p.texts ?? []).map((t) => `- ${t}`).join("\n");
 
 export function buildPrompt(a: {
   product: Product; rules: string[]; userPrompt: string; aspect: string; analysis: string;
   others?: { product: Product; n: number }[]; variation: string; nProductImages: number; hasModelRef: boolean; modelDescription?: string; noPeople: boolean; noProduct?: boolean;
-  nModelRefs?: number; seriesRef?: boolean; typeLine?: string; realism?: string; hasStyleRef?: boolean;
+  nModelRefs?: number; seriesRef?: boolean; typeLine?: string; realism?: string; hasStyleRef?: boolean; hasTexture?: boolean;
 }) {
   const nModels = a.hasModelRef ? Math.max(1, a.nModelRefs ?? 1) : 0;
   // Version courte et cohérente : chaque consigne n'apparaît qu'une fois, sans ordres contradictoires.
@@ -43,11 +48,13 @@ export function buildPrompt(a: {
   const productBlock = (p: Product) => [
     `"${p.name}"${p.look ? `: ${p.look}` : ""}`,
     p.real_size ? `Real size: ${p.real_size.replace(/\n/g, ", ")}.` : "",
+    p.applied_look ? `The formula itself (out of the tube or applied on skin): ${p.applied_look}. Always show this exact colour and texture.` : "",
     p.texts?.length ? `Printed texts, spelled exactly:\n${textsBlock(p)}` : "",
   ].filter(Boolean).join("\n");
   const roles = [
     a.noProduct ? "" : (a.nProductImages > 1 ? `Images 1 to ${a.nProductImages}: packshots` : "Image 1: packshot") + ` of the real product "${a.product.name}".`,
     ...oth.map((o) => `Next ${o.n} image(s): packshot of the real product "${o.product.name}".`),
+    a.hasTexture ? "Next image: TEXTURE REFERENCE = how the formula of the product looks (colour, finish) out of the tube or on skin. Use it only for the formula, never as packaging." : "",
     nModels === 1 ? "Next image: the MODEL REFERENCE (the person to show)." : nModels > 1 ? `Next ${nModels} images: the MODEL REFERENCES (the ${nModels} persons to show, one image per person).` : "",
     a.seriesRef ? "Next image: the SERIES REFERENCE = the first image of the same series: keep exactly its person, outfit, set, lighting, colour palette and photographic style, but show the different shot described below." : "",
     a.hasStyleRef === false ? "" : "Last image(s): the STYLE REFERENCE.",
@@ -86,6 +93,7 @@ export function buildPrompt(a: {
     "",
     a.realism ?? REALISM,
     `Format: aspect ratio ${a.aspect}. Do NOT add any text, letters, words, typography, logo, watermark or graphic shapes to the image: the only text allowed is what is printed on the real products.`,
+    a.noProduct ? "" : NO_MIRROR,
   ].filter((l, i, arr) => l !== "" || arr[i - 1] !== "").join("\n");
 }
 
@@ -111,6 +119,7 @@ export function correctionPrompt(a: { product: Product; rules: string[]; feedbac
     `TASK: apply this correction requested by the client, and change nothing else: "${a.feedback}".`,
     "ANATOMY: the person has exactly two arms and two hands. Never add an extra hand, arm, finger or limb, and never leave the old hand pose behind: modify the EXISTING hand and fingers only.",
     "THE REQUESTED CHANGE MUST BE CLEARLY VISIBLE in the result: never return an unchanged copy of Image 1. If the request is a pose change (a hand holding an object, a different gesture), actually redraw the hand and fingers in the new pose and move the object accordingly, while everything else stays as it is.",
+    PRODUCT_LOCK, NO_MIRROR,
     "The product must remain identical to the packshot (shape, color, every printed text). Keep the SAME person (same face, hair, eyewear, jewelry, outfit), the SAME background, the SAME camera framing and the SAME lighting: change only what the correction asks for, and keep every other element exactly as it is. If an object moves or is re-held, completely erase it from its old position (no ghost or duplicate).",
     sizeLine(a.product),
     "Keep the visible fine skin texture and individual eyebrow hair strokes: never smooth the skin.",
@@ -126,6 +135,7 @@ export function formatPrompt(a: { product: Product; rules: string[]; aspect: str
     "ADD NOTHING that is not visible in Image 1: if Image 1 has no person there must be NO person, no hand, no face and no body part in the result; never add props, objects, textures or products that are not already there. Only extend or trim the background and surroundings to fit the new shape.",
     "Recompose and extend the scene naturally so that the whole product stays complete and fully visible, keeps the same relative scale to the person, and its label stays sharp and legible. Never crop the product. Do not add text or logos. Keep the visible fine skin texture and individual eyebrow hair strokes: never smooth the skin.",
     "The result must be ONE single continuous photograph that fills the whole frame: NO collage, NO split panels, NO inset or picture-in-picture photos, NO duplicated person or product, NO borders or empty bands. To fit a different shape, extend the background and surroundings naturally around the same subject; the person and the product are never repeated or tiled.",
+    PRODUCT_LOCK, NO_MIRROR,
     a.product.texts?.length ? `Texts that must appear exactly on the product:\n${textsBlock(a.product)}` : "",
   ].filter(Boolean).join("\n");
 }
@@ -197,8 +207,11 @@ export function interpretPrompt(a: { realSize?: string; feedback: string; hasZon
     a.refCount ? `The LAST ${a.refCount} image(s) are REFERENCE image(s) the client supplied only to EXPLAIN what they want (a pose, a grip, an arrangement, a style, an element). IMPORTANT: the retoucher will NEVER see these references and nothing from them must be pasted or copied into the photo. Describe in the instruction, in precise words, everything to reproduce: where the hand and each finger are, how they wrap around the object, the angle, the orientation, the arrangement, the proportions. Never describe or reuse the person's identity, brand, logo, text or background of the reference.` : "",
     a.realSize ? `REAL SIZE of the product: ${a.realSize.replace(/\n/g, ", ")}. If the request concerns the size or scale of the product, write the instruction with concrete proportions based on this real size (for example: the tube must be about as long as the model's hand, from wrist to fingertips, and clearly smaller than her face and shoulders).` : "",
     `Client request: "${a.feedback}"`,
+    "READING COMPLAINTS: a complaint states the goal. \"On dirait pas un selfie\" means \"make it look MORE like a real selfie\"; \"ça fait faux\" means \"make it look more real\"; \"le tube est trop gros\" means \"make it smaller\". Never do the opposite of what the complaint implies.",
     a.avoid ? `A previous attempt FAILED because: ${a.avoid}. Write the instruction so that this mistake does not happen again, with more explicit and concrete details.` : "",
-    'Return JSON only: {"instruction": str, "understood": str, "scope": "local"|"global", "intent": "edit"|"label", "use_original": bool, "boxes": [[ymin, xmin, ymax, xmax], ...]}.',
+    'Return JSON only: {"instruction": str, "understood": str, "scope": "local"|"global", "intent": "edit"|"label", "use_original": bool, "redo": bool, "clarify": str, "boxes": [[ymin, xmin, ymax, xmax], ...]}.',
+    "clarify = a short French question (max 30 words) ONLY when the request is too vague to know WHAT to change (e.g. \"tout est faux\", \"c'est nul\", \"refais\", \"pas bien\" with nothing specific); offer 3 or 4 concrete options seen in the photo (e.g. \"Qu'est-ce qui est faux : le tube (taille, forme), la main, la peau trop lisse, la lumière, le décor ?\"). Otherwise an empty string. Never guess a vague request.",
+    "redo = true when the request changes the pose, the camera angle or viewpoint, the framing or composition, the setting or decor, or many big elements at once: a retouch cannot do that and the photo must be shot again with these changes. Otherwise false. When redo is true, the instruction describes the NEW photo to create (what to change and what to keep: same person, same product, same style).",
     "use_original = true ONLY when the client explicitly asks to bring back, undo or restore something that existed in the original version (for example \"remets la bague\", \"reviens à comme avant\", \"le mannequin d'origine\"). For any other request (change the background, the light, a pose, an object, a color...) use_original MUST be false: the retoucher must then work on Image 1 only and never copy back the original version.",
     "instruction = a precise, concrete English instruction for the retoucher: what exactly to change, in which element (hand, product, outfit, background, light, skin...), the exact target result, and what must stay unchanged. Never ask to change the product's shape, label text or logo unless the client explicitly asks to fix them to match the packshot.",
     RECIPES,
@@ -222,6 +235,7 @@ export function localEditPrompt(a: { product: Product; rules: string[]; instruct
     "If the task moves, resizes or re-positions an object, you must COMPLETELY erase it from its previous position and rebuild the background and body parts that were behind it, so that no ghost, duplicate or leftover of the old object remains.",
     "HARD CONSTRAINTS: keep the exact same framing, camera angle, scale and position of every element, the same lighting, colors and background. Change ONLY what the task asks for. Everything that is not mentioned must stay pixel-identical to Image 1 (same person, same face, same outfit, same product, same text). Do not zoom, shift, crop or re-compose. Output the same crop with the same framing.",
     a.mode === "edit" ? sizeLine(a.product) : "",
+    PRODUCT_LOCK, NO_MIRROR,
     "Keep the visible fine skin texture and individual eyebrow hair strokes: never smooth the skin.",
     texts,
   ].filter(Boolean).join("\n");

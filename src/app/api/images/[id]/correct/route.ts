@@ -32,12 +32,19 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       if (p && !p.rules.includes(feedback)) await sb.from("products").update({ rules: [...p.rules, feedback] }).eq("id", pid);
     }
 
+    // Interprétation déjà vue et validée par le client (« Compris : … ») : réutilisée telle quelle, sans nouvel appel
+    const pr = b.pre && typeof b.pre === "object" && typeof b.pre.instruction === "string" ? b.pre : null;
+    const pre = pr ? {
+      instruction: String(pr.instruction).slice(0, 3000), understood: String(pr.understood ?? "").slice(0, 400),
+      region: valid(pr.region) ? { x: pr.region.x, y: pr.region.y, w: pr.region.w, h: pr.region.h } : null,
+      intent: pr.intent === "label" ? "label" : "edit", useOriginal: pr.useOriginal === true, redo: pr.redo === true, clarify: "",
+    } : null;
     const group = crypto.randomUUID();
     const rows = Array.from({ length: n }, (_, i) => ({
       shoot_id: parent.shoot_id, parent_id: parent.id, kind: mode === "label" ? "label" : "correction",
       version: (parent.version ?? 1) + 1, variant_index: parent.variant_index, aspect: parent.aspect, model_id: parent.model_id,
       feedback: mode === "label" ? "Réparation de l'étiquette" : feedback,
-      params: { ...(zone ? { zone } : {}), ...(zones.length ? { zones } : {}), group, n, i: i + 1, original: feedback, ...(refs.length ? { refs } : {}), round: Math.min(2, Math.max(0, Number(b.round) || 0)), ...(avoid ? { avoid } : {}) },
+      params: { ...(zone ? { zone } : {}), ...(zones.length ? { zones } : {}), group, n, i: i + 1, original: feedback, ...(refs.length ? { refs } : {}), round: Math.min(2, Math.max(0, Number(b.round) || 0)), ...(avoid ? { avoid } : {}), ...(pre ? { pre, instruction: pre.instruction, understood: pre.understood, ...(pre.redo ? { redo: true } : {}) } : {}) },
       created_by: user.id,
     }));
     const { data: imgs, error } = await sb.from("images").insert(rows).select("id");

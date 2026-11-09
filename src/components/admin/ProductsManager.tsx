@@ -81,6 +81,10 @@ function ProductCard({ p, urls, onChange }: { p: Product; urls: Record<string, s
   const [texts, setTexts] = useState((p.texts ?? []).join("\n"));
   const [look, setLook] = useState(p.look ?? "");
   const [size, setSize] = useState(p.real_size ?? "");
+  const [applied, setApplied] = useState(p.applied_look ?? "");
+  const [texture, setTexture] = useState<string | null>(p.texture_path ?? null);
+  const texRef = useRef<HTMLInputElement>(null);
+  const texUrls = useSignedUrls([texture]);
   const [rules, setRules] = useState<string[]>(p.rules ?? []);
   const [newRule, setNewRule] = useState("");
   const [saved, setSaved] = useState(false);
@@ -88,7 +92,7 @@ function ProductCard({ p, urls, onChange }: { p: Product; urls: Record<string, s
   const imgs = [...(p.product_images ?? [])].sort((a, b) => a.position - b.position);
 
   async function save(nextRules = rules) {
-    await sb.from("products").update({ name, texts: texts.split("\n").map((t) => t.trim()).filter(Boolean), look, real_size: size, rules: nextRules }).eq("id", p.id);
+    await sb.from("products").update({ name, texts: texts.split("\n").map((t) => t.trim()).filter(Boolean), look, real_size: size, applied_look: applied, texture_path: texture, rules: nextRules }).eq("id", p.id);
     setSaved(true); setTimeout(() => setSaved(false), 1800); onChange();
   }
   async function addImages(files: FileList) {
@@ -117,7 +121,21 @@ function ProductCard({ p, urls, onChange }: { p: Product; urls: Record<string, s
         <div><Label>Textes imprimés à contrôler (un par ligne)</Label><textarea className={INPUT + " min-h-[120px] text-[13px]"} value={texts} onChange={(e) => setTexts(e.target.value)} /></div>
         <div className="grid sm:grid-cols-2 gap-3">
           <div><Label>Aspect</Label><textarea className={INPUT + " min-h-[64px] text-[13px]"} value={look} onChange={(e) => setLook(e.target.value)} /></div>
-          <div><Label>Taille réelle</Label><textarea className={INPUT + " min-h-[64px] text-[13px]"} value={size} onChange={(e) => setSize(e.target.value)} /></div>
+          <div><Label>Taille réelle</Label><textarea className={INPUT + " min-h-[64px] text-[13px]"} value={size} onChange={(e) => setSize(e.target.value)} placeholder="Ex : tube de 15 cm de long et 4 cm de large (75 ml)" /></div>
+        </div>
+        <div className="grid sm:grid-cols-[1fr_auto] gap-3 items-start">
+          <div>
+            <Label>Couleur et texture du soin (sorti du tube, appliqué)</Label>
+            <textarea className={INPUT + " min-h-[64px] text-[13px]"} value={applied} onChange={(e) => setApplied(e.target.value)} placeholder="Ex : crème-gel bleu indigo moyen, ni foncé ni pastel, fine et lisse, couche fine et semi-opaque sur la peau" />
+          </div>
+          <div>
+            <Label>Photo de la texture</Label>
+            <button type="button" onClick={() => texRef.current?.click()} className="w-24 h-24 rounded-xl border border-dashed border-[#D4D4D8] bg-[#F4F4F5] overflow-hidden flex items-center justify-center text-[11px] text-[#6B6B72]">
+              {texture && texUrls[texture] ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={texUrls[texture]} alt="Texture" className="w-full h-full object-cover" /> : "Ajouter"}
+            </button>
+            {texture && <button type="button" className="block text-[11px] text-[#A0A0A8] hover:text-[#E8444A] mt-1" onClick={() => setTexture(null)}>Retirer</button>}
+            <input ref={texRef} type="file" accept="image/*" hidden onChange={async (e) => { const f = e.target.files?.[0]; if (f) setTexture(await uploadImage(sb, "products", f, 1400)); }} />
+          </div>
         </div>
         <div>
           <Label>Règles propres à ce produit</Label>

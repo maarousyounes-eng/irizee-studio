@@ -167,32 +167,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
   // La dernière image créée par une correction (pour s'y retrouver)
   const latestFixId = useMemo(() => images.filter((i) => i.kind === "correction" && !i.params?.archived).sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at))[0]?.id, [images]);
 
-  // Si aucune proposition ne répond à la demande, la plateforme réessaie seule (une fois), en disant à l'IA ce qui a échoué.
-  const retried = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    const groups = new Map<string, ImageRow[]>();
-    images.forEach((i) => { const g = i.params?.group; if (g && i.kind === "correction" && !i.params?.archived) groups.set(g, [...(groups.get(g) ?? []), i]); });
-    groups.forEach((list, g) => {
-      if (retried.current.has(g) || list[0].created_by !== me.id) return;
-      if (list.some((i) => i.state === "generating" || (i.state === "done" && !i.qc) || running.has(i.id))) return;
-      const round = Number(list[0].params?.round ?? 0);
-      if (round >= 1) return; // une seule relance automatique (chaque essai coûte de l'argent)
-      const judged = list.filter((i) => i.state === "done" && i.qc);
-      if (!judged.length || judged.some((i) => i.qc!.unchanged)) return; // déjà 2 tentatives sans effet côté serveur : inutile de payer encore
-      if (judged.some((i) => i.qc!.instruction_followed !== false && !i.qc!.ghost_or_duplicate)) return;
-      retried.current.add(g);
-      const parent = images.find((i) => i.id === list[0].parent_id);
-      if (!parent) return;
-      const issues = Array.from(new Set(judged.map((i) => [
-        i.qc!.instruction_followed === false ? "the requested change was not clearly visible (the image looked unchanged)" : "",
-        i.qc!.ghost_or_duplicate ? "a ghost or duplicate of the old object was left" : "",
-        i.qc!.comment ?? "",
-      ].filter(Boolean).join("; ")))).slice(0, 2).join(" | ");
-      Promise.all(list.map((i) => sb.from("images").update({ params: { ...i.params, archived: true } }).eq("id", i.id))).then(() =>
-        submitFix(parent, "edit", { feedback: String(list[0].params?.original ?? list[0].feedback ?? ""), zones: ((list[0].params?.zones as NoteZone[]) ?? (list[0].params?.zone ? [{ ...(list[0].params.zone as object), note: "" } as NoteZone] : [])), remember: false, refs: (list[0].params?.refs as string[]) ?? [] }, issues, round + 1));
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [images, running]);
+  // Plus de relance automatique : chaque essai coûte, c'est vous qui décidez (bouton « Réessayer »).
 
   /** Annule des générations : elles sont écartées et ne sont pas facturées si l'IA n'a pas fini. */
   async function cancelImages(list: ImageRow[]) {
@@ -213,12 +188,12 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
     generating: images.filter((i) => i.state === "generating").length,
   }), [images]);
 
-  async function submitFix(img: ImageRow, mode: "edit" | "label", v?: { feedback: string; zones: NoteZone[]; remember: boolean; refs?: string[] }, avoid?: string, round = 0) {
+  async function submitFix(img: ImageRow, mode: "edit" | "label", v?: { feedback: string; zones: NoteZone[]; remember: boolean; refs?: string[]; pre?: unknown }, avoid?: string, round = 0) {
     try {
-      const r = await api<{ imageIds: string[] }>(`/api/images/${img.id}/correct`, { mode, feedback: v?.feedback ?? "", zones: v?.zones ?? [], remember: !!v?.remember, refs: v?.refs ?? [], avoid, round, candidates: 1 });
+      const r = await api<{ imageIds: string[] }>(`/api/images/${img.id}/correct`, { mode, feedback: v?.feedback ?? "", zones: v?.zones ?? [], remember: !!v?.remember, refs: v?.refs ?? [], avoid, round, candidates: 1, pre: v?.pre ?? null });
       setFix(null);
       await load(); run(r.imageIds);
-      flash(mode === "label" ? "Réparation de l'étiquette lancée" : round > 0 ? `La correction n'a pas marché : je réessaie automatiquement (essai ${round + 1}/2) avec une consigne plus précise` : v?.remember ? "Correction lancée — consigne mémorisée pour ce produit" : "Correction lancée : je vérifie le résultat et je réessaie seul si besoin");
+      flash(mode === "label" ? "Réparation de l'étiquette lancée" : round > 0 ? `La correction n'a pas marché : je réessaie automatiquement (essai ${round + 1}/2) avec une consigne plus précise` : v?.remember ? "Correction lancée — consigne mémorisée pour ce produit" : "Correction lancée : le résultat sera vérifié automatiquement");
     } catch (e) { flash(e instanceof Error ? e.message : "Erreur"); }
   }
 
@@ -246,7 +221,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
     ].filter(Boolean).join("; ");
     // les anciennes propositions sont écartées pour ne pas encombrer la page
     await archiveGroup(img, null);
-    await submitFix(parent, "edit", { feedback: String(img.params?.original ?? img.feedback ?? ""), zones: ((img.params?.zones as NoteZone[]) ?? (img.params?.zone ? [{ ...(img.params.zone as object), note: "" } as NoteZone] : [])), remember: false, refs: (img.params?.refs as string[]) ?? [] }, issues || "the result did not match the request");
+    await submitFix(parent, "edit", { feedback: String(img.params?.original ?? img.feedback ?? ""), zones: ((img.params?.zones as NoteZone[]) ?? (img.params?.zone ? [{ ...(img.params.zone as object), note: "" } as NoteZone] : [])), remember: false, refs: (img.params?.refs as string[]) ?? [], pre: img.params?.redo ? img.params?.pre : undefined }, issues || "the result did not match the request");
   }
 
   /** Garde cette proposition et écarte les autres essais du même groupe. */

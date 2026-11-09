@@ -8,7 +8,7 @@ export interface Profile {
   monthly_quota: number;
 }
 export interface Product {
-  id: string; name: string; texts: string[]; look: string; real_size: string; rules: string[];
+  id: string; name: string; texts: string[]; look: string; real_size: string; rules: string[]; applied_look?: string; texture_path?: string | null;
   product_images?: { id: string; path: string; position: number }[];
 }
 export interface Model {

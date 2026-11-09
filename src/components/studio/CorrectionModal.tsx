@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Crosshair, ImagePlus, X } from "lucide-react";
 import { Btn, INPUT, Label, Modal, Spinner } from "@/components/ui";
-import { uploadImage, useSupabase } from "@/lib/client";
+import { api, uploadImage, useSupabase } from "@/lib/client";
 
 export interface Zone { x: number; y: number; w: number; h: number }
 export interface NoteZone extends Zone { note: string }
@@ -32,7 +32,7 @@ interface Props {
   aspect: string;
   isStaff: boolean;
   onClose: () => void;
-  onSubmit: (v: { feedback: string; zones: NoteZone[]; remember: boolean; refs: string[]; baseId: string }) => Promise<void> | void;
+  onSubmit: (v: { feedback: string; zones: NoteZone[]; remember: boolean; refs: string[]; baseId: string; pre?: unknown }) => Promise<void> | void;
 }
 
 export default function CorrectionModal({ bases, currentId, aspect, isStaff, onClose, onSubmit }: Props) {
@@ -51,6 +51,11 @@ export default function CorrectionModal({ bases, currentId, aspect, isStaff, onC
   const [refs, setRefs] = useState<{ path: string; preview: string }[]>([]);
   const [uploading, setUploading] = useState(0);
   const [refError, setRefError] = useState<string | null>(null);
+  // Étape « Vérifier » : ce que l'outil a compris, AVANT de payer une image
+  const [check, setCheck] = useState<{ understood: string; clarify: string; redo: boolean; pre: unknown } | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [checkErr, setCheckErr] = useState<string | null>(null);
+  useEffect(() => { setCheck(null); }, [text, zones, refs, baseId]);
 
   async function addRefs(files: File[]) {
     const list = files.filter((f) => f.type.startsWith("image/")).slice(0, 3 - refs.length);
@@ -91,9 +96,15 @@ export default function CorrectionModal({ bases, currentId, aspect, isStaff, onC
   };
   const canSubmit = !!text.trim() || (zones.length > 0 && zones.every((z) => z.note.trim()));
 
+  async function verify() {
+    setChecking(true); setCheckErr(null);
+    try { setCheck(await api(`/api/images/${baseId}/understand`, { feedback: text.trim(), zones, refs: refs.map((r) => r.path) })); }
+    catch (e) { setCheckErr(e instanceof Error ? e.message : "Erreur"); }
+    setChecking(false);
+  }
   async function apply() {
     setBusy(true);
-    try { await onSubmit({ feedback: text.trim(), zones, remember, refs: refs.map((r) => r.path), baseId }); } finally { setBusy(false); }
+    try { await onSubmit({ feedback: text.trim(), zones, remember, refs: refs.map((r) => r.path), baseId, pre: check?.pre ?? undefined }); } finally { setBusy(false); }
   }
 
   return (
@@ -158,7 +169,7 @@ export default function CorrectionModal({ bases, currentId, aspect, isStaff, onC
             <Label>3. Dis ce que tu veux changer {zones.length > 1 && <span className="normal-case tracking-normal font-normal">(valable pour toutes les zones sans note)</span>}</Label>
             <textarea className={INPUT + " min-h-[110px]"} value={text} onChange={(e) => setText(e.target.value)} autoFocus
               placeholder="Ex : la main de gauche a six doigts / le flacon est trop grand / enlève les lunettes. Tu peux écrire plusieurs demandes à la suite, une par ligne." />
-            <p className="text-[11px] text-[#A0A0A8] mt-1">Écris comme tu parles. La plateforme génère 1 version et la vérifie (ta demande est-elle faite ? rien d&apos;autre n&apos;a-t-il changé ?). Si ce n&apos;est pas le cas, elle réessaie seule, jusqu&apos;à 2 fois. Le « Compris : … » sur la carte te montre comment ta demande a été interprétée.</p>
+            <p className="text-[11px] text-[#A0A0A8] mt-1">Écris comme tu parles, en disant précisément ce qui ne va pas. Clique d&apos;abord sur « Vérifier ma demande » : tu vois ce qui a été compris avant de payer une image. Pour changer la pose, l&apos;angle, le cadrage ou le décor, la photo est refaite (nouvelle prise de vue) au lieu d&apos;être retouchée.</p>
           </div>
           <div>
             <Label>4. Montre une référence <span className="normal-case tracking-normal font-normal">(facultatif)</span></Label>
@@ -189,8 +200,23 @@ export default function CorrectionModal({ bases, currentId, aspect, isStaff, onC
               <span>Retenir cette consigne pour ce produit <span className="text-[#A0A0A8]">(l&apos;erreur ne reviendra plus sur les prochains shootings)</span></span>
             </label>
           )}
-          <div className="flex gap-2 pt-1">
-            <Btn onClick={apply} disabled={busy || uploading > 0 || !canSubmit}>{busy || uploading > 0 ? "Envoi…" : "Appliquer la correction"}</Btn>
+          {check && (check.clarify ? (
+            <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-[13px] text-amber-900">
+              <b>Précise ta demande :</b> {check.clarify}
+              <p className="text-[11px] mt-1">Complète le texte ci-dessus puis clique à nouveau sur « Vérifier ma demande ». Rien n&apos;a été payé.</p>
+            </div>
+          ) : (
+            <div className="p-3 rounded-xl bg-[#EBF2FF] border border-[#C9D9F8] text-[13px] text-[#1F3F7A] space-y-1">
+              <p><b>Compris :</b> {check.understood}</p>
+              {check.redo && <p className="text-[12px]"><b>La photo sera refaite</b> (nouvelle prise de vue avec le même mannequin, le même produit et le même style) : une retouche ne peut pas changer la pose, l&apos;angle ou le décor.</p>}
+              <p className="text-[11px] text-[#52525B]">Si ce n&apos;est pas ça, reformule avant de lancer : rien n&apos;a encore été payé.</p>
+            </div>
+          ))}
+          {checkErr && <p className="text-[12px] text-[#E8444A]">{checkErr}</p>}
+          <div className="flex flex-wrap gap-2 pt-1">
+            {!check || check.clarify
+              ? <Btn onClick={verify} disabled={checking || uploading > 0 || !canSubmit}>{checking ? <><Spinner className="border-white/40 border-t-white" /> Lecture de ta demande…</> : "Vérifier ma demande (gratuit)"}</Btn>
+              : <Btn onClick={apply} disabled={busy || uploading > 0}>{busy ? "Envoi…" : check.redo ? "Refaire la photo (1 image payante)" : "Lancer la correction (1 image payante)"}</Btn>}
             <Btn variant="ghost" onClick={onClose}>Annuler</Btn>
           </div>
         </div>
