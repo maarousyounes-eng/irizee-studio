@@ -53,6 +53,9 @@ export async function analyzeInspirations(sb: SupabaseClient, paths: string[], p
 
 type Img = { buf: Buffer; mime: string };
 
+/** Moteur d'image unique : OpenAI (génération, corrections, étiquette, formats). Les textes et le contrôle restent sur Gemini. */
+export const IMAGE_MODEL = "openai:auto";
+
 /**
  * Floute les visages des images d'inspiration quand on utilise un mannequin :
  * le modèle d'image ne peut alors plus mélanger le visage de l'inspiration avec celui du mannequin.
@@ -260,7 +263,7 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
   // « Refaire la photo » : une correction qui change la pose, l'angle, le cadrage ou le décor est une nouvelle prise de vue
   const redo = image.kind === "correction" && prm0.redo === true;
   if (image.kind === "generated" || redo) {
-    model = shoot.engine === "openai" ? "openai:auto" : shoot.engine === "pro" ? MODELS.pro : shoot.engine === "flash" ? MODELS.flash : (image.variant_index % 2 === 0 ? MODELS.flash : MODELS.pro);
+    model = IMAGE_MODEL; // tout passe par OpenAI (meilleur rendu constaté), quel que soit l'ancien réglage du shooting
     const vtype = String(shoot.visual_type ?? "photo");
     // « Autre idée » : cette image suit la nouvelle idée choisie par le client
     const idea = image.kind === "generated" ? String(prm0.idea ?? "").trim() : "";
@@ -326,7 +329,7 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
     const { data: parent } = await sb.from("images").select("path").eq("id", image.parent_id).single();
     if (!parent?.path) throw new Error("Image parente introuvable");
     const prev = await download(sb, parent.path);
-    model = MODELS.pro;
+    model = IMAGE_MODEL;
     const meta = await sharp(prev.buf).metadata();
     const W = meta.width ?? 0, H = meta.height ?? 0;
     const prm = (image.params ?? {}) as Record<string, any>;
@@ -499,7 +502,7 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
     });
     const sp: Part[] = [{ text: strong }, imgPart(prevImg.buf, prevImg.mime), ...(origImg ? [imgPart(origImg.buf, origImg.mime)] : []), ...packshots.map((p) => imgPart(p.buf, p.mime))];
     try {
-      const nb = firstImage(await gemini(MODELS.pro, sp, { purpose: "retouche renforcée", image: true, aspect, size: shoot.size, signal, timeoutMs: left() }));
+      const nb = firstImage(await gemini(IMAGE_MODEL, sp, { purpose: "retouche renforcée", image: true, aspect, size: shoot.size, signal, timeoutMs: left() }));
       if (nb && (await hasChanged(prevImg.buf, nb))) buf = nb; else unchanged = true;
     } catch { unchanged = true; }
   }

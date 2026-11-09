@@ -101,7 +101,8 @@ async function callOpenAI(model: string, parts: Part[], o: { purpose?: string; a
     imgs.forEach((p, k) => fd.append("image[]", new Blob([new Uint8Array(Buffer.from(p.inline_data.data, "base64"))], { type: p.inline_data.mime_type }), `ref${k}.${p.inline_data.mime_type.includes("png") ? "png" : "jpg"}`));
     let res: Response;
     try {
-      res = await fetch("https://api.openai.com/v1/images/edits", { method: "POST", headers: { Authorization: `Bearer ${key}` }, body: fd, signal: o.signal ? AbortSignal.any([o.signal, AbortSignal.timeout(o.timeoutMs ?? 240_000)]) : AbortSignal.timeout(o.timeoutMs ?? 240_000) });
+      // Sans image de référence : création pure (l'endpoint « edits » exige au moins une image)
+      res = await fetch(imgs.length ? "https://api.openai.com/v1/images/edits" : "https://api.openai.com/v1/images/generations", { method: "POST", headers: imgs.length ? { Authorization: `Bearer ${key}` } : { Authorization: `Bearer ${key}`, "Content-Type": "application/json" }, body: imgs.length ? fd : JSON.stringify({ model: name, prompt, size, quality: "high", n: 1 }), signal: o.signal ? AbortSignal.any([o.signal, AbortSignal.timeout(o.timeoutMs ?? 240_000)]) : AbortSignal.timeout(o.timeoutMs ?? 240_000) });
     } catch (e) {
       await logCall({ purpose: o.purpose ?? "autre", model: name, status: "timeout", ms: Date.now() - t0, note: e instanceof Error ? e.message : "" });
       throw e;

@@ -12,7 +12,7 @@ export async function POST(_: Request, { params }: { params: { id: string } }) {
     if (!m) throw new HttpError(404, "Mannequin introuvable");
     await sb.from("models").update({ state: "generating", error: null }).eq("id", m.id);
     try {
-      const r = await withAiCtx({ sb, userId: user.id }, () => gemini(MODELS.pro, [{ text: modelSheetPrompt({ name: m.name, description: m.description }) }], { purpose: "mannequin", image: true, aspect: "3:4", size: "1K" }));
+      const r = await withAiCtx({ sb, userId: user.id }, () => gemini("openai:auto", [{ text: modelSheetPrompt({ name: m.name, description: m.description }) }], { purpose: "mannequin", image: true, aspect: "3:4", size: "1K" }));
       const buf = firstImage(r);
       if (!buf) throw new Error("Aucune image renvoyée");
       const path = `models/${m.id}-${Date.now()}.png`;

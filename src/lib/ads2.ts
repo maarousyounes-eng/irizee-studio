@@ -22,7 +22,7 @@ export interface Variant {
 export interface AdQC { texts: { expected: string; read: string; ok: boolean }[]; unwanted_text: boolean; product_ok: boolean; duplicate_products: boolean; issues: string[]; comment: string }
 
 const cut = (s: unknown, n: number) => String(s ?? "").trim().slice(0, n);
-const imageModel = (engine: string) => (engine === "pro" ? MODELS.pro : "openai:auto");
+const imageModel = (_engine: string) => "openai:auto";
 const productBlock = (p: Product) => [`"${p.name}"${p.look ? `: ${p.look}` : ""}`, p.real_size ? `Real size: ${p.real_size.replace(/\n/g, ", ")}.` : "", p.texts?.length ? `Printed on it (exactly): ${p.texts.join(" | ")}` : ""].filter(Boolean).join("\n");
 
 async function loadProducts(sb: SupabaseClient, ids: string[]) {

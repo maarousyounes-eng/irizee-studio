@@ -40,7 +40,7 @@ export default function NewShootForm(p: Props) {
   const [prompt, setPrompt] = useState(p.again?.prompt ?? "");
   const [aspect, setAspect] = useState(p.again && FORMATS[p.again.aspect] ? p.again.aspect : p.initial.aspect && FORMATS[p.initial.aspect] ? p.initial.aspect : "4:5");
   const [variants, setVariants] = useState(p.again?.variants ?? 6);
-  const [engine, setEngine] = useState(p.again?.engine ?? "pro");
+  const engine = "openai";
   const [size, setSize] = useState(p.again?.size ?? "2K");
   const [inspirations, setInspirations] = useState<string[]>(p.again?.inspirationPaths ?? p.initial.inspirationPaths);
   const [vtype, setVtype] = useState<VisualType>((VISUAL_TYPES.find((t) => t.id === p.again?.visualType)?.id) ?? "photo");
@@ -411,11 +411,7 @@ export default function NewShootForm(p: Props) {
         <div className="grid grid-cols-2 gap-3">
           <div>
             <Label>Moteur</Label>
-            <select className={INPUT} value={engine} onChange={(e) => setEngine(e.target.value)}>
-              <option value="pro">Gemini — qualité max (≈ 0,13 € / image)</option>
-              <option value="openai">OpenAI — meilleur modèle (≈ 0,20 € / image)</option>
-              <option value="flash">Gemini — rapide</option>
-            </select>
+            <p className="text-sm font-semibold py-2">OpenAI <span className="text-[11px] font-normal text-[#6B6B72]">(≈ 0,20 € / image)</span></p>
           </div>
           <div>
             <Label>Résolution</Label>
