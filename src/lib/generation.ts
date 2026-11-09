@@ -53,6 +53,31 @@ export async function analyzeInspirations(sb: SupabaseClient, paths: string[], p
 
 type Img = { buf: Buffer; mime: string };
 
+/**
+ * Floute les visages des images d'inspiration quand on utilise un mannequin :
+ * le modèle d'image ne peut alors plus mélanger le visage de l'inspiration avec celui du mannequin.
+ */
+async function blurFaces(img: Img): Promise<Img> {
+  try {
+    const r = await gemini(MODELS.text, [{ text: 'Find every human face (forehead to chin, including hair line) in this image. Return JSON only: {"faces": [[ymin, xmin, ymax, xmax], ...]} with integer coordinates from 0 to 1000; empty list if none.' }, imgPart(img.buf, img.mime)], { purpose: "floutage visage inspiration", json: true, timeoutMs: 25_000 });
+    const boxes = (parseJson<{ faces?: number[][] }>(firstText(r)).faces ?? []).filter((b) => Array.isArray(b) && b.length === 4);
+    if (!boxes.length) return img;
+    const meta = await sharp(img.buf).metadata();
+    const W = meta.width ?? 0, H = meta.height ?? 0;
+    if (!W || !H) return img;
+    const layers = await Promise.all(boxes.slice(0, 6).map(async ([y0, x0, y1, x1]) => {
+      const pad = 0.08;
+      const left = Math.max(0, Math.round((x0 / 1000 - pad) * W)), top = Math.max(0, Math.round((y0 / 1000 - pad) * H));
+      const width = Math.min(W - left, Math.round(((x1 - x0) / 1000 + 2 * pad) * W)), height = Math.min(H - top, Math.round(((y1 - y0) / 1000 + 2 * pad) * H));
+      if (width < 4 || height < 4) return null;
+      const input = await sharp(img.buf).extract({ left, top, width, height }).blur(Math.max(12, Math.round(Math.min(width, height) / 6))).toBuffer();
+      return { input, left, top };
+    }));
+    const buf = await sharp(img.buf).composite(layers.filter(Boolean) as { input: Buffer; left: number; top: number }[]).jpeg({ quality: 92 }).toBuffer();
+    return { buf, mime: "image/jpeg" };
+  } catch { return img; }
+}
+
 /** Retouche d'un recadrage autour d'une zone : renvoie l'image retouchée et le cadre utilisé. */
 async function localEditCrop(a: {
   prev: Buffer; W: number; H: number; region: Zone; instruction: string; mode: "edit" | "label"; product: Product; rules: string[];
@@ -249,7 +274,7 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
       // Carrousel : la même inspiration pour toutes les slides (cohérence de la série).
       const allInsp = shoot.inspiration_paths as string[];
       const pick = vtype === "carousel" ? 0 : allInsp.length > 1 ? Math.floor(image.variant_index / plan.slots) % allInsp.length : 0; // avec plusieurs produits, chaque inspiration sert à chaque cas (chaque produit seul, tous ensemble)
-      const inspirations = await Promise.all((allInsp.length > 1 ? [allInsp[pick]] : allInsp).map((p) => download(sb, p)));
+      let inspirations: Img[] = await Promise.all((allInsp.length > 1 ? [allInsp[pick]] : allInsp).map((p) => download(sb, p)));
       const perAnalysis = String(shoot.analysis ?? "").split(ANALYSIS_SEP);
       const analysisFor = allInsp.length > 1 && perAnalysis.length === allInsp.length ? perAnalysis[pick] : (shoot.analysis ?? "");
       // Mannequin(s) : un par image, ou tous ensemble sur la même image
@@ -268,6 +293,8 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
         const a0 = firsts?.[0];
         if (a0 && a0.variant_index < image.variant_index && a0.path) series = await download(sb, a0.path).catch(() => null);
       }
+      // Mannequin choisi : les visages des inspirations sont floutés pour ne jamais se mélanger avec le sien
+      if (modelRefs.length && inspirations.length) inspirations = await Promise.all(inspirations.map(blurFaces));
       const nSlides = normalizeSlides(tp.slides).length || 1;
       // Photo de la texture du soin (couleur, rendu sur la peau)
       const texture = !noProduct && product.texture_path ? await download(sb, product.texture_path).catch(() => null) : null;

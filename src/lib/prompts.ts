@@ -50,7 +50,7 @@ export function buildPrompt(a: {
   const products = [a.product, ...oth.map((o) => o.product)];
   const productBlock = (p: Product) => [
     `"${p.name}"${p.look ? `: ${p.look}` : ""}`,
-    p.real_size ? `Real size: ${p.real_size.replace(/\n/g, ", ")}.` : "",
+    p.real_size ? `Real size: ${p.real_size.replace(/\n/g, ", ")}.` : "Real size: a standard hand-held cosmetic of this kind (a tube of about 15 cm): in a hand it is no longer than the hand itself, clearly smaller than the face.",
     p.applied_look ? `The formula itself (out of the tube or applied on skin): ${p.applied_look}. Always show this exact colour and texture.` : "",
     p.texts?.length ? `Printed texts, spelled exactly:\n${textsBlock(p)}` : "",
   ].filter(Boolean).join("\n");
@@ -87,10 +87,11 @@ export function buildPrompt(a: {
     "",
     a.noProduct ? "STYLE: reproduce the style reference: composition, camera angle and lens, pose, lighting, colour palette, background and mood." : (products.length > 1 ? "STYLE: reproduce the style reference: composition, camera angle and lens, pose, lighting, colour palette, background and mood, and how the products are placed (held, standing, floating), but with exactly one of each product, at a realistic scale." : "STYLE: reproduce the style reference: composition, camera angle and lens, pose, lighting, colour palette, background, mood, and the way the product is placed (held, floating, number of copies), at a realistic scale for the product."),
     a.analysis ? `Description of the style reference:\n${a.analysis}` : "",
+    "The result is ONE clean single photograph: ignore any phone camera interface, viewfinder grid, icons, stickers, text, frames or collage layout visible in the style reference, and never add any.",
     "",
     `CLIENT BRIEF (priority over the style reference when they differ): ${a.userPrompt}`,
     a.typeLine ? `\n${a.typeLine}` : "",
-    a.shot ? `\nPHOTOGRAPHER'S SHOT SPEC for this image (follow it precisely, it overrides the style reference for framing, lens, light and pose): ${a.shot}` : "",
+    a.shot ? `\nPHOTOGRAPHER'S SHOT SPEC for this image (lens, framing, light and pose; the client brief always wins if they differ): ${a.shot}` : "",
     "",
     person,
     a.noPeople ? "" : a.noProduct ? "Hands are anatomically correct: five fingers per hand, natural joints." : "Hands are anatomically correct: five fingers per hand, natural joints and a firm, plausible grip on the product.",
@@ -191,7 +192,8 @@ export const EXTRACT_PROMPT =
   'This is a packshot of a cosmetics product. Return JSON only: {"name":str (product name as printed, short),"texts":[every distinct printed text on the product, exactly as printed, accents included. Join the lines that belong to the same sentence or title into ONE string. Include the volume line and the brand logo word],"look":str (2 sentences in English: shape, material, colors, cap; and the layout of the printed text, including its direction relative to the product axis: horizontal, or vertical along the length, and the reading direction of the large logo),"realSize":str (estimated real-world size in English from the volume and shape, e.g. "about 9 cm tall, fits in the palm of one hand")}';
 
 export const ANALYZE_PROMPT =
-  "Describe this advertising photo in about 120 words, in English, as a brief for a photographer: camera angle and lens, composition, lighting, color palette, background and graphic elements, styling and mood. " +
+  "Describe this advertising photo in about 120 words, in English, as a brief for a photographer: camera angle and lens, composition, lighting, color palette, background, styling and mood. " +
+  "IGNORE completely any phone camera interface, viewfinder grid, icons, stickers, text, frames or graphic overlays visible on the image: describe only the photograph itself and never mention them. " +
   "Say how the product(s) are arranged (a single hero product or several copies, whether they float or are held) and how big the object appears relative to the person (for example \"about a third of the face height\", \"fits in the palm\", \"covers the chin\"), but refer to them only as \"the product\": do NOT describe the product's type, shape or packaging. " +
   "Do NOT describe the identity of any person and do NOT mention any brand names or text printed in the image.";
 
@@ -357,6 +359,7 @@ export function shotListPrompt(a: { brief: string; analysis: string; n: number; 
     a.noProduct ? "No product appears in these photos." : `Product(s) to feature, exactly as they are:\n${a.products}`,
     a.people ? `Model(s): ${a.people} real person(s) (identity given separately), directed like a professional model.` : "No person in these photos.",
     a.type === "social" ? "Use: organic Instagram posts, natural and authentic." : a.type === "ad" ? "Use: paid social ads, the product is the hero." : "",
+    "STRICT: never invent anything the brief does not ask for. Every shot is ONE single clean photograph: no diptych, no collage, no split frame, no phone interface, no grid, no icon, no text or graphic overlay. The product is held naturally and upright (label facing the camera), at its real small size (no longer than the model's hand). Only describe the formula on the skin if the brief mentions applying it.",
     `Write ${a.n} shots that together form a coherent, varied professional series (vary framing: wide / medium / close-up / detail; vary angles and gestures), all in the same set, light and colour mood.`,
     "For each shot write ONE dense English paragraph (60-90 words) a photographer would follow: framing and camera angle, lens and aperture (e.g. 85mm f/2.8), light setup (key light type and direction, fill, rim, natural window light...), set and props, exact pose and gesture direction for the model (where the hands are, how the product is held so the label faces the camera at a natural angle and realistic size), expression, styling, colour grade. Physically plausible, never an extreme close-up of the label unless the brief asks.",
     'Return JSON only: {"shots": [str]}',
