@@ -48,6 +48,7 @@ export async function POST(req: Request) {
       if (!slides.some(filled)) {
         try { slides = await withAiCtx({ sb, userId: user.id }, () => planSlides(sb, { idea: prompt, n, style: tp.carouselStyle!, productIds, noProduct: !!b.noProduct, people: !b.noPeople })); } catch { slides = []; }
       }
+      if (slides.length >= 3) n = Math.min(10, slides.length);
       slides = Array.from({ length: n }, (_, i) => slides[i] ?? emptySlide());
       tp.slides = slides;
       if (!slides.some((x) => x.layout !== "text")) throw new HttpError(400, "Il faut au moins une slide avec photo");

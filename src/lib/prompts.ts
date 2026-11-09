@@ -61,7 +61,7 @@ export function buildPrompt(a: {
     ...oth.map((o) => `Next ${o.n} image(s): packshot of the real product "${o.product.name}".`),
     a.hasTexture ? "Next image: TEXTURE REFERENCE = how the formula of the product looks (colour, finish) out of the tube or on skin. Use it only for the formula, never as packaging." : "",
     nModels === 1 ? "Next image: the MODEL REFERENCE (the person to show)." : nModels > 1 ? `Next ${nModels} images: the MODEL REFERENCES (the ${nModels} persons to show, one image per person).` : "",
-    a.seriesRef ? "Next image: the SERIES REFERENCE = the first image of the same series: keep exactly its person, outfit, set, lighting, colour palette and photographic style, but show the different shot described below." : "",
+    a.seriesRef ? "Next image: the SERIES REFERENCE = the first image of the same series: match its art direction, colour grade and photographic quality (and its person, if a person appears in both), but NEVER copy its subject, set or composition: this image shows what is described for it below." : "",
     a.hasStyleRef === false ? "" : "Last image(s): the STYLE REFERENCE.",
   ].filter(Boolean).join(" ");
   const person = a.noPeople
@@ -301,7 +301,7 @@ export function typeLine(type: string, tp: TypeParams, vi: number, nSlides: numb
     const z = SLIDE_ZONES.find((x) => x.id === sl?.zone)?.en ?? "the top third";
     const hasText = !!sl && (sl.title || sl.body);
     return [
-      `CAROUSEL: this image is slide ${vi + 1} of ${nSlides} of an Instagram carousel. All slides share the same person, outfit, set, lighting, colour palette and photographic style, but each slide is a different shot.`,
+      `CAROUSEL: this image is slide ${vi + 1} of ${nSlides} of an Instagram carousel. All slides share the same art direction, colour world and photographic quality (and the same person when a person appears), but each slide has its own subject, framing and set, exactly as described for this slide.`,
       sl?.photo ? `This slide shows: ${sl.photo}` : "",
       hasText && sl!.layout === "band" ? `A solid colour band will cover ${z} of the frame later: keep the main subject and the whole product out of ${z}.` : "",
       hasText && sl!.layout !== "band" ? `A headline will be added later in ${z}: keep that area calm and simple (plain background, no face, no product, no important detail). Do not write anything there.` : "",
@@ -344,11 +344,13 @@ export function slidesPlanPrompt(a: { idea: string; n: number; style: string; pr
     a.products ? `PRODUCTS (describe them exactly as they are, never invent another packaging, shape, colour or accessory):\n${a.products}` : "No product appears in this carousel.",
     a.rules.length ? `Brand rules:\n${numbered(a.rules)}` : "",
     a.people ? "A model (always the same person) can appear in some photos." : "No person appears in the photos.",
-    `Plan exactly ${a.n} slides: slide 1 is the cover (strong, short promise), the last slide closes with a soft call to action. Each photo slide is a clearly different shot (framing, gesture, detail, texture, model) in the same set and style; avoid extreme close-ups of the product label.`,
+    "CLIENT'S OWN PLAN (absolute priority): if the brief already contains a slide-by-slide plan (numbered points, slide texts, image descriptions, art direction), follow it EXACTLY: one slide per point, same order, same number of slides (up to 10, even if it differs from the default count below), the client's hooks and sentences word for word, every fact, price, date and offer the client gave (never drop or invent one), the client's image description for each slide, and the client's art direction (backgrounds, light, style, what to avoid). Only fill what the client left open.",
+    "WHEN THE CLIENT GIVES NO PLAN: think like a top beauty creative director: bold, specific, editorial ideas, one striking concept per photo (macro textures, graphic still lifes, strong colour, hard light, the product treated like a jewel), never clichés (spa mood, decorative plants, generic smiling faces, flat white backgrounds).",
+    `Default number of slides if the client gives no plan: ${a.n}. Slide 1 is the cover (strong, short promise), the last slide closes with a soft call to action. Each photo slide is a clearly different shot (framing, gesture, detail, texture, model) in the same set and style; avoid extreme close-ups of the product label.`,
     "For each slide give:",
     "- photo: French, max 30 words, the photo to shoot (setting, framing, what is visible). Empty string if layout is \"text\".",
     "- title: French headline, max 40 characters (" + (st.id === "mood" ? "can be empty" : "required") + ").",
-    "- body: French short text, max 110 characters (can be empty, always empty on the cover).",
+    "- body: French short text, max 180 characters (can be empty, usually empty on the cover).",
     "- layout: \"overlay\" (text on the photo), \"band\" (photo with a solid colour band behind the text) or \"text\" (text-only slide on a plain brand colour, no photo; use it for dense explanations, at most a third of the slides, never the cover).",
     "- zone: where the text goes: \"top\", \"bottom\" or \"center\".",
     "COMPLIANCE (French cosmetics advertising law): no medical or therapeutic claim (never 'soigne', 'guérit', 'traite'), no guaranteed or quantified result, no before/after promise; never invent a number, percentage, study, price or customer review. Use cosmetic wording ('aide à', 'contribue à', 'peau d'apparence plus lumineuse').",

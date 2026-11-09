@@ -13,10 +13,11 @@ export async function planSlides(sb: SupabaseClient, a: { idea: string; n: numbe
     return [`"${p.name}"${p.look ? `: ${p.look}` : ""}`, p.real_size ? `Real size: ${p.real_size.replace(/\n/g, ", ")}.` : "", p.texts?.length ? `Printed on it: ${p.texts.join(" / ")}` : ""].filter(Boolean).join(" ");
   }).join("\n");
   const rules = [...(await brandRules(sb)), ...prods.flatMap((x) => x!.product.rules ?? [])];
-  const r = await gemini(MODELS.text, [{ text: slidesPlanPrompt({ idea: a.idea, n, style: a.style, products, rules, people: a.people }) }], { purpose: "plan carrousel", json: true, timeoutMs: 60_000 });
+  const r = await gemini(MODELS.vision, [{ text: slidesPlanPrompt({ idea: a.idea, n, style: a.style, products, rules, people: a.people }) }], { purpose: "plan carrousel", json: true, timeoutMs: 60_000 });
   const raw = JSON.parse(firstText(r).trim().replace(/^```json\s*|```$/g, "")) as { slides?: unknown[] };
-  const slides = normalizeSlides(raw.slides).slice(0, n);
+  // Le plan du client peut avoir un autre nombre de slides que le formulaire : on suit le sien (10 max)
+  const slides = normalizeSlides(raw.slides).slice(0, 10);
   if (slides[0]?.layout === "text") slides[0].layout = "overlay";
-  while (slides.length < n) slides.push(emptySlide());
+  while (slides.length < 3) slides.push(emptySlide());
   return slides;
 }
