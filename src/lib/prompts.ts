@@ -31,6 +31,8 @@ export const REALISM =
   "AVOID EVERY AI TELL: over-smoothed skin, oversaturated glow, HDR look, perfect symmetry, melted details, warped hands, objects merging, glossy CGI rendering. " +
   "Keep every styling detail exactly as described: makeup, hairstyle, jewelry, nails, eyewear, outfit.";
 
+/** Style voulu par le client (inspiration avec interface de téléphone) : le contrôle ne doit pas le refuser. */
+const OVERLAY_OK = "INTENDED STYLE: the client deliberately asked for a phone camera interface overlay (viewfinder grid, camera icons, phone frame). It is NOT a defect: never count it as added text, graphic element, artifact or issue, and do not lower any score for it.";
 /** Le texte imprimé ne doit jamais sortir à l'envers (effet miroir des selfies). */
 export const NO_MIRROR = "Every text printed on the product reads normally, left to right, NEVER mirrored or reversed, even in a selfie, a front-camera shot or a mirror reflection.";
 /** Pendant une retouche, le produit ne change jamais. */
@@ -87,7 +89,9 @@ export function buildPrompt(a: {
     "",
     a.noProduct ? "STYLE: reproduce the style reference: composition, camera angle and lens, pose, lighting, colour palette, background and mood." : (products.length > 1 ? "STYLE: reproduce the style reference: composition, camera angle and lens, pose, lighting, colour palette, background and mood, and how the products are placed (held, standing, floating), but with exactly one of each product, at a realistic scale." : "STYLE: reproduce the style reference: composition, camera angle and lens, pose, lighting, colour palette, background, mood, and the way the product is placed (held, floating, number of copies), at a realistic scale for the product."),
     a.analysis ? `Description of the style reference:\n${a.analysis}` : "",
-    "The result is ONE clean single photograph: ignore any phone camera interface, viewfinder grid, icons, stickers, text, frames or collage layout visible in the style reference, and never add any.",
+    /OVERLAY:\s*yes/i.test(a.analysis)
+      ? "The style reference includes a phone camera interface / graphic overlay (grid, icons, frame): it is WANTED, reproduce it in the same way, as part of the style. It is the only graphic element allowed."
+      : "The result is ONE single photograph: no phone interface, grid, icons, frame or collage layout.",
     "",
     `CLIENT BRIEF (priority over the style reference when they differ): ${a.userPrompt}`,
     a.typeLine ? `\n${a.typeLine}` : "",
@@ -97,7 +101,7 @@ export function buildPrompt(a: {
     a.noPeople ? "" : a.noProduct ? "Hands are anatomically correct: five fingers per hand, natural joints." : "Hands are anatomically correct: five fingers per hand, natural joints and a firm, plausible grip on the product.",
     "",
     a.realism ?? REALISM,
-    `Format: aspect ratio ${a.aspect}. Do NOT add any text, letters, words, typography, logo, watermark or graphic shapes to the image: the only text allowed is what is printed on the real products.`,
+    `Format: aspect ratio ${a.aspect}. Do NOT add any text, letters, words, typography, logo or watermark to the image: the only text allowed is what is printed on the real products${/OVERLAY:\s*yes/i.test(a.analysis) ? " (the camera interface overlay of the style reference is allowed)" : ""}.`,
     a.noProduct ? "" : NO_MIRROR,
   ].filter((l, i, arr) => l !== "" || arr[i - 1] !== "").join("\n");
 }
@@ -155,8 +159,9 @@ export function modelSheetPrompt(a: { name: string; description: string }) {
 }
 
 /** Contrôle qualité d'une image SANS produit (peau, texture, ambiance…). */
-export function qcPromptNoProduct(correction?: { instruction: string; refCount?: number }, opts?: { modelRef?: boolean }) {
+export function qcPromptNoProduct(correction?: { instruction: string; refCount?: number }, opts?: { modelRef?: boolean; overlay?: boolean }) {
   return [
+    opts?.overlay ? OVERLAY_OK : "",
     "You are a strict quality inspector for the advertising photos of a cosmetics brand.",
     "Image 1 = a generated advertising photo that must contain NO product: no bottle, tube, jar, packaging, brand name or logo." + (correction ? " Image 2 = the same photo BEFORE a correction was applied." + (correction.refCount ? ` The next ${correction.refCount} image(s) are REFERENCE image(s) supplied by the client.` : "") : ""),
     correction ? `A correction was requested: "${correction.instruction}". Set instruction_followed to true ONLY if the requested change is clearly visible in image 1 compared with image 2. List in unwanted_changes what changed without being requested (empty string if none). ghost_or_duplicate = true if a leftover or duplicate of a moved or removed element is visible. edit_quality_0_10 = how natural the modification is (8+ only if publishable as is); edit_defects = short French sentence (empty if none).` : "",
@@ -169,8 +174,9 @@ export function qcPromptNoProduct(correction?: { instruction: string; refCount?:
   ].filter(Boolean).join("\n");
 }
 
-export function qcPrompt(p: Product, correction?: { instruction: string; refCount?: number }, opts?: { modelRef?: boolean; others?: Product[] }) {
+export function qcPrompt(p: Product, correction?: { instruction: string; refCount?: number }, opts?: { modelRef?: boolean; others?: Product[]; overlay?: boolean }) {
   return [
+    opts?.overlay ? OVERLAY_OK : "",
     "You are a strict quality inspector for a cosmetics brand.",
     "Image 1 = the REAL product packshot. Image 2 = a generated advertising photo that must show this exact product." + (correction ? " Image 3 = the same photo BEFORE a correction was applied." + (correction.refCount ? ` The last ${correction.refCount} image(s) are REFERENCE image(s) supplied by the client showing what they wanted.` : "") : ""),
     correction ? `A correction was requested: "${correction.instruction}". Compare image 3 (before) and image 2 (after): set instruction_followed to true ONLY if the requested change is clearly and convincingly visible in image 2 (for example, if a hand must hold the product, the fingers must visibly wrap around it and it must not float). List in unwanted_changes every element that changed although it was NOT requested (face, outfit, background, product shape or text, framing...), or an empty string if none. Set ghost_or_duplicate to true if a leftover, ghost or duplicate of a moved or removed object is visible. BE A DEMANDING ART DIRECTOR about the quality of the modified or added element: edit_quality_0_10 = how natural and well executed it is (correct proportions and scale, perspective, lighting, shadows, depth of field and sharpness consistent with the scene, clean edges, no distortion, no artifacts, realistic like a real photograph). Give 8 or more ONLY if you would publish it without any retouching; give 4 or less if it looks fake, pasted, deformed or badly drawn. List the visible defects of the modification in edit_defects (short French sentence, empty if none).${correction.refCount ? " Set matches_reference to false if the result clearly does not look like what the reference shows (same kind, style, shape, colors); otherwise true." : ""}` : "",
@@ -193,7 +199,7 @@ export const EXTRACT_PROMPT =
 
 export const ANALYZE_PROMPT =
   "Describe this advertising photo in about 120 words, in English, as a brief for a photographer: camera angle and lens, composition, lighting, color palette, background, styling and mood. " +
-  "IGNORE completely any phone camera interface, viewfinder grid, icons, stickers, text, frames or graphic overlays visible on the image: describe only the photograph itself and never mention them. " +
+  "If the image shows a phone camera interface or another graphic overlay (viewfinder grid, camera icons, phone frame, stickers), it is an intended part of the style: describe it precisely (what, where, colour, thickness) and END your answer with the exact line \"OVERLAY: yes\"; otherwise end with \"OVERLAY: no\". " +
   "Say how the product(s) are arranged (a single hero product or several copies, whether they float or are held) and how big the object appears relative to the person (for example \"about a third of the face height\", \"fits in the palm\", \"covers the chin\"), but refer to them only as \"the product\": do NOT describe the product's type, shape or packaging. " +
   "Do NOT describe the identity of any person and do NOT mention any brand names or text printed in the image.";
 

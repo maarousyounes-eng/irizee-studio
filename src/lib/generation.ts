@@ -575,9 +575,11 @@ async function qualityCheckInner(sb: SupabaseClient, image: ImageRow) {
   }
   const qcRefs = before ? (await Promise.all((((image.params as any)?.refs as string[] | undefined) ?? []).slice(0, 3).map((p) => download(sb, p).catch(() => null)))).filter(Boolean) as { buf: Buffer; mime: string }[] : [];
   const noProduct = !!shoot!.no_product;
+  const { data: sa } = await sb.from("shoots").select("analysis").eq("id", image.shoot_id).single();
+  const overlay = /OVERLAY:\s*yes/i.test(String(sa?.analysis ?? ""));
   const qcParts = noProduct
-    ? [{ text: qcPromptNoProduct(before ? { instruction: instr!, refCount: qcRefs.length } : undefined, { modelRef: !!modelRef }) }, imgPart(gen.buf, gen.mime), ...(before ? [imgPart(before.buf, before.mime)] : []), ...qcRefs.map((r) => imgPart(r.buf, r.mime)), ...(modelRef ? [imgPart(modelRef.buf, modelRef.mime)] : [])]
-    : [{ text: qcPrompt(product, before ? { instruction: instr!, refCount: qcRefs.length } : undefined, { modelRef: !!modelRef, others: qcOthers }) }, imgPart(pack.buf, pack.mime), imgPart(gen.buf, gen.mime), ...(before ? [imgPart(before.buf, before.mime)] : []), ...qcRefs.map((r) => imgPart(r.buf, r.mime)), ...extraPacks.map((r) => imgPart(r.buf, r.mime)), ...(modelRef ? [imgPart(modelRef.buf, modelRef.mime)] : [])];
+    ? [{ text: qcPromptNoProduct(before ? { instruction: instr!, refCount: qcRefs.length } : undefined, { modelRef: !!modelRef, overlay }) }, imgPart(gen.buf, gen.mime), ...(before ? [imgPart(before.buf, before.mime)] : []), ...qcRefs.map((r) => imgPart(r.buf, r.mime)), ...(modelRef ? [imgPart(modelRef.buf, modelRef.mime)] : [])]
+    : [{ text: qcPrompt(product, before ? { instruction: instr!, refCount: qcRefs.length } : undefined, { modelRef: !!modelRef, others: qcOthers, overlay }) }, imgPart(pack.buf, pack.mime), imgPart(gen.buf, gen.mime), ...(before ? [imgPart(before.buf, before.mime)] : []), ...qcRefs.map((r) => imgPart(r.buf, r.mime)), ...extraPacks.map((r) => imgPart(r.buf, r.mime)), ...(modelRef ? [imgPart(modelRef.buf, modelRef.mime)] : [])];
   let r: any;
   try { r = await gemini(MODELS.vision, qcParts, { purpose: "contrôle qualité", json: true, timeoutMs: 70_000 }); }
   catch { r = await gemini(MODELS.text, qcParts, { purpose: "contrôle qualité (secours)", json: true, timeoutMs: 35_000 }); } // modèle plus rapide si le premier est trop lent
