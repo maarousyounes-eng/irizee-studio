@@ -169,7 +169,7 @@ export default function Editor({ design, kit, formats }: { design: Design; kit: 
         if (!node) throw new Error("Rendu impossible");
         const imgs = Array.from(node.querySelectorAll("img"));
         await Promise.all(imgs.map((im) => (im.complete ? Promise.resolve() : new Promise((r) => { im.onload = r; im.onerror = r; }))));
-        resolve(await toJpeg(node, { width: job.f.out[0], height: job.f.out[1], pixelRatio: 1, quality: 0.95, cacheBust: false }));
+        resolve(await toJpeg(node, { width: job.f.out[0], height: job.f.out[1], pixelRatio: 1, quality: 0.95, cacheBust: false, includeQueryParams: true }));
       } catch (e) { reject(e); }
     }, 120);
   }), []);

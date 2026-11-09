@@ -144,7 +144,7 @@ export default function CampaignView({ campaign, initial, kit, isAdmin }: { camp
           const node = exportRefs.current[`${v.id}:${o.key}`];
           const src = o.key === "4:5" ? v.path : v.formats?.[o.key];
           if (!node || !src) continue;
-          const png = await toPng(node, { width: o.w, height: o.h, pixelRatio: 1 });
+          const png = await toPng(node, { width: o.w, height: o.h, pixelRatio: 1, includeQueryParams: true });
           for (const f of o.files) zip.file(`${f.replace(/([^/]+)$/, `${code}-$1`)}.png`, png.split(",")[1], { base64: true });
         }
       }
