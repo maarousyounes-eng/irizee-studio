@@ -262,7 +262,12 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
   if (image.kind === "generated" || redo) {
     model = shoot.engine === "openai" ? "openai:auto" : shoot.engine === "pro" ? MODELS.pro : shoot.engine === "flash" ? MODELS.flash : (image.variant_index % 2 === 0 ? MODELS.flash : MODELS.pro);
     const vtype = String(shoot.visual_type ?? "photo");
-    const tp = (shoot.type_params ?? {}) as TypeParams;
+    // « Autre idée » : cette image suit la nouvelle idée choisie par le client
+    const idea = image.kind === "generated" ? String(prm0.idea ?? "").trim() : "";
+    const tp0 = (shoot.type_params ?? {}) as TypeParams;
+    const tp: TypeParams = idea && vtype === "carousel"
+      ? { ...tp0, slides: normalizeSlides(tp0.slides).map((x, i) => (i === image.variant_index ? { ...x, photo: idea } : x)) }
+      : tp0;
     // Avant / après : l'« après » est la même photo que l'« avant », seule la peau change
     if (vtype === "ba" && image.variant_index % 2 === 1 && !redo) {
       const { data: bef } = await sb.from("images").select("path").eq("shoot_id", shoot.id).eq("kind", "generated").eq("variant_index", image.variant_index - 1).is("deleted_at", null).not("path", "is", null).order("created_at", { ascending: false }).limit(1).maybeSingle();
@@ -307,7 +312,7 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
       const redoBrief = redo ? `\n\nTHIS IS A NEW TAKE replacing a previous attempt the client rejected. Client's remarks to apply: ${String(prm0.instruction || image.feedback || "")}${prev ? " The LAST image is that rejected previous attempt: do NOT copy its composition, pose or framing where the client asked for a change; keep only what the client did not criticise (same person, same product, same style)." : ""}` : "";
       const prompt = buildPrompt({
         product, rules, userPrompt: shoot.prompt + redoBrief, aspect, analysis: analysisFor, hasTexture: !!texture,
-        shot: (tp.shots ?? [])[image.variant_index] || undefined,
+        shot: (idea && vtype !== "carousel" ? idea : (tp.shots ?? [])[image.variant_index]) || undefined,
         others: others.map((o) => ({ product: o.product, n: 1 })), variation: variationHint(image.variant_index, shoot.no_people), nProductImages: imagePaths.length,
         hasModelRef: modelRefs.length > 0, nModelRefs: modelRefs.length, modelDescription: descs.join(" / "), noPeople: shoot.no_people, noProduct,
         ...(vtype === "photo" ? {} : { typeLine: typeLine(vtype, tp, image.variant_index, nSlides), seriesRef: !!series, hasStyleRef: inspirations.length > 0, realism: vtype === "ba" ? REALISM_NATURAL : undefined }),

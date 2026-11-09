@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Archive, BookmarkPlus, Check, Download, LayoutTemplate, MessageSquare, Pencil, RotateCcw, Send, Trash2, Type, X } from "lucide-react";
+import { Lightbulb, Archive, BookmarkPlus, Check, Download, LayoutTemplate, MessageSquare, Pencil, RotateCcw, Send, Trash2, Type, X } from "lucide-react";
 import { Badge, Btn, Card, INPUT, Label, Lightbox, Modal, Spinner } from "@/components/ui";
 import Comments from "./Comments";
 import CorrectionModal, { type NoteZone } from "./CorrectionModal";
@@ -68,6 +68,28 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
   // Carrousel : le plan (photo + textes de chaque slide) et le passage vers l'éditeur Ads
   const slideInfo = useMemo(() => normalizeSlides(shoot.type_params?.slides).map((x) => x.title || x.photo), [shoot.type_params]);
   const [dressing, setDressing] = useState(false);
+  // « Autre idée » : l'IA propose une nouvelle idée pour une image, on la lit (et la modifie) avant de payer
+  const [ideaFor, setIdeaFor] = useState<ImageRow | null>(null);
+  const [ideaHint, setIdeaHint] = useState("");
+  const [ideaText, setIdeaText] = useState("");
+  const [ideaBusy, setIdeaBusy] = useState<"" | "propose" | "create">("");
+  async function proposeIdea() {
+    if (!ideaFor) return;
+    setIdeaBusy("propose");
+    try { const r = await api<{ idea: string }>(`/api/images/${ideaFor.id}/idea`, { action: "propose", hint: ideaHint }); setIdeaText(r.idea); }
+    catch (e) { flash(e instanceof Error ? e.message : "Erreur"); }
+    setIdeaBusy("");
+  }
+  async function createIdea() {
+    if (!ideaFor || !ideaText.trim()) return;
+    setIdeaBusy("create");
+    try {
+      const r = await api<{ imageId: string }>(`/api/images/${ideaFor.id}/idea`, { action: "create", idea: ideaText });
+      setIdeaFor(null); await load(); run([r.imageId]);
+      flash("Nouvelle idée lancée : l'image arrive dans quelques instants");
+    } catch (e) { flash(e instanceof Error ? e.message : "Erreur"); }
+    setIdeaBusy("");
+  }
   async function dressCarousel() {
     setDressing(true);
     try {
@@ -477,6 +499,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
 
                     <div className="flex flex-wrap gap-1.5 mt-auto">
                       <Btn size="sm" variant="ghost" onClick={() => setFix(img.id)}><Pencil size={12} /> Corriger</Btn>
+                      {img.kind !== "format" && shoot.visual_type !== "ba" && <Btn size="sm" variant="ghost" onClick={() => { setIdeaFor(img); setIdeaHint(""); setIdeaText(""); }} title="Une autre idée de photo pour cette image"><Lightbulb size={12} /> Autre idée</Btn>}
                       {img.kind === "correction" && img.params?.n > 1 && !img.params?.archived && <Btn size="sm" onClick={() => { archiveGroup(img); flash("Proposition gardée, les autres sont écartées"); }}><Check size={12} /> Garder celle-ci</Btn>}
                       {img.kind === "format" && !img.params?.archived && <Btn size="sm" variant="ghost" onClick={() => retryFormat(img)} title="Refait cette déclinaison depuis la même image"><RotateCcw size={12} /> Réessayer</Btn>}
                       {img.kind === "correction" && !img.params?.archived && <Btn size="sm" variant="ghost" onClick={() => retryFix(img)} title="Relance en tenant compte de ce qui n'a pas marché"><RotateCcw size={12} /> Réessayer</Btn>}
@@ -540,6 +563,29 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
           {img.feedback && <p className="text-sm text-[#6B6B72] mt-3">Demande : {img.feedback}</p>}
         </Modal>
       ) : null; })()}
+      {ideaFor && (
+        <Modal title={`Autre idée${imageLabel(shoot.visual_type, ideaFor.variant_index) ? ` · ${imageLabel(shoot.visual_type, ideaFor.variant_index)}` : ""}`} onClose={() => setIdeaFor(null)}>
+          <div className="space-y-3">
+            <div>
+              <Label>Une envie pour la nouvelle idée ? (facultatif)</Label>
+              <input className={INPUT} value={ideaHint} onChange={(e) => setIdeaHint(e.target.value)} placeholder="Ex : plutôt une main qui étale le masque, fond bleu cobalt" />
+            </div>
+            <Btn variant="ghost" onClick={proposeIdea} disabled={!!ideaBusy}>{ideaBusy === "propose" ? <Spinner /> : <Lightbulb size={13} />} {ideaText ? "Proposer une autre idée" : "Proposer une idée (gratuit)"}</Btn>
+            {ideaText && (
+              <div>
+                <Label>L&apos;idée (modifiable)</Label>
+                <textarea className={INPUT + " min-h-[90px]"} value={ideaText} onChange={(e) => setIdeaText(e.target.value)} />
+              </div>
+            )}
+            <p className="text-[11px] text-[#6B6B72]">Vous pouvez aussi écrire votre propre idée directement. La nouvelle image garde le même brief, le même produit, le même mannequin et la même place{shoot.visual_type === "carousel" ? " dans le carrousel (avec les mêmes textes)" : ""}. L&apos;ancienne image reste visible.</p>
+            {!ideaText && <button type="button" className="text-xs text-[#2B6EE8] font-semibold" onClick={() => setIdeaText(" ")}>Écrire mon idée moi-même</button>}
+            <div className="flex gap-2">
+              <Btn onClick={createIdea} disabled={!!ideaBusy || !ideaText.trim()}>{ideaBusy === "create" ? <Spinner className="border-white/40 border-t-white" /> : null} Générer cette idée (1 image payante)</Btn>
+              <Btn variant="ghost" onClick={() => setIdeaFor(null)}>Annuler</Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
       {formatFor && (
         <Modal title="Décliner en formats" onClose={() => setFormatFor(null)}>
           <p className="text-sm text-[#6B6B72] mb-3">La photo est recomposée dans chaque format en gardant le produit entier et la direction artistique. Chaque déclinaison est contrôlée.</p>

@@ -373,3 +373,18 @@ export function shotListPrompt(a: { brief: string; analysis: string; n: number; 
     'Return JSON only: {"shots": [str]}',
   ].filter(Boolean).join("\n");
 }
+
+/** « Autre idée » : une nouvelle idée de photo pour une image précise, différente de la précédente. */
+export function anotherIdeaPrompt(a: { brief: string; type: string; slide?: { title: string; body: string } | null; current: string; hint: string; products: string; people: boolean }) {
+  return [
+    "You are a top beauty creative director and photographer for the French cosmetics brand Irizée.",
+    `The client's brief for this shoot (in French): "${a.brief}"`,
+    a.slide && (a.slide.title || a.slide.body) ? `This photo illustrates the carousel slide: "${a.slide.title}" ${a.slide.body ? `— "${a.slide.body}"` : ""}. The new photo must still illustrate this slide.` : "",
+    a.products ? `Product(s), exactly as they are (never invent another packaging):\n${a.products}` : "No product in this photo.",
+    a.people ? "A model can appear." : "No person in this photo.",
+    a.current ? `The client did NOT like this previous idea, propose something clearly different: "${a.current}"` : "The client did not like the previous photo: propose something clearly different.",
+    a.hint ? `The client's wish for the new idea: "${a.hint}" (priority).` : "",
+    "Follow the art direction of the brief (backgrounds, light, style, what to avoid). Be bold, specific and editorial; one strong concept; physically plausible; the product (if any) held naturally upright or placed, at its real small size, never an extreme close-up of its label.",
+    'Return JSON only: {"idea": str (French, 25 to 45 words: subject, framing, set and background, light)}',
+  ].filter(Boolean).join("\n");
+}
