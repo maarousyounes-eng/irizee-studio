@@ -1,5 +1,5 @@
 import { requireUser, handle, HttpError } from "@/lib/api";
-import { analyzeInspirations, checkQuota } from "@/lib/generation";
+import { ANALYSIS_SEP, analyzeInspirations, checkQuota } from "@/lib/generation";
 import { withAiCtx } from "@/lib/gemini";
 import { ANALYZE_PROMPT } from "@/lib/prompts";
 import { FORMATS } from "@/types";
@@ -52,6 +52,15 @@ export async function POST(req: Request) {
       slides = Array.from({ length: n }, (_, i) => slides[i] ?? emptySlide());
       tp.slides = slides;
       if (!slides.some((x) => x.layout !== "text")) throw new HttpError(400, "Il faut au moins une slide avec photo");
+    }
+    // Inspirations déjà analysées dans le formulaire (et éventuellement corrigées par le client) : on les réutilise telles quelles
+    const pre = (Array.isArray(b.inspirationAnalyses) ? b.inspirationAnalyses : []) as { path?: string; analysis?: string; note?: string }[];
+    if (paths.length && paths.every((p) => pre.some((x) => x.path === p && String(x.analysis ?? "").trim()))) {
+      analysis = paths.map((p) => {
+        const x = pre.find((y) => y.path === p)!;
+        const note = String(x.note ?? "").trim().slice(0, 600);
+        return String(x.analysis).slice(0, 4000) + (note ? `\nCLIENT CORRECTION of this description (it has priority): ${note}` : "");
+      }).join(ANALYSIS_SEP);
     }
     if (!analysis && paths.length) {
       try { analysis = await withAiCtx({ sb, userId: user.id }, () => analyzeInspirations(sb, paths, ANALYZE_PROMPT)); } catch { analysis = null; }

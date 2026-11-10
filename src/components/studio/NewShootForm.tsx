@@ -58,6 +58,19 @@ export default function NewShootForm(p: Props) {
   const [baAfter, setBaAfter] = useState<string>(tp0.baAfter ?? "");
   const [pairs, setPairs] = useState(1);
   const [uploading, setUploading] = useState(0);
+  // Chaque inspiration est analysée dès son ajout : le client voit ce que l'IA a compris et peut le corriger avant de lancer
+  const [insp, setInsp] = useState<Record<string, { state: "loading" | "done" | "error"; analysis: string; summary: string; note: string; phoneUi: boolean }>>({});
+  useEffect(() => {
+    inspirations.forEach((path) => {
+      if (insp[path]) return;
+      setInsp((m) => ({ ...m, [path]: { state: "loading", analysis: "", summary: "", note: "", phoneUi: false } }));
+      api<{ analysis: string; summary: string; phoneUi: boolean }>("/api/inspirations/analyze", { path })
+        .then((r) => setInsp((m) => ({ ...m, [path]: { state: "done", analysis: r.analysis, summary: r.summary, note: r.summary, phoneUi: r.phoneUi } })))
+        .catch(() => setInsp((m) => ({ ...m, [path]: { state: "error", analysis: "", summary: "", note: "", phoneUi: false } })));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inspirations]);
+  const inspPending = inspirations.some((p) => insp[p]?.state === "loading");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -147,6 +160,14 @@ export default function NewShootForm(p: Props) {
       const r = await api<{ shootId: string; imageIds: string[] }>("/api/shoots", {
         productId, productIds: [productId, ...extraIds.filter((x) => x !== productId)].slice(0, 4), productMode, projectId: projectId || null, modelIds: peopleMode === "models" ? modelIds : [],
         conceptId: conceptId || null, prompt, aspect, size, engine, variants, noPeople, noProduct, inspirationPaths: inspirations,
+        inspirationAnalyses: inspirations.map((p) => {
+          const a = insp[p];
+          if (a?.state !== "done") return null;
+          const edited = a.note.trim() !== a.summary.trim();
+          // Interface de téléphone retirée du texte par le client : on ne la reproduit pas
+          const dropUi = a.phoneUi && edited && !/interface|t[ée]l[ée]phone|iphone/i.test(a.note);
+          return { path: p, analysis: dropUi ? a.analysis.replace(/PHONE UI:\s*yes/gi, "PHONE UI: no") : a.analysis, note: edited ? a.note : "" };
+        }).filter(Boolean),
         visualType: vtype, modelMode, slideCount: slides.length, pairs,
         typeParams: { socialStyle, textZone, slides, carouselStyle, baChange, baBefore, baAfter },
       });
@@ -232,13 +253,27 @@ export default function NewShootForm(p: Props) {
           </div>
           <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={(e) => e.target.files && addFiles(e.target.files)} />
           {(inspirations.length > 0 || uploading > 0) && (
-            <div className="flex gap-2 flex-wrap mt-3">
-              {inspirations.map((path, i) => (
-                <div key={path} className="relative w-20 h-24 rounded-xl overflow-hidden border border-[#E4E4E7] bg-[#F4F4F5]">
-                  {urls[path] && /* eslint-disable-next-line @next/next/no-img-element */ <img src={urls[path]} alt="" className="w-full h-full object-cover" />}
-                  <button onClick={() => { setInspirations(inspirations.filter((_, k) => k !== i)); setConceptId(""); }} className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 text-white flex items-center justify-center" aria-label="Retirer"><X size={11} /></button>
-                </div>
-              ))}
+            <div className="space-y-2 mt-3">
+              {inspirations.map((path, i) => {
+                const a = insp[path];
+                return (
+                  <div key={path} className="flex gap-3 items-start bg-white border border-[#E4E4E7] rounded-2xl p-2">
+                    <div className="relative w-20 h-24 shrink-0 rounded-xl overflow-hidden bg-[#F4F4F5]">
+                      {urls[path] && /* eslint-disable-next-line @next/next/no-img-element */ <img src={urls[path]} alt="" className="w-full h-full object-cover" />}
+                      <button onClick={() => { setInspirations(inspirations.filter((_, k) => k !== i)); setConceptId(""); }} className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 text-white flex items-center justify-center" aria-label="Retirer"><X size={11} /></button>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[11px] font-semibold text-[#6B6B72] mb-1">Ce que l&apos;IA va reprendre de cette inspiration</p>
+                      {!a || a.state === "loading" ? <p className="text-xs text-[#6B6B72] flex items-center gap-1.5"><Spinner className="w-3 h-3" /> Analyse en cours…</p>
+                        : a.state === "error" ? <p className="text-xs text-[#B45309]">Analyse impossible pour l&apos;instant : elle sera refaite au lancement.</p>
+                        : <>
+                          <textarea className={INPUT + " min-h-[64px] !text-[12px]"} value={a.note} onChange={(e) => { const v = e.target.value; setInsp((m) => ({ ...m, [path]: { ...m[path], note: v } })); }} />
+                          <p className="text-[11px] text-[#A0A0A8] mt-1">Corrigez ce texte si l&apos;IA s&apos;est trompée ou s&apos;il faut ignorer quelque chose : votre version passe avant.{a.phoneUi ? " Interface de téléphone détectée : elle sera reproduite (retirez-la du texte si vous n'en voulez pas)." : ""}</p>
+                        </>}
+                    </div>
+                  </div>
+                );
+              })}
               {uploading > 0 && <div className="w-20 h-24 rounded-xl border border-dashed border-[#E4E4E7] flex items-center justify-center"><Spinner /></div>}
             </div>
           )}
@@ -429,8 +464,8 @@ export default function NewShootForm(p: Props) {
           </p>
         )}
         {error && <div className="p-3 rounded-xl bg-red-50 border border-red-100 text-sm text-red-700">{error}</div>}
-        <Btn className="w-full" onClick={submit} disabled={busy || uploading > 0 || remaining < nImages}>
-          {busy ? <><Spinner className="border-white/40 border-t-white" /> Préparation…</> : <><Wand2 size={15} /> Générer {nImages} images</>}
+        <Btn className="w-full" onClick={submit} disabled={busy || uploading > 0 || inspPending || remaining < nImages}>
+          {busy ? <><Spinner className="border-white/40 border-t-white" /> Préparation…</> : inspPending ? <><Spinner className="border-white/40 border-t-white" /> Analyse des inspirations…</> : <><Wand2 size={15} /> Générer {nImages} images</>}
         </Btn>
         {remaining < nImages && <p className="text-[12px] text-[#E8444A]">Il ne te reste que {Math.max(0, remaining)} images ce mois-ci.</p>}
       </Card>
