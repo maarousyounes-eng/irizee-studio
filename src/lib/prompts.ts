@@ -32,6 +32,9 @@ export const REALISM =
   "Keep every styling detail exactly as described: makeup, hairstyle, jewelry, nails, eyewear, outfit.";
 
 /** Style voulu par le client (inspiration avec interface de téléphone) : le contrôle ne doit pas le refuser. */
+/** Interface de téléphone voulue : vraiment visible sur l'inspiration, ou demandée dans la consigne. */
+export const wantsPhoneUi = (analysis: string, brief: string) =>
+  /PHONE UI:\s*yes/i.test(analysis) || /interface (du |de |d'un )?t[ée]l[ée]phone|mode photo|appareil photo de l'iphone|écran de l'appareil photo|grille (de l'appareil|photo)/i.test(brief);
 const OVERLAY_OK = "INTENDED STYLE: the client deliberately asked for a phone camera interface overlay (viewfinder grid, camera icons, phone frame). It is NOT a defect: never count it as added text, graphic element, artifact or issue, and do not lower any score for it.";
 /** Le texte imprimé ne doit jamais sortir à l'envers (effet miroir des selfies). */
 export const NO_MIRROR = "Every text printed on the product reads normally, left to right, NEVER mirrored or reversed, even in a selfie, a front-camera shot or a mirror reflection.";
@@ -89,9 +92,9 @@ export function buildPrompt(a: {
     "",
     a.noProduct ? "STYLE: reproduce the style reference: composition, camera angle and lens, pose, lighting, colour palette, background and mood." : (products.length > 1 ? "STYLE: reproduce the style reference: composition, camera angle and lens, pose, lighting, colour palette, background and mood, and how the products are placed (held, standing, floating), but with exactly one of each product, at a realistic scale." : "STYLE: reproduce the style reference: composition, camera angle and lens, pose, lighting, colour palette, background, mood, and the way the product is placed (held, floating, number of copies), at a realistic scale for the product."),
     a.analysis ? `Description of the style reference:\n${a.analysis}` : "",
-    /OVERLAY:\s*yes/i.test(a.analysis)
-      ? "The style reference includes a phone camera interface / graphic overlay (grid, icons, frame): it is WANTED, reproduce it in the same way, as part of the style. It is the only graphic element allowed."
-      : "The result is ONE single photograph: no phone interface, grid, icons, frame or collage layout.",
+    wantsPhoneUi(a.analysis, a.userPrompt)
+      ? "PHONE INTERFACE: the client wants the smartphone camera interface shown on the style reference (or described in the brief): reproduce exactly that interface, as described, and nothing more."
+      : "The result is ONE single photograph: never add a phone interface, camera mode labels, shutter button, viewfinder grid, icons, frame or collage layout.",
     "",
     `CLIENT BRIEF (priority over the style reference when they differ): ${a.userPrompt}`,
     a.typeLine ? `\n${a.typeLine}` : "",
@@ -101,7 +104,7 @@ export function buildPrompt(a: {
     a.noPeople ? "" : a.noProduct ? "Hands are anatomically correct: five fingers per hand, natural joints." : "Hands are anatomically correct: five fingers per hand, natural joints and a firm, plausible grip on the product.",
     "",
     a.realism ?? REALISM,
-    `Format: aspect ratio ${a.aspect}. Do NOT add any text, letters, words, typography, logo or watermark to the image: the only text allowed is what is printed on the real products${/OVERLAY:\s*yes/i.test(a.analysis) ? " (the camera interface overlay of the style reference is allowed)" : ""}.`,
+    `Format: aspect ratio ${a.aspect}. Do NOT add any text, letters, words, typography, logo or watermark to the image: the only text allowed is what is printed on the real products${wantsPhoneUi(a.analysis, a.userPrompt) ? " (and the labels of the wanted phone camera interface)" : ""}.`,
     a.noProduct ? "" : NO_MIRROR,
   ].filter((l, i, arr) => l !== "" || arr[i - 1] !== "").join("\n");
 }
@@ -199,7 +202,7 @@ export const EXTRACT_PROMPT =
 
 export const ANALYZE_PROMPT =
   "Describe this advertising photo in about 120 words, in English, as a brief for a photographer: camera angle and lens, composition, lighting, color palette, background, styling and mood. " +
-  "If the image shows a phone camera interface or another graphic overlay (viewfinder grid, camera icons, phone frame, stickers), it is an intended part of the style: describe it precisely (what, where, colour, thickness) and END your answer with the exact line \"OVERLAY: yes\"; otherwise end with \"OVERLAY: no\". " +
+  "PHONE INTERFACE: ONLY if a smartphone camera app interface is clearly drawn ON the image (camera mode labels such as PHOTO / VIDEO / PORTRAIT, a round shutter button, a thumbnail of the last photo, viewfinder grid lines), describe it precisely and END your answer with the exact line \"PHONE UI: yes\". Snow, particles, rain, light leaks, grain, filters, blur or a frame of the photo itself are part of the PHOTOGRAPH, not an interface: in that case, and in every other case, end with \"PHONE UI: no\". " +
   "Say how the product(s) are arranged (a single hero product or several copies, whether they float or are held) and how big the object appears relative to the person (for example \"about a third of the face height\", \"fits in the palm\", \"covers the chin\"), but refer to them only as \"the product\": do NOT describe the product's type, shape or packaging. " +
   "Do NOT describe the identity of any person and do NOT mention any brand names or text printed in the image.";
 

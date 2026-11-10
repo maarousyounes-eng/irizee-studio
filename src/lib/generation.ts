@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { MODELS, gemini, imgPart, firstImage, firstText, noImageReason, parseJson, withAiCtx, type Part } from "./gemini";
 import sharp from "sharp";
-import { baAfterPrompt, typeLine, REALISM_NATURAL, buildPrompt, correctionPrompt, qcPromptNoProduct, sizeLine, formatPrompt, interpretPrompt, localEditPrompt, LOCATE_PRODUCT_PROMPT, READ_LABEL_PROMPT, qcPrompt, variationHint } from "./prompts";
+import { wantsPhoneUi, baAfterPrompt, typeLine, REALISM_NATURAL, buildPrompt, correctionPrompt, qcPromptNoProduct, sizeLine, formatPrompt, interpretPrompt, localEditPrompt, LOCATE_PRODUCT_PROMPT, READ_LABEL_PROMPT, qcPrompt, variationHint } from "./prompts";
 import { normalizeSlides, type TypeParams } from "./visualTypes";
 import { cropBoxFor, cropImage, pasteBack, unionZones, zoneFromBox, zonesFromBoxes, type CropBox, type Zone } from "./localedit";
 import type { ImageRow, Product, QC } from "@/types";
@@ -583,8 +583,8 @@ async function qualityCheckInner(sb: SupabaseClient, image: ImageRow) {
   }
   const qcRefs = before ? (await Promise.all((((image.params as any)?.refs as string[] | undefined) ?? []).slice(0, 3).map((p) => download(sb, p).catch(() => null)))).filter(Boolean) as { buf: Buffer; mime: string }[] : [];
   const noProduct = !!shoot!.no_product;
-  const { data: sa } = await sb.from("shoots").select("analysis").eq("id", image.shoot_id).single();
-  const overlay = /OVERLAY:\s*yes/i.test(String(sa?.analysis ?? ""));
+  const { data: sa } = await sb.from("shoots").select("analysis, prompt").eq("id", image.shoot_id).single();
+  const overlay = wantsPhoneUi(String(sa?.analysis ?? ""), String(sa?.prompt ?? ""));
   const qcParts = noProduct
     ? [{ text: qcPromptNoProduct(before ? { instruction: instr!, refCount: qcRefs.length } : undefined, { modelRef: !!modelRef, overlay }) }, imgPart(gen.buf, gen.mime), ...(before ? [imgPart(before.buf, before.mime)] : []), ...qcRefs.map((r) => imgPart(r.buf, r.mime)), ...(modelRef ? [imgPart(modelRef.buf, modelRef.mime)] : [])]
     : [{ text: qcPrompt(product, before ? { instruction: instr!, refCount: qcRefs.length } : undefined, { modelRef: !!modelRef, others: qcOthers, overlay }) }, imgPart(pack.buf, pack.mime), imgPart(gen.buf, gen.mime), ...(before ? [imgPart(before.buf, before.mime)] : []), ...qcRefs.map((r) => imgPart(r.buf, r.mime)), ...extraPacks.map((r) => imgPart(r.buf, r.mime)), ...(modelRef ? [imgPart(modelRef.buf, modelRef.mime)] : [])];
