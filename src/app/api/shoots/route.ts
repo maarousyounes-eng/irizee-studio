@@ -68,7 +68,7 @@ export async function POST(req: Request) {
 
     // Le photographe prépare une prise de vue précise par image (sauf carrousel et avant/après, qui ont leur propre plan)
     // Avec des inspirations, ce sont elles qui donnent les prises de vue : pas de plan inventé par-dessus
-    if (vtype !== "carousel" && vtype !== "ba" && !paths.length) {
+    if (false && vtype !== "carousel" && vtype !== "ba" && !paths.length) { // désactivé : il inventait des éléments non demandés
       try { tp.shots = await withAiCtx({ sb, userId: user.id }, () => planShots(sb, { brief: prompt, analysis: analysis ?? "", n, type: vtype, productIds, productMode: productIds.length > 1 ? (["together", "split", "mix"].includes(b.productMode) ? b.productMode : "mix") : null, noProduct: !!b.noProduct, people: b.noPeople ? 0 : b.modelMode === "together" ? Math.min(3, modelIds.length) : 1 })); } catch { /* sans plan : la consigne seule */ }
     }
     const { data: shoot, error } = await sb.from("shoots").insert({

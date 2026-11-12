@@ -6,15 +6,18 @@ export interface CropBox { left: number; top: number; width: number; height: num
 // Formats d'image que le modèle sait produire : le recadrage envoyé doit en suivre un, pour revenir à l'identique.
 const RATIOS: [string, number][] = [["1:1", 1], ["4:5", 0.8], ["5:4", 1.25], ["3:4", 0.75], ["4:3", 4 / 3], ["2:3", 2 / 3], ["3:2", 1.5], ["9:16", 9 / 16], ["16:9", 16 / 9]];
 
+/** OpenAI ne produit que ces 3 formats : un recadrage dans un autre format reviendrait déformé et décalé. */
+export const OPENAI_RATIOS: [string, number][] = [["1:1", 1], ["2:3", 2 / 3], ["3:2", 1.5]];
+
 /** Rectangle de contexte autour de la zone, au format d'image supporté le plus proche (le plus petit qui convient). */
-export function cropBoxFor(zone: Zone, W: number, H: number): CropBox | null {
+export function cropBoxFor(zone: Zone, W: number, H: number, ratios: [string, number][] = RATIOS): CropBox | null {
   const short = Math.min(W, H);
   const pad = 0.06 * short;
   const needW = zone.w * W + 2 * pad;
   const needH = zone.h * H + 2 * pad;
   const minSide = 0.4 * short; // assez de contexte pour que le modèle comprenne la scène
   let best: { w: number; h: number; ratio: string } | null = null;
-  for (const [label, r] of RATIOS) {
+  for (const [label, r] of ratios) {
     let w = needW, h = needH;
     if (w / h < r) w = h * r; else h = w / r;
     const k = Math.max(1, minSide / Math.min(w, h));

@@ -3,7 +3,7 @@ import { MODELS, gemini, imgPart, firstImage, firstText, noImageReason, parseJso
 import sharp from "sharp";
 import { maskEditPrompt, wantsPhoneUi, baAfterPrompt, typeLine, REALISM_NATURAL, buildPrompt, correctionPrompt, qcPromptNoProduct, sizeLine, formatPrompt, interpretPrompt, localEditPrompt, LOCATE_PRODUCT_PROMPT, READ_LABEL_PROMPT, qcPrompt, variationHint } from "./prompts";
 import { normalizeSlides, type TypeParams } from "./visualTypes";
-import { cropBoxFor, cropImage, pasteBack, unionZones, zoneFromBox, zonesFromBoxes, type CropBox, type Zone } from "./localedit";
+import { OPENAI_RATIOS, cropBoxFor, cropImage, pasteBack, unionZones, zoneFromBox, zonesFromBoxes, type CropBox, type Zone } from "./localedit";
 import type { ImageRow, Product, QC } from "@/types";
 
 const BUCKET = "studio";
@@ -86,7 +86,7 @@ async function localEditCrop(a: {
   prev: Buffer; W: number; H: number; region: Zone; instruction: string; mode: "edit" | "label"; product: Product; rules: string[];
   refs: Img[]; packshots: Img[]; original: Img | null; model: string; signal?: AbortSignal; timeoutMs?: number;
 }): Promise<{ edited: Buffer; box: CropBox } | null> {
-  const box = cropBoxFor(a.region, a.W, a.H);
+  const box = cropBoxFor(a.region, a.W, a.H, OPENAI_RATIOS);
   if (!box) return null;
   const crop = await cropImage(a.prev, box);
   let originalCrop: Buffer | null = null;
@@ -131,7 +131,7 @@ async function maskEditOpenAI(a: {
   // On retire les bords ajoutés et on revient à la taille d'origine
   const full = await sharp(await sharp(out).resize(TW, TH, { fit: "fill" }).toBuffer()).extract({ left: padL, top: padT, width: sw, height: sh }).resize(a.W, a.H, { fit: "fill" }).png().toBuffer();
   if (!a.region) return full;
-  const box = cropBoxFor(a.region, a.W, a.H);
+  const box = cropBoxFor(a.region, a.W, a.H, OPENAI_RATIOS);
   if (!box) return full;
   const editedCrop = await sharp(full).extract({ left: box.left, top: box.top, width: box.width, height: box.height }).png().toBuffer();
   return pasteBack(a.prev, editedCrop, box, a.region, a.W, a.H);
@@ -427,7 +427,8 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
       if (globalTasks.length && left() > 120_000) {
         const gOrig = globalTasks.some(({ it }) => it.useOriginal) ? original : null;
         const gp: Part[] = [{ text: correctionPrompt({ product, rules, feedback: globalTasks.map(({ it }) => it.instruction).join(" Also: "), mode: "edit", hasOriginal: !!gOrig }) }, imgPart(acc, "image/png"), ...(gOrig ? [imgPart(gOrig.buf, gOrig.mime)] : []), ...packshots.map((p) => imgPart(p.buf, p.mime))];
-        try { const gb = firstImage(await gemini(model, gp, { purpose: "retouche globale", image: true, aspect, size: shoot.size, signal, timeoutMs: left() })); if (gb) acc = gb; } catch { /* on garde les retouches locales */ }
+        void gp; // photo entière bordée au format OpenAI : rien n'est déformé ni décalé
+        try { const gb = await maskEditOpenAI({ prev: acc, W, H, region: null, instruction: globalTasks.map(({ it }) => it.instruction).join(" Also: "), product, rules, refs: [], packshots, signal, timeoutMs: left() }); if (gb) acc = gb; } catch { /* on garde les retouches locales */ }
       }
       // Tâches qui n'ont pas pu être appliquées : on le dit
       const notDone = [
@@ -494,6 +495,10 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
         if ((r as { errors?: string[] }).errors?.length) await sb.from("images").update({ params: { ...prm, not_applied: [`Étiquette : mots encore douteux (${(r as unknown as { errors: string[] }).errors.join(", ")})`] } }).eq("id", image.id);
       }
     }
+    // Retouche globale (lumière, fond entier…) : photo entière bordée au format OpenAI, pour qu'elle ne soit ni recadrée ni décalée
+    if (!buf && image.kind !== "format" && W && H) {
+      try { buf = await maskEditOpenAI({ prev: prev.buf, W, H, region: null, instruction, product, rules, refs, packshots, signal, timeoutMs: left() }); } catch { buf = null; }
+    }
     if (!buf) {
       // Modification globale (lumière, fond entier…) ou repli : régénération complète de l'image
       const prompt = image.kind === "format"
@@ -542,7 +547,9 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
     });
     const sp: Part[] = [{ text: strong }, imgPart(prevImg.buf, prevImg.mime), ...(origImg ? [imgPart(origImg.buf, origImg.mime)] : []), ...packshots.map((p) => imgPart(p.buf, p.mime))];
     try {
-      const nb = firstImage(await gemini(IMAGE_MODEL, sp, { purpose: "retouche renforcée", image: true, aspect, size: shoot.size, signal, timeoutMs: left() }));
+      void sp;
+      const pm = await sharp(prevImg.buf).metadata();
+      const nb = await maskEditOpenAI({ prev: prevImg.buf, W: pm.width ?? 0, H: pm.height ?? 0, region: null, instruction: `${instr}\nCRITICAL: a previous attempt returned the photo practically unchanged. This time the change MUST be obvious at first glance. ${sizeLine(product)}`, product, rules, refs: [], packshots, signal, timeoutMs: left() });
       if (nb && (await hasChanged(prevImg.buf, nb))) buf = nb; else unchanged = true;
     } catch { unchanged = true; }
   }
