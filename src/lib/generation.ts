@@ -3,6 +3,7 @@ import { MODELS, gemini, imgPart, firstImage, firstText, noImageReason, parseJso
 import sharp from "sharp";
 import { textZoneLine, maskEditPrompt, wantsPhoneUi, baAfterPrompt, typeLine, REALISM_NATURAL, buildPrompt, correctionPrompt, qcPromptNoProduct, sizeLine, formatPrompt, interpretPrompt, localEditPrompt, LOCATE_PRODUCT_PROMPT, READ_LABEL_PROMPT, qcPrompt, variationHint } from "./prompts";
 import { normalizeSlides, type TypeParams } from "./visualTypes";
+import { cropTo, cropWindow, type Box } from "./framing";
 import { OPENAI_RATIOS, cropBoxFor, cropImage, pasteBack, unionZones, zoneFromBox, zonesFromBoxes, type CropBox, type Zone } from "./localedit";
 import type { ImageRow, Product, QC } from "@/types";
 
@@ -211,6 +212,18 @@ async function locateProduct(img: { buf: Buffer; mime: string }): Promise<Zone |
     const r = await gemini(MODELS.text, [{ text: LOCATE_PRODUCT_PROMPT }, imgPart(img.buf, img.mime)], { purpose: "localisation produit", json: true, timeoutMs: 40_000 });
     const z = zoneFromBox(parseJson<{ box?: unknown }>(firstText(r)).box, 0.01);
     return z && z.w * z.h < 0.85 ? z : null;
+  } catch { return null; }
+}
+
+/** Repère tout ce qui compte dans l'image (produits entiers, visage, mains) pour recadrer sans rien couper. */
+async function locateSubject(img: { buf: Buffer; mime: string }): Promise<Box | null> {
+  try {
+    const small = await sharp(img.buf).resize({ width: 768, withoutEnlargement: true }).jpeg({ quality: 80 }).toBuffer();
+    const r = await gemini(MODELS.text, [{ text: 'Find the ONE bounding box that contains everything important in this advertising photo: every cosmetic product ENTIRELY (from its top to the very bottom of its cap), and the face and hands of any person. Ignore empty background, props and decor. Return JSON only: {"box": [ymin, xmin, ymax, xmax]} with integer coordinates from 0 to 1000.' }, imgPart(small, "image/jpeg")], { purpose: "repérage du sujet", json: true, timeoutMs: 30_000 });
+    const b = parseJson<{ box?: number[] }>(firstText(r)).box;
+    if (!Array.isArray(b) || b.length !== 4) return null;
+    const [y0, x0, y1, x1] = b.map((n) => Math.max(0, Math.min(1000, Number(n))) / 1000);
+    return x1 > x0 && y1 > y0 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null;
   } catch { return null; }
 }
 
@@ -519,7 +532,8 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
   // (un appel bloqué coûte ~0,01 €), en gardant toutes les autres et la même résolution. En dernier recours, sans aucune inspiration.
   const run = async (p: Part[], label: string) => {
     try {
-      const resp = await gemini(model, p, { purpose: purposeOf(label), image: true, aspect, size: shoot.size, signal });
+      // Photo neuve : on garde l'image entière de l'IA (pas de coupe à l'aveugle), le recadrage se fait ensuite autour du sujet
+      const resp = await gemini(model, p, { purpose: purposeOf(label), image: true, aspect, size: shoot.size, signal, noFit: image.kind === "generated" || redo });
       buf = firstImage(resp);
       if (!buf) noImage = noImageReason(resp);
     } catch (e) { lastErr = e; }
@@ -556,6 +570,24 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
     } catch { unchanged = true; }
   }
 
+  // Recadrage au format du shooting, autour du sujet repéré ; l'image entière est gardée pour pouvoir recadrer autrement
+  let extraParams: Record<string, unknown> = {};
+  if (image.kind === "generated" || redo) {
+    const mm = await sharp(buf).metadata();
+    const MW = mm.width ?? 0, MH = mm.height ?? 0;
+    const [aw, ah] = String(aspect).split(":").map(Number);
+    if (MW && MH && aw && ah && Math.abs(MW / MH - aw / ah) > 0.01) {
+      const subject = await locateSubject({ buf, mime: "image/png" });
+      const tz = String(shoot.visual_type) === "ad" ? String((shoot.type_params as TypeParams | null)?.textZone ?? "") : "";
+      const win = cropWindow(MW, MH, String(aspect), subject, { textZone: tz });
+      const masterPath = `generated/${shoot.id}/${image.id}_m.jpg`;
+      const master = await sharp(buf).jpeg({ quality: 94, chromaSubsampling: "4:4:4", mozjpeg: true }).toBuffer();
+      const upM = await sb.storage.from(BUCKET).upload(masterPath, master, { contentType: "image/jpeg", upsert: true });
+      buf = await cropTo(buf, win);
+      extraParams = { ...(upM.error ? {} : { master_path: masterPath }), crop: { x: win.left / MW, y: win.top / MH, w: win.width / MW, h: win.height / MH }, subject, ...(win.fits ? {} : { subject_cut: true }) };
+    }
+  }
+
   // Image finale en JPEG haute qualité (≈ 1 Mo au lieu de 3-7 Mo en PNG) + miniature WebP pour les grilles
   const full = await sharp(buf).jpeg({ quality: 94, chromaSubsampling: "4:4:4", mozjpeg: true }).toBuffer();
   const thumb = await sharp(buf).resize({ width: 640, withoutEnlargement: true }).webp({ quality: 78 }).toBuffer();
@@ -566,7 +598,7 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
     sb.storage.from(BUCKET).upload(thumbPath, thumb, { contentType: "image/webp", upsert: true }),
   ]);
   if (up.error) throw new Error("Enregistrement de l'image impossible : " + up.error.message);
-  await sb.from("images").update({ path, thumb_path: upT.error ? null : thumbPath, state: "done", model_used: model, error: null, aspect, ...(unchanged ? { qc: UNCHANGED_QC, verdict: "rejected", score: 0 } : {}) }).eq("id", image.id);
+  await sb.from("images").update({ path, thumb_path: upT.error ? null : thumbPath, state: "done", model_used: model, error: null, aspect, ...(Object.keys(extraParams).length ? { params: { ...((cur.params as Record<string, unknown>) ?? {}), ...extraParams } } : {}), ...(unchanged ? { qc: UNCHANGED_QC, verdict: "rejected", score: 0 } : {}) }).eq("id", image.id);
   await sb.from("usage_events").insert({ user_id: userId, kind: image.kind, units: 1, model });
 }
 

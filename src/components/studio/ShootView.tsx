@@ -7,6 +7,7 @@ import { Lightbulb, Archive, BookmarkPlus, Check, Download, LayoutTemplate, Mess
 import { Badge, Btn, Card, INPUT, Label, Lightbox, Modal, Spinner } from "@/components/ui";
 import Comments from "./Comments";
 import CorrectionModal, { type NoteZone } from "./CorrectionModal";
+import CropModal from "./CropModal";
 import { api, signUrls, useSignedUrls, usePipeline, useSupabase } from "@/lib/client";
 import { FORMATS, FORMAT_PACKS, type ImageRow, type Role } from "@/types";
 import { imageLabel, normalizeSlides, typeName } from "@/lib/visualTypes";
@@ -68,6 +69,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
   // Carrousel : le plan (photo + textes de chaque slide) et le passage vers l'éditeur Ads
   const slideInfo = useMemo(() => normalizeSlides(shoot.type_params?.slides).map((x) => x.title || x.photo), [shoot.type_params]);
   const [dressing, setDressing] = useState(false);
+  const [cropFor, setCropFor] = useState<ImageRow | null>(null);
   // « Autre idée » : l'IA propose une nouvelle idée pour une image, on la lit (et la modifie) avant de payer
   const [ideaFor, setIdeaFor] = useState<ImageRow | null>(null);
   const [ideaHint, setIdeaHint] = useState("");
@@ -454,6 +456,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
                     {img.feedback && <span className="text-[11px] text-[#A0A0A8] truncate" title={img.feedback}>{img.feedback}</span>}
                   </div>
                   {img.kind === "generated" && (img.params?.idea || shoot.type_params?.shots?.[img.variant_index]) && <p className="text-[#3F3F46] bg-[#F4F4F5] rounded-lg px-2.5 py-1.5 leading-snug"><span className="font-semibold">Idée :</span> {String(img.params?.idea ?? shoot.type_params?.shots?.[img.variant_index])}</p>}
+                  {img.params?.subject_cut && <p className="text-[#7A4B00] bg-[#FFF4D6] rounded-lg px-2.5 py-1.5 leading-snug">Le sujet ne tient pas en entier dans ce format. Ouvrez « Formats » pour choisir le cadrage ou un autre format.</p>}
                   {img.params?.understood && <p className="text-[#2B6EE8] bg-[#EBF2FF] rounded-lg px-2.5 py-1.5 leading-snug"><span className="font-semibold">Compris :</span> {String(img.params.understood)}</p>}
                   {img.kind === "correction" && qc && qc.instruction_followed !== undefined && (
                     <p className={`leading-snug font-semibold ${qc.instruction_followed && !qc.ghost_or_duplicate ? "text-[#16A249]" : "text-[#E8444A]"}`}>
@@ -508,7 +511,8 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
                       {img.kind === "correction" && !img.params?.archived && <Btn size="sm" variant="ghost" onClick={() => retryFix(img)} title="Relance en tenant compte de ce qui n'a pas marché"><RotateCcw size={12} /> Réessayer</Btn>}
                       {img.parent_id && img.kind !== "format" && <Btn size="sm" variant="ghost" onClick={() => setCompare(img.id)}>Avant / après</Btn>}
                       <Btn size="sm" variant="ghost" onClick={() => submitFix(img, "label")} title="Corrige uniquement le texte de l'étiquette"><Type size={12} /> Étiquette</Btn>
-                      <Btn size="sm" variant="ghost" onClick={() => { setFormatFor(img.id); setFormats([]); }}><LayoutTemplate size={12} /> Décliner</Btn>
+                      {img.path && <Btn size="sm" variant="ghost" onClick={() => setCropFor(img)} title="Recadrer ou créer un autre format, à la souris (gratuit)"><LayoutTemplate size={12} /> Formats</Btn>}
+                      <Btn size="sm" variant="ghost" onClick={() => { setFormatFor(img.id); setFormats([]); }} title="L'IA redessine l'image dans un autre format (payant)">Recomposer (IA)</Btn>
                       {url && <a href={url} download={fileName(img)} className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-xl border border-[#E4E4E7] hover:bg-[#F4F4F5]"><Download size={12} /></a>}
                       {(isStaff || mine) && <Btn size="sm" variant="ghost" onClick={() => setOpen({ ...open, [img.id]: !open[img.id] })}><MessageSquare size={12} /></Btn>}
                       {isStaff && <Btn size="sm" variant="danger" onClick={() => removeImage(img)}><Trash2 size={12} /></Btn>}
@@ -566,6 +570,10 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
           {img.feedback && <p className="text-sm text-[#6B6B72] mt-3">Demande : {img.feedback}</p>}
         </Modal>
       ) : null; })()}
+      {cropFor && cropFor.path && (
+        <CropModal image={{ id: cropFor.id, path: cropFor.path, aspect: cropFor.aspect ?? shoot.aspect, params: cropFor.params }} onClose={() => setCropFor(null)}
+          onDone={async (m) => { setCropFor(null); await load(); flash(m); }} />
+      )}
       {ideaFor && (
         <Modal title={`Autre idée${imageLabel(shoot.visual_type, ideaFor.variant_index) ? ` · ${imageLabel(shoot.visual_type, ideaFor.variant_index)}` : ""}`} onClose={() => setIdeaFor(null)}>
           <div className="space-y-3">

@@ -23,13 +23,9 @@ export function variationHint(i: number, noPeople: boolean) {
 
 /** Qualité peau & détails : rendu campagne beauté/mode glamour, mais peau réelle (pas de lissage « IA »). */
 export const REALISM =
-  "PHOTOGRAPHIC QUALITY: this must be indistinguishable from a real photograph taken by an expert commercial beauty photographer on a real set, with a full-frame camera and a prime lens (35, 50, 85 or 100 mm macro as the shot requires), real light sources (window light, large softbox, bounce, a subtle rim light) and correct exposure. " +
-  "Natural depth of field and focus fall-off, true-to-life colours with a subtle editorial colour grade, fine natural grain, physically correct shadows, contact shadows and reflections. " +
-  "REAL SKIN: visible pores, fine texture, natural micro-imperfections, slight unevenness and peach fuzz, only the light retouch a professional retoucher would do; never plastic, waxy, airbrushed, overly glossy or doll-like; no beauty filter; natural asymmetry of a real face. " +
-  "Eyebrows built from individual hairs, real eyelashes and flyaway hair strands, real fabric weave and folds. " +
-  "THE PRODUCT IS PHYSICALLY IN THE SCENE: lit by the same light as everything around it, with matching reflections, correct perspective and contact shadows, held with real pressure by the fingers; it must never look pasted, floating, cut out or composited. " +
-  "AVOID EVERY AI TELL: over-smoothed skin, oversaturated glow, HDR look, perfect symmetry, melted details, warped hands, objects merging, glossy CGI rendering. " +
-  "Keep every styling detail exactly as described: makeup, hairstyle, jewelry, nails, eyewear, outfit.";
+  "PHOTOGRAPHIC QUALITY: indistinguishable from a real photograph by an expert beauty photographer: real lens and depth of field, real light sources, physically correct shadows and reflections, fine natural grain, true colours with a subtle editorial grade. " +
+  "Real skin when a person appears: visible pores and texture, natural micro-imperfections, light professional retouching only; never plastic, waxy, airbrushed or doll-like. " +
+  "Avoid every AI tell: over-smoothing, HDR glow, perfect symmetry, melted details, objects merging, a pasted or floating product, a CGI look.";
 
 /** Style voulu par le client (inspiration avec interface de téléphone) : le contrôle ne doit pas le refuser. */
 /** Interface de téléphone voulue : vraiment visible sur l'inspiration, ou demandée dans la consigne. */
@@ -74,43 +70,47 @@ export function buildPrompt(a: {
       : a.hasModelRef
       ? `PERSON: exactly the person of the MODEL REFERENCE (same face, skin tone, hair colour and hairstyle)${a.modelDescription ? `: ${a.modelDescription}` : ""}. Take only the pose, gesture and expression from the style reference, never the face or hair of the person shown there.`
       : `PERSON: ${a.variation}`;
+  // Consigne réécrite : une seule idée par bloc, dans l'ordre de priorité. Le brief du client passe avant tout.
+  const phone = wantsPhoneUi(a.analysis, a.userPrompt);
+  const cliche = /fleur|rose|plante|serviette|bougie|spa|feuille|pétale|petale|flower|towel|plant|candle/i.test(`${a.userPrompt} ${a.shot ?? ""}`);
+  const one = products.length > 1 ? `exactly ONE of each of the ${products.length} products (${products.length} product objects in total, no other bottle, tube or jar)` : "exactly ONE copy of the product (unless the brief asks for several)";
   return [
-    "You are an expert commercial beauty photographer shooting for the cosmetics brand Irizée. Create the photograph exactly as you would shoot it on a real professional set: real camera, real lens, real light, real model.",
-    roles,
+    "You are an expert commercial beauty photographer shooting for the cosmetics brand Irizée. Produce ONE real-looking photograph, as shot on a professional set with a real camera, lens and light.",
+    `REFERENCE IMAGES: ${roles}`,
     "",
-    "BRAND RULES:", numbered([...a.rules, ...products.flatMap((p) => p.rules ?? [])]),
+    "PRIORITY ORDER when instructions conflict: 1) the client brief, 2) the idea for this image, 3) the product rules, 4) the style reference.",
+    "",
+    `1. CLIENT BRIEF: ${a.userPrompt}`,
+    a.shot ? `\n2. IDEA FOR THIS IMAGE: ${a.shot}` : "",
+    a.typeLine ? `\n${a.typeLine}` : "",
     "",
     ...(a.noProduct
-      ? ["NO PRODUCT: this image shows no product at all: no bottle, tube, jar, packaging, cosmetic container, brand name or logo, even if the style reference shows one."]
+      ? ["3. NO PRODUCT: this image shows no product at all (no bottle, tube, jar, packaging, brand name or logo), even if a reference shows one."]
       : [
-        products.length > 1
-          ? `PRODUCTS: EXACTLY ONE of each of these ${products.length} products appears, ${products.length} product objects in total. Never show the same product twice, never add any other bottle, tube, jar or look-alike product, even if the style reference shows more products.`
-          : "PRODUCT:",
+        `3. PRODUCT: ${one}. Any product mentioned elsewhere but not listed here must NOT appear.`,
         products.map(productBlock).join("\n\n"),
-        "The product is an exact copy of its packshot: same silhouette, proportions, cap, material, colours, label layout and text direction. Products visible in the style reference belong to other brands: take their place and position, never their design.",
-        "FRAMING: every product is ENTIRELY inside the frame, from the top of the tube or dropper to the bottom of the cap, with a clear margin: never cut by an edge of the image.",
+        "Each product is an exact copy of its packshot: same silhouette, proportions, cap, material, colours, label layout and text direction, at its real size, physically in the scene (same light, reflections, contact shadow). It is entirely visible, never cut by an edge of the image. Products seen in the style reference belong to other brands: never copy their design.",
+        NO_MIRROR,
       ]),
     "",
-    a.inspMode === "loose"
-      ? "STYLE (MOOD ONLY): the style reference is a mood board, NOT a photo to copy. Take only its general atmosphere: colour palette, type of light, level of styling, energy and attitude. Create a clearly DIFFERENT, original photograph: different composition, framing, camera angle, pose, gesture, set and props. Someone comparing both images must never think one is a copy of the other." + (a.noProduct ? "" : products.length > 1 ? " Exactly one of each product, at a realistic scale." : " EXACTLY ONE single copy of the product, at a realistic scale, unless the client brief explicitly asks for several copies.")
-      : a.noProduct ? "STYLE: reproduce the style reference: composition, camera angle and lens, pose, lighting, colour palette, background and mood." : (products.length > 1 ? "STYLE: reproduce the style reference: composition, camera angle and lens, pose, lighting, colour palette, background and mood, and how the products are placed (held, standing, floating), but with exactly one of each product, at a realistic scale." : "STYLE: reproduce the style reference: composition, camera angle and lens, pose, lighting, colour palette, background, mood, and the way the product is placed (held, standing, floating), at a realistic scale for the product. EXACTLY ONE single copy of the product appears, even if the style reference shows several objects, unless the client brief explicitly asks for several copies."),
-    a.analysis ? (a.inspMode === "loose" ? `Mood of the style reference (atmosphere only, do NOT reproduce its composition, pose or set):\n${a.analysis}` : `Description of the style reference:\n${a.analysis}`) : "",
-    wantsPhoneUi(a.analysis, a.userPrompt)
-      ? "PHONE INTERFACE: the client wants the smartphone camera interface shown on the style reference (or described in the brief): reproduce exactly that interface, as described, and nothing more."
-      : "The result is ONE single photograph: never add a phone interface, camera mode labels, shutter button, viewfinder grid, icons, frame or collage layout.",
+    `4. ${person}`,
+    a.noPeople ? "" : a.noProduct ? "Hands are anatomically correct: five fingers, natural joints." : "Hands are anatomically correct: five fingers, natural joints, a firm and plausible grip on the product.",
     "",
-    `CLIENT BRIEF (priority over the style reference when they differ): ${a.userPrompt}`,
-    a.typeLine ? `\n${a.typeLine}` : "",
-    a.shot ? `\nTHE IDEA FOR THIS IMAGE (create exactly this concept, as a real photograph; the client brief wins if they conflict; if it mentions any product that is not listed under PRODUCT above, ignore that product completely: it must NOT appear): ${a.shot}` : "",
+    a.hasStyleRef === false ? "" : a.inspMode === "loose"
+      ? "5. STYLE REFERENCE = MOOD ONLY: take its colour palette, type of light, level of styling and attitude. Do NOT reproduce its composition, framing, pose, set or props: create a clearly different photograph."
+      : "5. STYLE REFERENCE: reproduce its composition, camera angle, pose, lighting, colour palette, background and the way the product is placed.",
+    a.hasStyleRef === false || !a.analysis ? "" : `Description of the style reference:\n${a.analysis}`,
     "",
-    person,
-    a.noPeople ? "" : a.noProduct ? "Hands are anatomically correct: five fingers per hand, natural joints." : "Hands are anatomically correct: five fingers per hand, natural joints and a firm, plausible grip on the product.",
-    "",
-    a.realism ?? REALISM,
     a.layoutLine ?? "",
-    /fleur|rose|plante|serviette|bougie|spa|feuille|pétale|petale|flower|towel|plant|candle/i.test(a.userPrompt) ? "" : "NO CLICHÉ PROPS: no flowers, petals, plants or leaves in vases, no towels, no candles, no spa set dressing.",
-    `Format: aspect ratio ${a.aspect}. Do NOT add any text, letters, words, typography, logo or watermark to the image: the only text allowed is what is printed on the real products${wantsPhoneUi(a.analysis, a.userPrompt) ? " (and the labels of the wanted phone camera interface)" : ""}.`,
-    a.noProduct ? "" : NO_MIRROR,
+    a.realism ?? REALISM,
+    "",
+    "HARD RULES:",
+    numbered([
+      ...a.rules, ...products.flatMap((p) => p.rules ?? []),
+      phone ? "The smartphone camera interface asked for by the client is reproduced as described; no other graphic element." : "One single photograph: no phone interface, grid, icons, frame, split screen or collage.",
+      `No added text, letters, logo or watermark${a.noProduct ? "" : ": the only text is what is printed on the real products"}${phone ? " (plus the labels of the phone interface)" : ""}.`,
+      ...(cliche ? [] : ["No cliché props: no flowers, petals, plants, towels, candles or spa set dressing."]),
+    ]),
   ].filter((l, i, arr) => l !== "" || arr[i - 1] !== "").join("\n");
 }
 

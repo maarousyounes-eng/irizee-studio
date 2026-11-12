@@ -124,7 +124,7 @@ async function fitAspect(buf: Buffer, aspect?: string) {
 }
 
 /** Appel OpenAI (édition d'image avec références) ; renvoie une réponse au format Gemini pour que le reste du code ne change pas. */
-async function callOpenAI(model: string, parts: Part[], o: { purpose?: string; aspect?: string; timeoutMs?: number; signal?: AbortSignal; mask?: Buffer }) {
+async function callOpenAI(model: string, parts: Part[], o: { purpose?: string; aspect?: string; timeoutMs?: number; signal?: AbortSignal; mask?: Buffer; noFit?: boolean }) {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error("OPENAI_API_KEY manquante côté serveur");
   const name = model === "openai:auto" ? await resolveOpenAIModel(key) : model.slice(7);
@@ -133,18 +133,11 @@ async function callOpenAI(model: string, parts: Part[], o: { purpose?: string; a
   const [aw, ah] = (o.aspect ?? "1:1").split(":").map(Number);
   const r = aw && ah ? aw / ah : 1;
   const size = r > 1.2 ? "1536x1024" : r < 0.83 ? "1024x1536" : "1024x1024";
-  // L'image sera recadrée au format demandé : on prévient le modèle de la marge qui sera coupée (sinon le produit est tronqué)
-  const [ow, oh] = size.split("x").map(Number);
-  let safety = "";
-  if (aw && ah && !o.mask) {
-    if (ow / oh < r - 0.01) { const cut = Math.round(((1 - (ow / r) / oh) / 2) * 100); if (cut >= 2) safety = `\n\nCOMPOSITION SAFETY: this image will be cropped to ${o.aspect}: the top ${cut}% and the bottom ${cut}% of the frame will be cut off. Keep every product, its cap and base, and every important element well inside the central area, away from the top and bottom edges.`; }
-    else if (ow / oh > r + 0.01) { const cut = Math.round(((1 - (oh * r) / ow) / 2) * 100); if (cut >= 2) safety = `\n\nCOMPOSITION SAFETY: this image will be cropped to ${o.aspect}: the left ${cut}% and the right ${cut}% of the frame will be cut off. Keep every product and important element well inside the central area, away from the left and right edges.`; }
-  }
   let lastErr: Error = new Error("Erreur OpenAI");
   for (let attempt = 0; attempt < 2; attempt++) {
     const t0 = Date.now();
     const fd = new FormData();
-    const prompt = basePrompt + safety;
+    const prompt = basePrompt;
     fd.append("model", name); fd.append("prompt", prompt); fd.append("size", size); fd.append("quality", "high"); fd.append("n", "1");
     // Masque : zone transparente = seule zone que le modèle a le droit de modifier dans la PREMIÈRE image (même taille qu'elle)
     if (o.mask && imgs.length) fd.append("mask", new Blob([new Uint8Array(o.mask)], { type: "image/png" }), "mask.png");
@@ -161,7 +154,7 @@ async function callOpenAI(model: string, parts: Part[], o: { purpose?: string; a
     if (res.ok) {
       const b64: string | undefined = j.data?.[0]?.b64_json;
       if (!b64) { await logCall({ purpose: o.purpose ?? "autre", model: name, status: "ok", ms: Date.now() - t0, imagesOut: 0, note: "réponse sans image" }); return { candidates: [{ content: { parts: [] } }] }; }
-      const out = await fitAspect(Buffer.from(b64, "base64"), o.aspect);
+      const out = o.noFit ? Buffer.from(b64, "base64") : await fitAspect(Buffer.from(b64, "base64"), o.aspect);
       await logCall({ purpose: o.purpose ?? "autre", model: name, status: "ok", ms: Date.now() - t0, imagesOut: 1, size, cost: OPENAI_EUR_PER_IMAGE });
       return { candidates: [{ content: { parts: [{ inlineData: { mime_type: "image/png", data: out.toString("base64") } }] } }] };
     }
@@ -175,12 +168,13 @@ async function callOpenAI(model: string, parts: Part[], o: { purpose?: string; a
 
 let geminiDownUntil = 0;
 
-interface Opts { purpose?: string; image?: boolean; json?: boolean; aspect?: string; size?: string; timeoutMs?: number; signal?: AbortSignal; mask?: Buffer }
+interface Opts { purpose?: string; image?: boolean; json?: boolean; aspect?: string; size?: string; timeoutMs?: number; signal?: AbortSignal; mask?: Buffer; noFit?: boolean }
 
-export async function gemini(model: string, parts: Part[], { purpose, image, json, aspect, size, timeoutMs, signal, mask }: Opts = {}) {
-  if (model.startsWith("openai:")) return callOpenAI(model, parts, { purpose, aspect, timeoutMs, signal, mask });
+export async function gemini(model: string, parts: Part[], { purpose, image, json, aspect, size, timeoutMs, signal, mask, noFit }: Opts = {}) {
+  if (model.startsWith("openai:")) return callOpenAI(model, parts, { purpose, aspect, timeoutMs, signal, mask, noFit });
   // Textes (consigne, idées, contrôle…) : relais OpenAI si demandé, ou si Gemini n'a plus de crédit
-  if (!image && process.env.TEXT_ENGINE === "openai") return callOpenAIText(parts, { purpose, json, timeoutMs, signal });
+  // Un seul fournisseur : les textes passent par OpenAI (sauf TEXT_ENGINE=gemini)
+  if (!image && process.env.TEXT_ENGINE !== "gemini" && process.env.OPENAI_API_KEY) return callOpenAIText(parts, { purpose, json, timeoutMs, signal });
   if (!image) {
     // Gemini sans crédit : on passe directement par OpenAI pendant 10 minutes, sans le retenter à chaque appel
     if (geminiDownUntil > Date.now() && process.env.OPENAI_API_KEY) return callOpenAIText(parts, { purpose, json, timeoutMs, signal });
