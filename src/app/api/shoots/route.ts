@@ -71,9 +71,9 @@ export async function POST(req: Request) {
     const ideasIn = (Array.isArray(tpIn.shots) ? tpIn.shots : []).map((x) => String(x ?? "").trim().slice(0, 700)).filter(Boolean).slice(0, 12);
     if (vtype !== "carousel" && vtype !== "ba") {
       if (ideasIn.length) tp.shots = Array.from({ length: n }, (_, i) => ideasIn[i % ideasIn.length]);
-      else if (paths.length && tp.inspMode === "loose") {
+      else if (!paths.length || tp.inspMode === "loose") {
         try {
-          const ideas = await withAiCtx({ sb, userId: user.id }, () => proposeIdeas(sb, { brief: prompt, n, type: vtype, productIds, productMode: productIds.length > 1 ? (["together", "split", "mix"].includes(b.productMode) ? b.productMode : "mix") : null, noProduct: !!b.noProduct, people: !b.noPeople, inspMode: "loose", inspirationPaths: paths, analysis: analysis ?? "", textZone: vtype === "ad" ? tp.textZone : undefined }));
+          const ideas = await withAiCtx({ sb, userId: user.id }, () => proposeIdeas(sb, { brief: prompt, n, type: vtype, productIds, productMode: productIds.length > 1 ? (["together", "split", "mix"].includes(b.productMode) ? b.productMode : "mix") : null, noProduct: !!b.noProduct, people: !b.noPeople, inspMode: "loose", inspirationPaths: paths, analysis: analysis ?? "", textZone: vtype === "ad" ? tp.textZone : undefined, oneCampaign: true }));
           if (ideas.length) tp.shots = Array.from({ length: n }, (_, i) => { const x = ideas[i % ideas.length]; return `${x.title} : ${x.idea}`; });
         } catch { /* sans idées : la consigne seule */ }
       }

@@ -13,7 +13,7 @@ import { imageLabel, normalizeSlides, typeName } from "@/lib/visualTypes";
 import { carouselToItems } from "@/components/ads3/fromCarousel";
 
 interface Props {
-  shoot: { id: string; prompt: string; aspect: string; product_id: string; created_by: string; created_at: string; analysis: string | null; inspiration_paths: string[]; engine: string; size: string; visual_type?: string | null; type_params?: { slides?: unknown; shots?: string[]; direction?: string } | null };
+  shoot: { id: string; prompt: string; aspect: string; product_id: string; created_by: string; created_at: string; analysis: string | null; inspiration_paths: string[]; engine: string; size: string; no_people?: boolean; visual_type?: string | null; type_params?: { slides?: unknown; shots?: string[]; direction?: string } | null };
   productName: string;
   modelNames: string[];
   me: { id: string; name: string; role: Role };
@@ -333,7 +333,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
             <div className="flex flex-wrap gap-1.5 mt-2">
               {shoot.visual_type && shoot.visual_type !== "photo" && <Badge tone="blue">{typeName(shoot.visual_type)}</Badge>}
               <Badge tone="blue">{FORMATS[shoot.aspect]?.short ?? shoot.aspect}</Badge>
-              <Badge>{modelNames.length ? `${modelNames.length > 1 ? "Mannequins" : "Mannequin"} : ${modelNames.join(", ")}` : "Mannequins variés (IA)"}</Badge>
+              <Badge>{shoot.no_people ? "Sans personne" : modelNames.length ? `${modelNames.length > 1 ? "Mannequins" : "Mannequin"} : ${modelNames.join(", ")}` : "Mannequins variés (IA)"}</Badge>
               <Badge>{new Date(shoot.created_at).toLocaleDateString("fr-FR")}</Badge>
             </div>
           </div>

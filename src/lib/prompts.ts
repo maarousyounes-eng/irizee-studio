@@ -88,6 +88,7 @@ export function buildPrompt(a: {
           : "PRODUCT:",
         products.map(productBlock).join("\n\n"),
         "The product is an exact copy of its packshot: same silhouette, proportions, cap, material, colours, label layout and text direction. Products visible in the style reference belong to other brands: take their place and position, never their design.",
+        "FRAMING: every product is ENTIRELY inside the frame, from the top of the tube or dropper to the bottom of the cap, with a clear margin: never cut by an edge of the image.",
       ]),
     "",
     a.inspMode === "loose"
@@ -107,6 +108,7 @@ export function buildPrompt(a: {
     "",
     a.realism ?? REALISM,
     a.layoutLine ?? "",
+    /fleur|rose|plante|serviette|bougie|spa|feuille|pétale|petale|flower|towel|plant|candle/i.test(a.userPrompt) ? "" : "NO CLICHÉ PROPS: no flowers, petals, plants or leaves in vases, no towels, no candles, no spa set dressing.",
     `Format: aspect ratio ${a.aspect}. Do NOT add any text, letters, words, typography, logo or watermark to the image: the only text allowed is what is printed on the real products${wantsPhoneUi(a.analysis, a.userPrompt) ? " (and the labels of the wanted phone camera interface)" : ""}.`,
     a.noProduct ? "" : NO_MIRROR,
   ].filter((l, i, arr) => l !== "" || arr[i - 1] !== "").join("\n");
@@ -414,7 +416,7 @@ export function maskEditPrompt(a: { product: Product; rules: string[]; instructi
 }
 
 /** Idées d'images : un directeur artistique propose une idée forte et différente pour CHAQUE image, avant toute génération. */
-export function ideasPrompt(a: { brief: string; n: number; type: string; perImage: string[][]; products: string; rules: string[]; people: boolean; inspMode: "copy" | "loose"; nInsp: number; analysis: string; avoid: string[]; theme?: string; textZone?: string }) {
+export function ideasPrompt(a: { brief: string; n: number; type: string; perImage: string[][]; products: string; rules: string[]; people: boolean; inspMode: "copy" | "loose"; nInsp: number; analysis: string; avoid: string[]; theme?: string; textZone?: string; oneCampaign?: boolean }) {
   return [
     "You are the creative director of an award-winning beauty advertising agency (think of the best campaigns of Glossier, Aesop, Byredo, Rhode, Jacquemus beauty, Fenty). You must come up with the IDEAS for the images of a shoot for the French cosmetics brand Irizée.",
     `Client brief (French, absolute priority): "${a.brief}"`,
@@ -428,7 +430,8 @@ export function ideasPrompt(a: { brief: string; n: number; type: string; perImag
     a.analysis ? `Description of the references:\n${a.analysis}` : "",
     a.perImage.length ? `PRODUCTS PER IMAGE (mandatory):\n${a.perImage.map((p, i) => `Image ${i + 1}: ${p.join(" + ") || "no product"}`).join("\n")}` : "",
     a.theme ? `ONE SINGLE CAMPAIGN CONCEPT chosen by the client, used for ALL images: "${a.theme}". Every image belongs to this same concept (same set, materials, light, colour palette and art direction). Write ${a.n} shots of THIS concept, each a different take: change the framing (wide, medium, close-up, detail), the camera angle, the arrangement of the product(s) and of the props within the same set. Never introduce a different concept.` : "",
-    a.theme ? "" : `Write ${a.n} ideas, ONE per image, each using a clearly DIFFERENT creative device. Devices to pick from (or better): play of scale (giant product, miniature set), sculptural set design (plaster, stone, blocks, sand), graphic hard shadows and light shapes, colour blocking, macro of the formula or ingredient as a landscape, water / splash / ripple frozen in motion, reflection and mirror games, levitation with real physical support, unexpected material contrast (chrome, ice, silk, velvet), tight crop on a detail of skin and product, still life with a story, raw ingredient (indigo powder cloud, plant) staged as art.`,
+    !a.theme && a.oneCampaign ? `First invent ONE strong, original campaign art direction from the brief (central idea, set and materials, palette, light, attitude), then write ${a.n} shots of THIS single direction: same universe for every image, a different framing, angle and arrangement for each. Start every idea with the name of the direction.` : "",
+    a.theme || a.oneCampaign ? "" : `Write ${a.n} ideas, ONE per image, each using a clearly DIFFERENT creative device. Devices to pick from (or better): play of scale (giant product, miniature set), sculptural set design (plaster, stone, blocks, sand), graphic hard shadows and light shapes, colour blocking, macro of the formula or ingredient as a landscape, water / splash / ripple frozen in motion, reflection and mirror games, levitation with real physical support, unexpected material contrast (chrome, ice, silk, velvet), tight crop on a detail of skin and product, still life with a story, raw ingredient (indigo powder cloud, plant) staged as art.`,
     "Every idea is physically shootable in a real studio, premium and editorial, never cheesy: no roses, petals, decorative flowers or fruit, no generic aloe slices, no spa candles, no clichés, unless the brief asks for them. Each product appears exactly once, upright or naturally placed, at its real size, label facing camera, never an extreme close-up of the label.",
     a.avoid.length ? `Do not repeat these ideas: ${a.avoid.join(" | ")}` : "",
     TEXT_ZONES.find((x) => x.id === a.textZone)?.en ? `EVERY idea must leave ${TEXT_ZONES.find((x) => x.id === a.textZone)!.en} of the frame completely empty (plain background) for a headline: compose the scene in the rest of the frame.` : "",

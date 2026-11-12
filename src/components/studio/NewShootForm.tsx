@@ -422,7 +422,7 @@ export default function NewShootForm(p: Props) {
                 {ideas.length !== variants && <p className="text-[11px] text-[#B45309]">Vous avez {ideas.length} prises de vue pour {variants} images : elles seront réutilisées dans l&apos;ordre. Refaites-les pour en avoir une par image.</p>}
               </div>
             )}
-            {!ideas.length && inspirations.length > 0 && inspMode === "loose" && <p className="text-[11px] text-[#A0A0A8]">Sans direction ni idées choisies, des idées seront proposées automatiquement au lancement.</p>}
+            {!ideas.length && (inspirations.length === 0 || inspMode === "loose") && <p className="text-[11px] text-[#A0A0A8]">Sans direction ni prises de vue choisies, une direction de campagne est inventée automatiquement au lancement (vous la verrez sur la page du shooting).</p>}
           </div>
         )}
 
