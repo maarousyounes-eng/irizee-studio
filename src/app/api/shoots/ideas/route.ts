@@ -18,6 +18,7 @@ export async function POST(req: Request) {
       brief, n: Number(b.n) || 4, type: String(b.visualType ?? "photo"), productIds, productMode: productIds.length > 1 ? (["together", "split", "mix"].includes(b.productMode) ? b.productMode : "mix") : null,
       noProduct: !!b.noProduct, people: !b.noPeople, inspMode: b.inspMode === "copy" ? "copy" : "loose", inspirationPaths: paths, analysis,
       avoid: (Array.isArray(b.avoid) ? b.avoid : []).map((x: unknown) => String(x).slice(0, 200)).slice(0, 12),
+      theme: b.theme ? String(b.theme).slice(0, 800) : undefined,
     }));
     if (!ideas.length) throw new HttpError(502, "Pas d'idée reçue, réessayez");
     return { ideas };

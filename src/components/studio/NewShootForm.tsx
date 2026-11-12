@@ -61,22 +61,42 @@ export default function NewShootForm(p: Props) {
   // Idées d'images proposées par le directeur artistique, modifiables avant de générer
   const [ideas, setIdeas] = useState<{ title: string; idea: string }[]>([]);
   const [ideasBusy, setIdeasBusy] = useState<number | "all" | null>(null);
-  async function fetchIdeas(count: number, avoid: string[]) {
+  const [theme, setTheme] = useState<string | null>(null);
+  const [briefBusy, setBriefBusy] = useState(false);
+  const [prevPrompt, setPrevPrompt] = useState<string | null>(null);
+  async function improve() {
+    setError(null);
+    if (!prompt.trim()) return setError("Écris d'abord quelques mots dans la consigne");
+    setBriefBusy(true);
+    try {
+      const r = await api<{ brief: string }>("/api/shoots/brief", { brief: prompt, visualType: vtype, productIds: noProduct ? [] : [productId, ...extraIds.filter((x) => x !== productId)].slice(0, 4), noProduct });
+      setPrevPrompt(prompt); setPrompt(r.brief);
+    } catch (e) { setError(e instanceof Error ? e.message : "Erreur"); }
+    setBriefBusy(false);
+  }
+  async function wholeCampaign(i: number) {
+    const x = ideas[i];
+    if (!x) return;
+    setIdeasBusy(i);
+    try { const t = `${x.title} : ${x.idea}`; setIdeas(await fetchIdeas(variants, [], t)); setTheme(x.title); } catch (e) { setError(e instanceof Error ? e.message : "Erreur"); }
+    setIdeasBusy(null);
+  }
+  async function fetchIdeas(count: number, avoid: string[], themeText?: string) {
     return (await api<{ ideas: { title: string; idea: string }[] }>("/api/shoots/ideas", {
       brief: prompt, n: count, visualType: vtype, productIds: noProduct ? [] : [productId, ...extraIds.filter((x) => x !== productId)].slice(0, 4), productMode, noProduct, noPeople,
-      inspMode, inspirationPaths: inspirations, inspirationAnalyses: inspirations.map((p) => insp[p]?.state === "done" ? { analysis: insp[p].analysis, note: insp[p].note !== insp[p].summary ? insp[p].note : "" } : null).filter(Boolean), avoid,
+      inspMode, inspirationPaths: inspirations, inspirationAnalyses: inspirations.map((p) => insp[p]?.state === "done" ? { analysis: insp[p].analysis, note: insp[p].note !== insp[p].summary ? insp[p].note : "" } : null).filter(Boolean), avoid, theme: themeText,
     })).ideas;
   }
   async function proposeAll() {
     setError(null);
     if (!prompt.trim()) return setError("Écris d'abord la consigne : les idées partent d'elle");
     setIdeasBusy("all");
-    try { setIdeas(await fetchIdeas(variants, ideas.map((x) => x.title))); } catch (e) { setError(e instanceof Error ? e.message : "Erreur"); }
+    try { setIdeas(await fetchIdeas(variants, ideas.map((x) => x.title))); setTheme(null); } catch (e) { setError(e instanceof Error ? e.message : "Erreur"); }
     setIdeasBusy(null);
   }
   async function proposeOne(i: number) {
     setIdeasBusy(i);
-    try { const [x] = await fetchIdeas(1, ideas.map((y) => `${y.title}: ${y.idea.slice(0, 80)}`)); if (x) setIdeas((all) => all.map((y, k) => (k === i ? x : y))); } catch (e) { setError(e instanceof Error ? e.message : "Erreur"); }
+    try { const [x] = await fetchIdeas(1, ideas.map((y) => `${y.title}: ${y.idea.slice(0, 80)}`), theme ? `${theme} : ${ideas[0]?.idea ?? ""}` : undefined); if (x) setIdeas((all) => all.map((y, k) => (k === i ? x : y))); } catch (e) { setError(e instanceof Error ? e.message : "Erreur"); }
     setIdeasBusy(null);
   }
   const [uploading, setUploading] = useState(0);
@@ -315,7 +335,11 @@ export default function NewShootForm(p: Props) {
           <Label>Consigne</Label>
           <textarea className={INPUT + " min-h-[110px]"} value={prompt} onChange={(e) => setPrompt(e.target.value)}
             placeholder={vtype === "carousel" ? "Ex : le rituel du soir avec le Masque Nila, de la couverture jusqu'au résultat. Ambiance douce, tons sable." : vtype === "ba" ? "Ex : portrait de face, lumière neutre, cheveux attachés (facultatif)" : vtype === "free" ? "Ex : gros plan d'une goutte de texture sur une pierre sombre" : "Ex : même ambiance mais tout en bleu électrique : chemise, lunettes et rayons au sol. Lumière douce du matin."} />
-          <p className="text-[11px] text-[#A0A0A8] mt-1">Les règles de la marque sont appliquées automatiquement à chaque génération.</p>
+          <div className="flex flex-wrap items-center gap-2 mt-1.5">
+            <Btn size="sm" variant="ghost" onClick={improve} disabled={briefBusy || !prompt.trim()}>{briefBusy ? <Spinner /> : <Wand2 size={13} />} Améliorer ma consigne (gratuit)</Btn>
+            {prevPrompt !== null && <button type="button" className="text-[11px] font-semibold text-[#6B6B72]" onClick={() => { setPrompt(prevPrompt); setPrevPrompt(null); }}>Revenir à ma version</button>}
+            <span className="text-[11px] text-[#A0A0A8]">Les règles de la marque sont appliquées automatiquement à chaque génération.</span>
+          </div>
         </div>
 
         {vtype !== "carousel" && vtype !== "ba" && (
@@ -324,6 +348,12 @@ export default function NewShootForm(p: Props) {
               <Label>Les idées de chaque image</Label>
               <Btn size="sm" onClick={proposeAll} disabled={ideasBusy !== null || inspPending}>{ideasBusy === "all" ? <Spinner className="border-white/40 border-t-white" /> : <Wand2 size={13} />} {ideas.length ? "Reproposer toutes les idées" : `Proposer ${variants} idées (gratuit)`}</Btn>
             </div>
+            {theme && (
+              <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-[#EBF2FF] border border-[#C9D9F8] text-[12px] text-[#1F3F7A]">
+                <span><b>Une seule idée pour toute la campagne :</b> « {theme} ». Chaque image est une prise de vue différente de ce même concept.</span>
+                <button type="button" className="font-semibold text-[#2B6EE8]" onClick={proposeAll} disabled={ideasBusy !== null}>Revenir à des idées différentes</button>
+              </div>
+            )}
             {ideas.length === 0 ? (
               <p className="text-[12px] text-[#6B6B72]">Un directeur artistique propose une idée forte et différente pour chaque image, à partir de votre consigne{inspirations.length ? " et de l'ambiance de vos inspirations" : ""}. Vous les lisez et les modifiez avant de payer la moindre image.{inspirations.length && inspMode === "loose" ? " Si vous ne le faites pas, les idées seront proposées automatiquement au lancement." : ""}</p>
             ) : (
@@ -333,8 +363,9 @@ export default function NewShootForm(p: Props) {
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-bold w-16 shrink-0">Image {i + 1}</span>
                       <input className={INPUT + " !py-1.5 text-sm font-semibold"} value={x.title} onChange={(e) => setIdeas(ideas.map((y, k) => (k === i ? { ...y, title: e.target.value } : y)))} aria-label={`Titre de l'idée ${i + 1}`} />
-                      <Btn size="sm" variant="ghost" onClick={() => proposeOne(i)} disabled={ideasBusy !== null} title="Une autre idée pour cette image">{ideasBusy === i ? <Spinner /> : "Autre idée"}</Btn>
+                      <Btn size="sm" variant="ghost" onClick={() => proposeOne(i)} disabled={ideasBusy !== null} title={theme ? "Une autre prise de vue du même concept" : "Une autre idée pour cette image"}>{ideasBusy === i ? <Spinner /> : theme ? "Autre prise" : "Autre idée"}</Btn>
                     </div>
+                    {!theme && ideas.length > 1 && <button type="button" className="text-[11px] font-semibold text-[#2B6EE8]" onClick={() => wholeCampaign(i)} disabled={ideasBusy !== null}>Toute la campagne sur cette idée →</button>}
                     <textarea className={INPUT + " min-h-[70px] !text-[13px]"} value={x.idea} onChange={(e) => setIdeas(ideas.map((y, k) => (k === i ? { ...y, idea: e.target.value } : y)))} aria-label={`Idée ${i + 1}`} />
                   </div>
                 ))}

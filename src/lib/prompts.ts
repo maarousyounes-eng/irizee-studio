@@ -411,7 +411,7 @@ export function maskEditPrompt(a: { product: Product; rules: string[]; instructi
 }
 
 /** Idées d'images : un directeur artistique propose une idée forte et différente pour CHAQUE image, avant toute génération. */
-export function ideasPrompt(a: { brief: string; n: number; type: string; perImage: string[][]; products: string; rules: string[]; people: boolean; inspMode: "copy" | "loose"; nInsp: number; analysis: string; avoid: string[] }) {
+export function ideasPrompt(a: { brief: string; n: number; type: string; perImage: string[][]; products: string; rules: string[]; people: boolean; inspMode: "copy" | "loose"; nInsp: number; analysis: string; avoid: string[]; theme?: string }) {
   return [
     "You are the creative director of an award-winning beauty advertising agency (think of the best campaigns of Glossier, Aesop, Byredo, Rhode, Jacquemus beauty, Fenty). You must come up with the IDEAS for the images of a shoot for the French cosmetics brand Irizée.",
     `Client brief (French, absolute priority): "${a.brief}"`,
@@ -424,9 +424,24 @@ export function ideasPrompt(a: { brief: string; n: number; type: string; perImag
       : `The ${a.nInsp} attached image(s) are MOOD references only. Take their level of quality, light and colour mood, but NEVER their concept or composition: an idea that looks like "the same photo with our product" is a failure.`) : "",
     a.analysis ? `Description of the references:\n${a.analysis}` : "",
     a.perImage.length ? `PRODUCTS PER IMAGE (mandatory):\n${a.perImage.map((p, i) => `Image ${i + 1}: ${p.join(" + ") || "no product"}`).join("\n")}` : "",
-    `Write ${a.n} ideas, ONE per image, each using a clearly DIFFERENT creative device. Devices to pick from (or better): play of scale (giant product, miniature set), sculptural set design (plaster, stone, blocks, sand), graphic hard shadows and light shapes, colour blocking, macro of the formula or ingredient as a landscape, water / splash / ripple frozen in motion, reflection and mirror games, levitation with real physical support, unexpected material contrast (chrome, ice, silk, velvet), tight crop on a detail of skin and product, still life with a story, raw ingredient (indigo powder cloud, plant) staged as art.`,
+    a.theme ? `ONE SINGLE CAMPAIGN CONCEPT chosen by the client, used for ALL images: "${a.theme}". Every image belongs to this same concept (same set, materials, light, colour palette and art direction). Write ${a.n} shots of THIS concept, each a different take: change the framing (wide, medium, close-up, detail), the camera angle, the arrangement of the product(s) and of the props within the same set. Never introduce a different concept.` : "",
+    a.theme ? "" : `Write ${a.n} ideas, ONE per image, each using a clearly DIFFERENT creative device. Devices to pick from (or better): play of scale (giant product, miniature set), sculptural set design (plaster, stone, blocks, sand), graphic hard shadows and light shapes, colour blocking, macro of the formula or ingredient as a landscape, water / splash / ripple frozen in motion, reflection and mirror games, levitation with real physical support, unexpected material contrast (chrome, ice, silk, velvet), tight crop on a detail of skin and product, still life with a story, raw ingredient (indigo powder cloud, plant) staged as art.`,
     "Every idea is physically shootable in a real studio, premium and editorial, never cheesy: no roses, petals, decorative flowers or fruit, no generic aloe slices, no spa candles, no clichés, unless the brief asks for them. Each product appears exactly once, upright or naturally placed, at its real size, label facing camera, never an extreme close-up of the label.",
     a.avoid.length ? `Do not repeat these ideas: ${a.avoid.join(" | ")}` : "",
     'Return JSON only: {"ideas": [{"title": str (French, 2-5 words), "idea": str (French, 35-60 words: concept, set and background, light, how the product is staged, framing)}]}',
+  ].filter(Boolean).join("\n");
+}
+
+/** Améliore la consigne du client : un vrai brief de shooting, structuré, sans rien inventer sur la marque. */
+export function briefPrompt(a: { brief: string; type: string; products: string; rules: string[] }) {
+  return [
+    "You are a senior beauty art director. Rewrite the client's rough request into a clear, professional SHOOT BRIEF in French, that a photographer and an image AI can follow.",
+    `Client's request (French): "${a.brief}"`,
+    a.products ? `Products:\n${a.products}` : "",
+    a.rules.length ? `Brand rules:\n${numbered(a.rules)}` : "",
+    `Visual type: ${a.type}.`,
+    "Keep EVERYTHING the client asked for, word for word when it is precise (products, ingredients to feature, what to avoid, tone). Never invent a claim, a price, an ingredient, a number or a promise. Do not add people if the client did not mention them.",
+    "Structure, short and concrete (max 170 words): Objectif · Message · Direction artistique (décor, matières, lumière, couleurs, cadrage) · Mise en scène du produit · À éviter.",
+    'Return JSON only: {"brief": str}',
   ].filter(Boolean).join("\n");
 }
