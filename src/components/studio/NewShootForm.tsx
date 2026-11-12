@@ -57,6 +57,7 @@ export default function NewShootForm(p: Props) {
   const [baBefore, setBaBefore] = useState<string>(tp0.baBefore ?? "");
   const [baAfter, setBaAfter] = useState<string>(tp0.baAfter ?? "");
   const [pairs, setPairs] = useState(1);
+  const [inspMode, setInspMode] = useState<"copy" | "loose">(tp0.inspMode === "copy" ? "copy" : "loose");
   const [uploading, setUploading] = useState(0);
   // Chaque inspiration est analysée dès son ajout : le client voit ce que l'IA a compris et peut le corriger avant de lancer
   const [insp, setInsp] = useState<Record<string, { state: "loading" | "done" | "error"; analysis: string; summary: string; note: string; phoneUi: boolean }>>({});
@@ -169,7 +170,7 @@ export default function NewShootForm(p: Props) {
           return { path: p, analysis: dropUi ? a.analysis.replace(/PHONE UI:\s*yes/gi, "PHONE UI: no") : a.analysis, note: edited ? a.note : "" };
         }).filter(Boolean),
         visualType: vtype, modelMode, slideCount: slides.length, pairs,
-        typeParams: { socialStyle, textZone, slides, carouselStyle, baChange, baBefore, baAfter },
+        typeParams: { inspMode, socialStyle, textZone, slides, carouselStyle, baChange, baBefore, baAfter },
       });
       sessionStorage.setItem(`run:${r.shootId}`, JSON.stringify(r.imageIds));
       router.push(`/shoots/${r.shootId}`);
@@ -241,6 +242,16 @@ export default function NewShootForm(p: Props) {
 
         <div>
           <Label>Images d&apos;inspiration (Pinterest…)</Label>
+          <div className="grid grid-cols-2 gap-1.5 mb-2">
+            <button type="button" onClick={() => setInspMode("loose")} className={`text-left px-3 py-2 rounded-xl border transition ${inspMode === "loose" ? "bg-[#EBF2FF] border-[#2B6EE8]" : "bg-white border-[#E4E4E7] hover:bg-[#F4F4F5]"}`}>
+              <span className={`block text-xs font-semibold ${inspMode === "loose" ? "text-[#2B6EE8]" : "text-[#0A0A0B]"}`}>S&apos;inspirer</span>
+              <span className="block text-[11px] text-[#6B6B72] leading-snug">Même ambiance, couleurs et lumière, mais une photo différente.</span>
+            </button>
+            <button type="button" onClick={() => setInspMode("copy")} className={`text-left px-3 py-2 rounded-xl border transition ${inspMode === "copy" ? "bg-[#EBF2FF] border-[#2B6EE8]" : "bg-white border-[#E4E4E7] hover:bg-[#F4F4F5]"}`}>
+              <span className={`block text-xs font-semibold ${inspMode === "copy" ? "text-[#2B6EE8]" : "text-[#0A0A0B]"}`}>Reproduire</span>
+              <span className="block text-[11px] text-[#6B6B72] leading-snug">Même composition, cadrage et pose, avec vos produits.</span>
+            </button>
+          </div>
           <div
             onClick={() => fileRef.current?.click()}
             onDragOver={(e) => e.preventDefault()}

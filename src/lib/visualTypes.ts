@@ -76,6 +76,7 @@ export interface TypeParams {
   carouselStyle?: string;
   slides?: Slide[] | string[];
   shots?: string[];
+  inspMode?: "copy" | "loose";
   baChange?: string;
   baBefore?: string;
   baAfter?: string;

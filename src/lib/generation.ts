@@ -352,6 +352,7 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
       const prompt = buildPrompt({
         product, rules, userPrompt: shoot.prompt + redoBrief, aspect, analysis: analysisFor, hasTexture: !!texture,
         shot: (idea && vtype !== "carousel" ? idea : (tp.shots ?? [])[image.variant_index]) || undefined,
+        inspMode: tp.inspMode === "copy" ? "copy" : tp.inspMode === "loose" ? "loose" : undefined,
         others: others.map((o) => ({ product: o.product, n: 1 })), variation: variationHint(image.variant_index, shoot.no_people), nProductImages: imagePaths.length,
         hasModelRef: modelRefs.length > 0, nModelRefs: modelRefs.length, modelDescription: descs.join(" / "), noPeople: shoot.no_people, noProduct,
         ...(vtype === "photo" ? {} : { typeLine: typeLine(vtype, tp, image.variant_index, nSlides), seriesRef: !!series, hasStyleRef: inspirations.length > 0, realism: vtype === "ba" ? REALISM_NATURAL : undefined }),

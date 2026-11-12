@@ -18,7 +18,7 @@ export async function POST(req: Request) {
     const vtype = isVisualType(b.visualType) ? b.visualType : "photo";
     const tpIn = (b.typeParams ?? {}) as TypeParams;
     const s = (x: unknown, max = 400) => String(x ?? "").trim().slice(0, max);
-    const tp: TypeParams = {};
+    const tp: TypeParams = { inspMode: tpIn.inspMode === "copy" ? "copy" : "loose" };
     if (vtype === "social") tp.socialStyle = SOCIAL_STYLES.some((x) => x.id === tpIn.socialStyle) ? tpIn.socialStyle : "feed";
     if (vtype === "ad") tp.textZone = TEXT_ZONES.some((x) => x.id === tpIn.textZone) ? tpIn.textZone : "top";
     if (vtype === "ba") { tp.baChange = BA_CHANGES.some((x) => x.id === tpIn.baChange) ? tpIn.baChange : "terne"; tp.baBefore = s(tpIn.baBefore); tp.baAfter = s(tpIn.baAfter); if (tp.baChange === "autre" && (!tp.baBefore || !tp.baAfter)) throw new HttpError(400, "Décris l'avant et l'après"); }

@@ -47,7 +47,7 @@ const textsBlock = (p: Product) => (p.texts ?? []).map((t) => `- ${t}`).join("\n
 export function buildPrompt(a: {
   product: Product; rules: string[]; userPrompt: string; aspect: string; analysis: string;
   others?: { product: Product; n: number }[]; variation: string; nProductImages: number; hasModelRef: boolean; modelDescription?: string; noPeople: boolean; noProduct?: boolean;
-  nModelRefs?: number; seriesRef?: boolean; typeLine?: string; realism?: string; hasStyleRef?: boolean; hasTexture?: boolean; shot?: string;
+  nModelRefs?: number; seriesRef?: boolean; typeLine?: string; realism?: string; hasStyleRef?: boolean; hasTexture?: boolean; shot?: string; inspMode?: "copy" | "loose";
 }) {
   const nModels = a.hasModelRef ? Math.max(1, a.nModelRefs ?? 1) : 0;
   // Version courte et cohérente : chaque consigne n'apparaît qu'une fois, sans ordres contradictoires.
@@ -90,8 +90,10 @@ export function buildPrompt(a: {
         "The product is an exact copy of its packshot: same silhouette, proportions, cap, material, colours, label layout and text direction. Products visible in the style reference belong to other brands: take their place and position, never their design.",
       ]),
     "",
-    a.noProduct ? "STYLE: reproduce the style reference: composition, camera angle and lens, pose, lighting, colour palette, background and mood." : (products.length > 1 ? "STYLE: reproduce the style reference: composition, camera angle and lens, pose, lighting, colour palette, background and mood, and how the products are placed (held, standing, floating), but with exactly one of each product, at a realistic scale." : "STYLE: reproduce the style reference: composition, camera angle and lens, pose, lighting, colour palette, background, mood, and the way the product is placed (held, standing, floating), at a realistic scale for the product. EXACTLY ONE single copy of the product appears, even if the style reference shows several objects, unless the client brief explicitly asks for several copies."),
-    a.analysis ? `Description of the style reference:\n${a.analysis}` : "",
+    a.inspMode === "loose"
+      ? "STYLE (MOOD ONLY): the style reference is a mood board, NOT a photo to copy. Take only its general atmosphere: colour palette, type of light, level of styling, energy and attitude. Create a clearly DIFFERENT, original photograph: different composition, framing, camera angle, pose, gesture, set and props. Someone comparing both images must never think one is a copy of the other." + (a.noProduct ? "" : products.length > 1 ? " Exactly one of each product, at a realistic scale." : " EXACTLY ONE single copy of the product, at a realistic scale, unless the client brief explicitly asks for several copies.")
+      : a.noProduct ? "STYLE: reproduce the style reference: composition, camera angle and lens, pose, lighting, colour palette, background and mood." : (products.length > 1 ? "STYLE: reproduce the style reference: composition, camera angle and lens, pose, lighting, colour palette, background and mood, and how the products are placed (held, standing, floating), but with exactly one of each product, at a realistic scale." : "STYLE: reproduce the style reference: composition, camera angle and lens, pose, lighting, colour palette, background, mood, and the way the product is placed (held, standing, floating), at a realistic scale for the product. EXACTLY ONE single copy of the product appears, even if the style reference shows several objects, unless the client brief explicitly asks for several copies."),
+    a.analysis ? (a.inspMode === "loose" ? `Mood of the style reference (atmosphere only, do NOT reproduce its composition, pose or set):\n${a.analysis}` : `Description of the style reference:\n${a.analysis}`) : "",
     wantsPhoneUi(a.analysis, a.userPrompt)
       ? "PHONE INTERFACE: the client wants the smartphone camera interface shown on the style reference (or described in the brief): reproduce exactly that interface, as described, and nothing more."
       : "The result is ONE single photograph: never add a phone interface, camera mode labels, shutter button, viewfinder grid, icons, frame or collage layout.",
