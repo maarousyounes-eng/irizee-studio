@@ -634,6 +634,8 @@ async function qualityCheckInner(sb: SupabaseClient, image: ImageRow) {
   const qc = parseJson<QC>(firstText(r));
   qc.texts = qc.texts ?? [];
   if (!noProduct && qcOthers.length) qc.expected_count = 1 + qcOthers.length; // plusieurs produits ensemble : un de chaque, pas plus
+  // Un seul produit : un seul exemplaire, sauf si la consigne en demande plusieurs
+  else if (!noProduct && !/(plusieurs|deux|trois|quatre|[2-9])\s+(tubes?|flacons?|produits?|exemplaires?|copies?|pots?)/i.test(String(sa?.prompt ?? ""))) qc.expected_count = 1;
   if (noProduct) Object.assign(qc, { texts: [], color_ok: true, shape_ok: true, all_copies_exact: true, label_orientation_ok: true, product_height_pct: 100, hero_foreground: true, proportion_ok: true, angle_ok: true });
   if (before) {
     try { const [a, b] = await Promise.all([sharpness(before.buf), sharpness(gen.buf)]); if (a > 0) qc.sharpness_ratio = Math.round((b / a) * 100) / 100; } catch { /* mesure facultative */ }
