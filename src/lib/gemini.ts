@@ -128,15 +128,23 @@ async function callOpenAI(model: string, parts: Part[], o: { purpose?: string; a
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error("OPENAI_API_KEY manquante côté serveur");
   const name = model === "openai:auto" ? await resolveOpenAIModel(key) : model.slice(7);
-  const prompt = parts.filter((p): p is { text: string } => "text" in p).map((p) => p.text).join("\n\n");
+  const basePrompt = parts.filter((p): p is { text: string } => "text" in p).map((p) => p.text).join("\n\n");
   const imgs = parts.filter((p): p is { inline_data: { mime_type: string; data: string } } => "inline_data" in p).slice(0, 16);
   const [aw, ah] = (o.aspect ?? "1:1").split(":").map(Number);
   const r = aw && ah ? aw / ah : 1;
   const size = r > 1.2 ? "1536x1024" : r < 0.83 ? "1024x1536" : "1024x1024";
+  // L'image sera recadrée au format demandé : on prévient le modèle de la marge qui sera coupée (sinon le produit est tronqué)
+  const [ow, oh] = size.split("x").map(Number);
+  let safety = "";
+  if (aw && ah && !o.mask) {
+    if (ow / oh < r - 0.01) { const cut = Math.round(((1 - (ow / r) / oh) / 2) * 100); if (cut >= 2) safety = `\n\nCOMPOSITION SAFETY: this image will be cropped to ${o.aspect}: the top ${cut}% and the bottom ${cut}% of the frame will be cut off. Keep every product, its cap and base, and every important element well inside the central area, away from the top and bottom edges.`; }
+    else if (ow / oh > r + 0.01) { const cut = Math.round(((1 - (oh * r) / ow) / 2) * 100); if (cut >= 2) safety = `\n\nCOMPOSITION SAFETY: this image will be cropped to ${o.aspect}: the left ${cut}% and the right ${cut}% of the frame will be cut off. Keep every product and important element well inside the central area, away from the left and right edges.`; }
+  }
   let lastErr: Error = new Error("Erreur OpenAI");
   for (let attempt = 0; attempt < 2; attempt++) {
     const t0 = Date.now();
     const fd = new FormData();
+    const prompt = basePrompt + safety;
     fd.append("model", name); fd.append("prompt", prompt); fd.append("size", size); fd.append("quality", "high"); fd.append("n", "1");
     // Masque : zone transparente = seule zone que le modèle a le droit de modifier dans la PREMIÈRE image (même taille qu'elle)
     if (o.mask && imgs.length) fd.append("mask", new Blob([new Uint8Array(o.mask)], { type: "image/png" }), "mask.png");
