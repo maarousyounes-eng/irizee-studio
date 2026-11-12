@@ -1,4 +1,4 @@
-import { requireUser, handle, HttpError } from "@/lib/api";
+import { requireUser, handle, HttpError, withJob } from "@/lib/api";
 import { ANALYSIS_SEP, analyzeInspirations, checkQuota } from "@/lib/generation";
 import { withAiCtx } from "@/lib/gemini";
 import { ANALYZE_PROMPT } from "@/lib/prompts";
@@ -13,6 +13,7 @@ export async function POST(req: Request) {
   return handle(async () => {
     const { sb, user, profile } = await requireUser();
     const b = await req.json();
+    return withJob(sb, b.jobId, async () => {
     const productIds: string[] = Array.from(new Set([b.productId, ...(Array.isArray(b.productIds) ? b.productIds : [])].filter((x: unknown): x is string => typeof x === "string" && !!x))).slice(0, 4);
     if (!productIds.length) throw new HttpError(400, "Choisis un produit");
     const vtype = isVisualType(b.visualType) ? b.visualType : "photo";
@@ -108,5 +109,6 @@ export async function POST(req: Request) {
     const { data: imgs, error: e2 } = await sb.from("images").insert(rows).select("id");
     if (e2) throw new HttpError(400, e2.message);
     return { shootId: shoot.id, imageIds: (imgs ?? []).map((i: any) => i.id) };
+    });
   });
 }

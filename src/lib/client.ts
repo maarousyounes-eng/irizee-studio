@@ -11,6 +11,32 @@ export async function api<T = any>(url: string, body?: unknown, method = "POST",
   return j as T;
 }
 
+/**
+ * Appel d'une étape longue, insensible aux coupures de connexion : si la requête est coupée en route,
+ * le résultat est récupéré dans `ai_jobs` dès que le serveur a fini.
+ */
+export async function apiJob<T = any>(sb: { from: (t: string) => any }, url: string, body: Record<string, unknown>, maxMs = 240_000): Promise<T> {
+  const jobId = crypto.randomUUID();
+  let direct: { ok: true; data: T } | { ok: false; error: string } | null = null;
+  fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...body, jobId }) })
+    .then(async (res) => {
+      const j = await res.json().catch(() => null);
+      if (res.ok && j) direct = { ok: true, data: j as T };
+      else if (j?.error && res.status < 500) direct = { ok: false, error: j.error }; // vraie erreur de l'application (pas une coupure)
+    }).catch(() => { /* coupure : on attend le résultat enregistré */ });
+  const t0 = Date.now();
+  while (Date.now() - t0 < maxMs) {
+    await new Promise((r) => setTimeout(r, 2500));
+    const d = direct as { ok: true; data: T } | { ok: false; error: string } | null;
+    if (d?.ok) return d.data;
+    if (d && !d.ok) throw new Error(d.error);
+    const { data } = await sb.from("ai_jobs").select("state, result, error").eq("id", jobId).maybeSingle();
+    if (data?.state === "done") return data.result as T;
+    if (data?.state === "error") throw new Error(data.error || "Erreur");
+  }
+  throw new Error("Le serveur met trop de temps à répondre. Réessayez.");
+}
+
 /** Réduit une image avant envoi (JPEG) pour rester léger. */
 export async function shrinkImage(file: Blob, max = 1800): Promise<Blob> {
   const url = URL.createObjectURL(file);

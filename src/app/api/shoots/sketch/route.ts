@@ -1,5 +1,5 @@
 import sharp from "sharp";
-import { requireUser, handle, HttpError } from "@/lib/api";
+import { requireUser, handle, HttpError, withJob } from "@/lib/api";
 import { gemini, imgPart, firstImage, withAiCtx, type Part } from "@/lib/gemini";
 import { download, loadProduct, IMAGE_MODEL } from "@/lib/generation";
 
@@ -10,6 +10,7 @@ export async function POST(req: Request) {
   return handle(async () => {
     const { sb, user } = await requireUser();
     const b = await req.json();
+    return withJob(sb, b.jobId, async () => {
     const direction = String(b.direction ?? "").trim().slice(0, 1200);
     if (!direction) throw new HttpError(400, "Direction manquante");
     const productIds: string[] = b.noProduct ? [] : (Array.isArray(b.productIds) ? b.productIds : []).filter((x: unknown) => typeof x === "string").slice(0, 2);
@@ -30,5 +31,6 @@ export async function POST(req: Request) {
     const up = await sb.storage.from("studio").upload(path, jpg, { contentType: "image/jpeg", upsert: true });
     if (up.error) throw new HttpError(500, "Enregistrement impossible : " + up.error.message);
     return { path };
+    });
   });
 }

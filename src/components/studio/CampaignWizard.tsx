@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ImagePlus, Wand2, X } from "lucide-react";
 import { Btn, Card, INPUT, Label, Spinner } from "@/components/ui";
-import { api, imgUrl, uploadImage, useSupabase } from "@/lib/client";
+import { api, apiJob, imgUrl, uploadImage, useSupabase } from "@/lib/client";
 import { FORMATS } from "@/types";
 import { TEXT_ZONES } from "@/lib/visualTypes";
 
@@ -75,7 +75,7 @@ export default function CampaignWizard({ products, models, library }: Props) {
 
   async function improve() {
     setError(null); setBusy("brief");
-    try { const r = await api<{ brief: string }>("/api/shoots/brief", { brief, visualType: vtype, productIds: ids, noProduct }); setPrevBrief(brief); setBrief(r.brief); }
+    try { const r = await apiJob<{ brief: string }>(sb, "/api/shoots/brief", { brief, visualType: vtype, productIds: ids, noProduct }); setPrevBrief(brief); setBrief(r.brief); }
     catch (e) { setError(e instanceof Error ? e.message : "Erreur"); }
     setBusy("");
   }
@@ -85,14 +85,14 @@ export default function CampaignWizard({ products, models, library }: Props) {
   async function proposeDirs(feedback = "") {
     setError(null); setBusy("dirs");
     try {
-      const r = await api<{ directions: Dir[] }>("/api/shoots/directions", { ...common(), n: 3, avoid: dirs.map((d) => d.title), feedback, previous: feedback ? dirs.map((d) => `${d.title}: ${d.concept}`) : [] });
+      const r = await apiJob<{ directions: Dir[] }>(sb, "/api/shoots/directions", { ...common(), n: 3, avoid: dirs.map((d) => d.title), feedback, previous: feedback ? dirs.map((d) => `${d.title}: ${d.concept}`) : [] });
       setDirs(r.directions); setChosen(null); setChosenText(""); setRework("");
       // Une esquisse rapide par direction, pour choisir avec les yeux
       const next: Record<string, Sketch> = {};
       r.directions.forEach((d) => { next[d.title] = { state: "loading" }; });
       setSketches(next);
       r.directions.forEach((d) => {
-        api<{ path: string }>("/api/shoots/sketch", { direction: dirText(d), productIds: ids, noProduct, noPeople: modelIds.length === 0 })
+        apiJob<{ path: string }>(sb, "/api/shoots/sketch", { direction: dirText(d), productIds: ids, noProduct, noPeople: modelIds.length === 0 })
           .then((s) => setSketches((m) => ({ ...m, [d.title]: { state: "done", path: s.path } })))
           .catch(() => setSketches((m) => ({ ...m, [d.title]: { state: "error" } })));
       });
@@ -105,7 +105,7 @@ export default function CampaignWizard({ products, models, library }: Props) {
     setError(null); setBusy("launch");
     try {
       const d = dirs[chosen];
-      const r = await api<{ shootId: string; imageIds: string[] }>("/api/shoots", {
+      const r = await apiJob<{ shootId: string; imageIds: string[] }>(sb, "/api/shoots", {
         productId: productIds[0] ?? products[0]?.id, productIds, productMode, noProduct, modelIds, noPeople: modelIds.length === 0, modelMode: "split",
         prompt: brief, aspect, size: "2K", variants: count, visualType: vtype, pilot: true, sketchPath: sketches[d.title]?.path ?? null,
         inspirationPaths: inspirations.map((x) => x.path), inspirationAnalyses: inspirations.filter((x) => x.state === "done").map((x) => ({ path: x.path, analysis: x.analysis, note: "" })),

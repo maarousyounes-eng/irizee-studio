@@ -1,4 +1,4 @@
-import { requireUser, handle, HttpError } from "@/lib/api";
+import { requireUser, handle, HttpError, withJob } from "@/lib/api";
 import { withAiCtx } from "@/lib/gemini";
 import { proposeIdeas } from "@/lib/ideas";
 
@@ -9,6 +9,7 @@ export async function POST(req: Request) {
   return handle(async () => {
     const { sb, user } = await requireUser();
     const b = await req.json();
+    return withJob(sb, b.jobId, async () => {
     const brief = String(b.brief ?? "").trim().slice(0, 4000);
     if (!brief) throw new HttpError(400, "Écris d'abord la consigne");
     const productIds: string[] = (Array.isArray(b.productIds) ? b.productIds : []).filter((x: unknown) => typeof x === "string").slice(0, 4);
@@ -23,5 +24,6 @@ export async function POST(req: Request) {
     }));
     if (!ideas.length) throw new HttpError(502, "Pas d'idée reçue, réessayez");
     return { ideas };
+    });
   });
 }
