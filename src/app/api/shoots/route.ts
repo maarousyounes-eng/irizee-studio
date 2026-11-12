@@ -67,6 +67,7 @@ export async function POST(req: Request) {
     }
 
     // Idées d'images : celles choisies par le client dans le formulaire ; sinon, avec des inspirations en mode « s'inspirer », le directeur artistique les propose
+    if (vtype !== "carousel" && vtype !== "ba" && typeof tpIn.direction === "string" && tpIn.direction.trim()) tp.direction = tpIn.direction.trim().slice(0, 1200);
     const ideasIn = (Array.isArray(tpIn.shots) ? tpIn.shots : []).map((x) => String(x ?? "").trim().slice(0, 700)).filter(Boolean).slice(0, 12);
     if (vtype !== "carousel" && vtype !== "ba") {
       if (ideasIn.length) tp.shots = Array.from({ length: n }, (_, i) => ideasIn[i % ideasIn.length]);

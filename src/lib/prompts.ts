@@ -456,3 +456,21 @@ export function textZoneLine(zone?: string) {
   if (!z?.en) return "";
   return `LAYOUT (mandatory, it overrides the idea and the style reference): ${z.en} of the frame must stay COMPLETELY EMPTY: only plain, smooth background there, no product, no prop, no person, no shadow detail, no texture, so that a headline can be added later. Place the product(s) and all props in the rest of the frame. Do not write anything in that empty area.`;
 }
+
+/** Directions artistiques : plusieurs univers de campagne cohérents, parmi lesquels le client choisit, AVANT les prises de vue. */
+export function directionsPrompt(a: { brief: string; n: number; type: string; products: string; rules: string[]; people: boolean; nInsp: number; analysis: string; avoid: string[]; textZone?: string }) {
+  return [
+    "You are the creative director of an award-winning beauty advertising agency (the level of Aesop, Byredo, Rhode, Glossier, Jacquemus beauty campaigns). Propose ART DIRECTIONS for a whole campaign of the French cosmetics brand Irizée.",
+    `Client brief (French, absolute priority): "${a.brief}"`,
+    a.products ? `Products of the campaign, exactly as they are (never invent another packaging):\n${a.products}` : "No product appears.",
+    a.rules.length ? `Brand rules:\n${numbered(a.rules)}` : "",
+    a.people ? "A model can appear if it serves the direction." : "No person appears in this campaign.",
+    a.type === "ad" ? "Use: paid social ads, the product must be the hero and stop the scroll." : a.type === "social" ? "Use: organic Instagram posts." : "",
+    a.nInsp ? `The ${a.nInsp} attached image(s) are MOOD references from the client: take their level and mood, never copy their concept.` : "",
+    a.analysis ? `Description of the references:\n${a.analysis}` : "",
+    TEXT_ZONES.find((x) => x.id === a.textZone)?.en ? `Every image of the campaign must leave ${TEXT_ZONES.find((x) => x.id === a.textZone)!.en} empty for a headline.` : "",
+    a.avoid.length ? `Already proposed, do NOT repeat: ${a.avoid.join(" | ")}` : "",
+    `Propose ${a.n} CLEARLY DIFFERENT art directions. Each one is ONE coherent universe for the WHOLE campaign (all images share it): a strong central idea, the set and materials, the colour palette, the light, the attitude. Bold, editorial, premium and physically shootable; never cheesy (no roses, petals, decorative flowers or fruit, spa clichés) unless the brief asks.`,
+    'Return JSON only: {"directions": [{"title": str (French, 2-5 words), "concept": str (French, 1-2 sentences: the central idea and why it sells), "set": str (French: décor et matières), "palette": str (French: couleurs), "light": str (French: lumière), "attitude": str (French: ton, énergie, cadrages typiques)}]}',
+  ].filter(Boolean).join("\n");
+}

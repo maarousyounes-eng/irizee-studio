@@ -351,7 +351,7 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
       const redoBrief = redo ? `\n\nTHIS IS A NEW TAKE replacing a previous attempt the client rejected. Client's remarks to apply: ${String(prm0.instruction || image.feedback || "")}${prev ? " The LAST image is that rejected previous attempt: do NOT copy its composition, pose or framing where the client asked for a change; keep only what the client did not criticise (same person, same product, same style)." : ""}` : "";
       const prompt = buildPrompt({
         product, rules, userPrompt: shoot.prompt + redoBrief, aspect, analysis: analysisFor, hasTexture: !!texture,
-        shot: (idea && vtype !== "carousel" ? idea : (tp.shots ?? [])[image.variant_index]) || undefined,
+        shot: ((s) => (s && tp.direction ? `CAMPAIGN ART DIRECTION (shared by every image): ${tp.direction}\nTHIS IMAGE: ${s}` : s))((idea && vtype !== "carousel" ? idea : (tp.shots ?? [])[image.variant_index]) || undefined) || (tp.direction ? `CAMPAIGN ART DIRECTION (shared by every image): ${tp.direction}` : undefined),
         inspMode: tp.inspMode === "copy" ? "copy" : tp.inspMode === "loose" ? "loose" : undefined,
         layoutLine: vtype === "ad" ? textZoneLine(tp.textZone) : undefined,
         others: others.map((o) => ({ product: o.product, n: 1 })), variation: variationHint(image.variant_index, shoot.no_people), nProductImages: imagePaths.length,

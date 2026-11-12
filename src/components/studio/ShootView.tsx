@@ -13,7 +13,7 @@ import { imageLabel, normalizeSlides, typeName } from "@/lib/visualTypes";
 import { carouselToItems } from "@/components/ads3/fromCarousel";
 
 interface Props {
-  shoot: { id: string; prompt: string; aspect: string; product_id: string; created_by: string; created_at: string; analysis: string | null; inspiration_paths: string[]; engine: string; size: string; visual_type?: string | null; type_params?: { slides?: unknown; shots?: string[] } | null };
+  shoot: { id: string; prompt: string; aspect: string; product_id: string; created_by: string; created_at: string; analysis: string | null; inspiration_paths: string[]; engine: string; size: string; visual_type?: string | null; type_params?: { slides?: unknown; shots?: string[]; direction?: string } | null };
   productName: string;
   modelNames: string[];
   me: { id: string; name: string; role: Role };
@@ -345,6 +345,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
             {isStaff && <Btn size="sm" variant="danger" onClick={deleteShoot}><Trash2 size={13} /></Btn>}
           </div>
         </div>
+        {shoot.type_params?.direction && <p className="mt-3 text-[12px] text-[#3F3F46] bg-white border border-[#E4E4E7] rounded-2xl px-4 py-3 max-w-4xl"><b>Direction artistique :</b> {shoot.type_params.direction}</p>}
         {shoot.visual_type === "carousel" && normalizeSlides(shoot.type_params?.slides).length > 0 && (
           <details className="mt-3 bg-white border border-[#E4E4E7] rounded-2xl px-4 py-3">
             <summary className="text-sm font-semibold cursor-pointer">Plan du carrousel ({normalizeSlides(shoot.type_params?.slides).length} slides)</summary>

@@ -62,6 +62,32 @@ export default function NewShootForm(p: Props) {
   const [ideas, setIdeas] = useState<{ title: string; idea: string }[]>([]);
   const [ideasBusy, setIdeasBusy] = useState<number | "all" | null>(null);
   const [theme, setTheme] = useState<string | null>(null);
+  // Directions artistiques de campagne : on en propose plusieurs, le client en choisit UNE, puis toutes les prises de vue en découlent
+  type Dir = { title: string; concept: string; set: string; palette: string; light: string; attitude: string };
+  const [dirs, setDirs] = useState<Dir[]>([]);
+  const [dirBusy, setDirBusy] = useState(false);
+  const [chosenDir, setChosenDir] = useState<string | null>(null);
+  const dirText = (d: Dir) => `${d.title}. ${d.concept} Décor et matières : ${d.set}. Couleurs : ${d.palette}. Lumière : ${d.light}. Attitude : ${d.attitude}.`;
+  async function proposeDirs() {
+    setError(null);
+    if (!prompt.trim()) return setError("Écris d'abord la consigne : les directions partent d'elle");
+    setDirBusy(true);
+    try {
+      const r = await api<{ directions: Dir[] }>("/api/shoots/directions", {
+        brief: prompt, n: 3, visualType: vtype, productIds: noProduct ? [] : [productId, ...extraIds.filter((x) => x !== productId)].slice(0, 4), noProduct, noPeople, textZone,
+        inspirationPaths: inspirations, inspirationAnalyses: inspirations.map((p) => insp[p]?.state === "done" ? { analysis: insp[p].analysis, note: insp[p].note !== insp[p].summary ? insp[p].note : "" } : null).filter(Boolean),
+        avoid: dirs.map((d) => d.title),
+      });
+      setDirs(r.directions);
+    } catch (e) { setError(e instanceof Error ? e.message : "Erreur"); }
+    setDirBusy(false);
+  }
+  async function buildCampaign() {
+    if (!chosenDir?.trim()) return;
+    setIdeasBusy("all");
+    try { setIdeas(await fetchIdeas(variants, [], chosenDir)); setTheme(chosenDir.split(".")[0].slice(0, 60)); } catch (e) { setError(e instanceof Error ? e.message : "Erreur"); }
+    setIdeasBusy(null);
+  }
   const [briefBusy, setBriefBusy] = useState(false);
   const [prevPrompt, setPrevPrompt] = useState<string | null>(null);
   async function improve() {
@@ -73,13 +99,6 @@ export default function NewShootForm(p: Props) {
       setPrevPrompt(prompt); setPrompt(r.brief);
     } catch (e) { setError(e instanceof Error ? e.message : "Erreur"); }
     setBriefBusy(false);
-  }
-  async function wholeCampaign(i: number) {
-    const x = ideas[i];
-    if (!x) return;
-    setIdeasBusy(i);
-    try { const t = `${x.title} : ${x.idea}`; setIdeas(await fetchIdeas(variants, [], t)); setTheme(x.title); } catch (e) { setError(e instanceof Error ? e.message : "Erreur"); }
-    setIdeasBusy(null);
   }
   async function fetchIdeas(count: number, avoid: string[], themeText?: string) {
     return (await api<{ ideas: { title: string; idea: string }[] }>("/api/shoots/ideas", {
@@ -96,7 +115,7 @@ export default function NewShootForm(p: Props) {
   }
   async function proposeOne(i: number) {
     setIdeasBusy(i);
-    try { const [x] = await fetchIdeas(1, ideas.map((y) => `${y.title}: ${y.idea.slice(0, 80)}`), theme ? `${theme} : ${ideas[0]?.idea ?? ""}` : undefined); if (x) setIdeas((all) => all.map((y, k) => (k === i ? x : y))); } catch (e) { setError(e instanceof Error ? e.message : "Erreur"); }
+    try { const [x] = await fetchIdeas(1, ideas.map((y) => `${y.title}: ${y.idea.slice(0, 80)}`), chosenDir ?? undefined); if (x) setIdeas((all) => all.map((y, k) => (k === i ? x : y))); } catch (e) { setError(e instanceof Error ? e.message : "Erreur"); }
     setIdeasBusy(null);
   }
   const [uploading, setUploading] = useState(0);
@@ -211,7 +230,7 @@ export default function NewShootForm(p: Props) {
           return { path: p, analysis: dropUi ? a.analysis.replace(/PHONE UI:\s*yes/gi, "PHONE UI: no") : a.analysis, note: edited ? a.note : "" };
         }).filter(Boolean),
         visualType: vtype, modelMode, slideCount: slides.length, pairs,
-        typeParams: { inspMode, shots: vtype === "carousel" || vtype === "ba" ? [] : ideas.filter((x) => x.idea.trim()).map((x) => `${x.title} : ${x.idea}`), socialStyle, textZone, slides, carouselStyle, baChange, baBefore, baAfter },
+        typeParams: { inspMode, direction: vtype === "carousel" || vtype === "ba" ? "" : chosenDir ?? "", shots: vtype === "carousel" || vtype === "ba" ? [] : ideas.filter((x) => x.idea.trim()).map((x) => `${x.title} : ${x.idea}`), socialStyle, textZone, slides, carouselStyle, baChange, baBefore, baAfter },
       });
       sessionStorage.setItem(`run:${r.shootId}`, JSON.stringify(r.imageIds));
       router.push(`/shoots/${r.shootId}`);
@@ -343,35 +362,60 @@ export default function NewShootForm(p: Props) {
         </div>
 
         {vtype !== "carousel" && vtype !== "ba" && (
-          <div className="space-y-2">
+          <div className="space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <Label>Les idées de chaque image</Label>
-              <Btn size="sm" onClick={proposeAll} disabled={ideasBusy !== null || inspPending}>{ideasBusy === "all" ? <Spinner className="border-white/40 border-t-white" /> : <Wand2 size={13} />} {ideas.length ? "Reproposer toutes les idées" : `Proposer ${variants} idées (gratuit)`}</Btn>
+              <Label>1. Direction artistique de la campagne</Label>
+              <Btn size="sm" onClick={proposeDirs} disabled={dirBusy || inspPending}>{dirBusy ? <Spinner className="border-white/40 border-t-white" /> : <Wand2 size={13} />} {dirs.length ? "Autres directions" : "Proposer 3 directions (gratuit)"}</Btn>
             </div>
-            {theme && (
-              <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-[#EBF2FF] border border-[#C9D9F8] text-[12px] text-[#1F3F7A]">
-                <span><b>Une seule idée pour toute la campagne :</b> « {theme} ». Chaque image est une prise de vue différente de ce même concept.</span>
-                <button type="button" className="font-semibold text-[#2B6EE8]" onClick={proposeAll} disabled={ideasBusy !== null}>Revenir à des idées différentes</button>
+            {!dirs.length && !chosenDir && <p className="text-[12px] text-[#6B6B72]">Plusieurs univers de campagne complets (idée centrale, décor, couleurs, lumière, attitude). Vous en choisissez un, puis toutes les images de la campagne sont faites dedans. Rien n&apos;est payé à cette étape.</p>}
+            {dirs.length > 0 && (
+              <div className="grid md:grid-cols-3 gap-2">
+                {dirs.map((d, i) => {
+                  const on = chosenDir === dirText(d);
+                  return (
+                    <div key={i} className={`rounded-2xl border p-3 flex flex-col gap-1.5 ${on ? "border-[#2B6EE8] bg-[#EBF2FF]" : "border-[#E4E4E7] bg-white"}`}>
+                      <p className="text-sm font-semibold">{d.title}</p>
+                      <p className="text-[12px] leading-snug">{d.concept}</p>
+                      <p className="text-[11px] text-[#52525B] leading-snug"><b>Décor :</b> {d.set}</p>
+                      <p className="text-[11px] text-[#52525B] leading-snug"><b>Couleurs :</b> {d.palette}</p>
+                      <p className="text-[11px] text-[#52525B] leading-snug"><b>Lumière :</b> {d.light}</p>
+                      <p className="text-[11px] text-[#52525B] leading-snug"><b>Attitude :</b> {d.attitude}</p>
+                      <Btn size="sm" variant={on ? "primary" : "ghost"} className="mt-auto" onClick={() => { setChosenDir(dirText(d)); setIdeas([]); setTheme(null); }}>{on ? "Direction choisie" : "Choisir cette direction"}</Btn>
+                    </div>
+                  );
+                })}
               </div>
             )}
-            {ideas.length === 0 ? (
-              <p className="text-[12px] text-[#6B6B72]">Un directeur artistique propose une idée forte et différente pour chaque image, à partir de votre consigne{inspirations.length ? " et de l'ambiance de vos inspirations" : ""}. Vous les lisez et les modifiez avant de payer la moindre image.{inspirations.length && inspMode === "loose" ? " Si vous ne le faites pas, les idées seront proposées automatiquement au lancement." : ""}</p>
-            ) : (
+            {chosenDir !== null && (
               <div className="space-y-2">
+                <Label>Direction choisie (modifiable)</Label>
+                <textarea className={INPUT + " min-h-[80px] !text-[13px]"} value={chosenDir} onChange={(e) => { setChosenDir(e.target.value); }} aria-label="Direction artistique choisie" />
+                <div className="flex flex-wrap items-center gap-2">
+                  <Btn size="sm" onClick={buildCampaign} disabled={ideasBusy !== null || !chosenDir.trim()}>{ideasBusy === "all" ? <Spinner className="border-white/40 border-t-white" /> : <Wand2 size={13} />} {ideas.length ? "Refaire les prises de vue" : `2. Créer les ${variants} prises de vue de la campagne (gratuit)`}</Btn>
+                  <button type="button" className="text-[11px] font-semibold text-[#6B6B72]" onClick={() => { setChosenDir(null); setIdeas([]); setTheme(null); }}>Retirer la direction</button>
+                </div>
+              </div>
+            )}
+            {chosenDir === null && (
+              <button type="button" className="text-[11px] font-semibold text-[#2B6EE8]" onClick={proposeAll} disabled={ideasBusy !== null || inspPending}>{ideasBusy === "all" ? "…" : `Ou : ${variants} idées différentes, une par image (sans direction commune)`}</button>
+            )}
+            {ideas.length > 0 && (
+              <div className="space-y-2">
+                <Label>{chosenDir ? "Les prises de vue de la campagne" : "Les idées de chaque image"}</Label>
                 {ideas.map((x, i) => (
                   <div key={i} className="rounded-2xl border border-[#E4E4E7] bg-white p-3 space-y-1.5">
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-bold w-16 shrink-0">Image {i + 1}</span>
                       <input className={INPUT + " !py-1.5 text-sm font-semibold"} value={x.title} onChange={(e) => setIdeas(ideas.map((y, k) => (k === i ? { ...y, title: e.target.value } : y)))} aria-label={`Titre de l'idée ${i + 1}`} />
-                      <Btn size="sm" variant="ghost" onClick={() => proposeOne(i)} disabled={ideasBusy !== null} title={theme ? "Une autre prise de vue du même concept" : "Une autre idée pour cette image"}>{ideasBusy === i ? <Spinner /> : theme ? "Autre prise" : "Autre idée"}</Btn>
+                      <Btn size="sm" variant="ghost" onClick={() => proposeOne(i)} disabled={ideasBusy !== null} title={chosenDir ? "Une autre prise de vue dans la même direction" : "Une autre idée pour cette image"}>{ideasBusy === i ? <Spinner /> : chosenDir ? "Autre prise" : "Autre idée"}</Btn>
                     </div>
-                    {!theme && ideas.length > 1 && <button type="button" className="text-[11px] font-semibold text-[#2B6EE8]" onClick={() => wholeCampaign(i)} disabled={ideasBusy !== null}>Toute la campagne sur cette idée →</button>}
                     <textarea className={INPUT + " min-h-[70px] !text-[13px]"} value={x.idea} onChange={(e) => setIdeas(ideas.map((y, k) => (k === i ? { ...y, idea: e.target.value } : y)))} aria-label={`Idée ${i + 1}`} />
                   </div>
                 ))}
-                {ideas.length !== variants && <p className="text-[11px] text-[#B45309]">Vous avez {ideas.length} idées pour {variants} images : les idées seront réutilisées dans l&apos;ordre. Reproposez pour en avoir une par image.</p>}
+                {ideas.length !== variants && <p className="text-[11px] text-[#B45309]">Vous avez {ideas.length} prises de vue pour {variants} images : elles seront réutilisées dans l&apos;ordre. Refaites-les pour en avoir une par image.</p>}
               </div>
             )}
+            {!ideas.length && inspirations.length > 0 && inspMode === "loose" && <p className="text-[11px] text-[#A0A0A8]">Sans direction ni idées choisies, des idées seront proposées automatiquement au lancement.</p>}
           </div>
         )}
 
