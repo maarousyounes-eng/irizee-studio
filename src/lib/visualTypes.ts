@@ -77,6 +77,9 @@ export interface TypeParams {
   slides?: Slide[] | string[];
   shots?: string[];
   direction?: string;
+  pilot?: "pending" | "validated";
+  count?: number;
+  sketch_path?: string;
   inspMode?: "copy" | "loose";
   baChange?: string;
   baBefore?: string;

@@ -25,8 +25,16 @@ export async function loadProduct(sb: SupabaseClient, id: string): Promise<{ pro
 }
 
 export async function brandRules(sb: SupabaseClient): Promise<string[]> {
-  const { data } = await sb.rpc("get_brand_rules");
-  return (data as string[]) ?? [];
+  const [{ data }, taste] = await Promise.all([sb.rpc("get_brand_rules"), brandTaste(sb)]);
+  return [...((data as string[]) ?? []), ...(taste.hate ? [`The brand never wants: ${taste.hate.replace(/\n+/g, "; ")}`] : [])];
+}
+
+/** DA de marque : ce que le client adore et ce qu'il refuse (écrit une fois, appliqué partout). */
+export async function brandTaste(sb: SupabaseClient): Promise<{ love: string; hate: string }> {
+  try {
+    const { data } = await sb.from("brand_kit").select("da_love, da_hate").eq("id", 1).single();
+    return { love: String(data?.da_love ?? "").trim().slice(0, 800), hate: String(data?.da_hate ?? "").trim().slice(0, 800) };
+  } catch { return { love: "", hate: "" }; }
 }
 
 /** Quota mensuel d'images (l'admin est illimité). */
@@ -345,6 +353,15 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
       }
       // Carrousel : les slides suivantes reprennent la première photo du carrousel (même personne, décor, lumière)
       let series: { buf: Buffer; mime: string } | null = null;
+      const campaign = !!tp.pilot && vtype !== "carousel";
+      if (campaign && image.variant_index > 0) {
+        // Campagne : les images suivantes reprennent l'image pilote validée (sa dernière version)
+        const { data: pil } = await sb.from("images").select("path").eq("shoot_id", shoot.id).eq("variant_index", 0).neq("kind", "format").eq("state", "done").is("deleted_at", null).not("path", "is", null).order("created_at", { ascending: false }).limit(1);
+        if (pil?.[0]?.path) series = await download(sb, pil[0].path).catch(() => null);
+      } else if (campaign && tp.sketch_path && !redo) {
+        // Image pilote : elle reprend l'esquisse choisie par le client
+        series = await download(sb, tp.sketch_path).catch(() => null);
+      }
       if (vtype === "carousel") {
         const { data: firsts } = await sb.from("images").select("variant_index, path").eq("shoot_id", shoot.id).eq("kind", "generated").is("deleted_at", null).order("variant_index", { ascending: true }).order("created_at", { ascending: true }).limit(1);
         const a0 = firsts?.[0];
@@ -367,9 +384,10 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
         shot: ((s) => (s && tp.direction ? `CAMPAIGN ART DIRECTION (shared by every image): ${tp.direction}\nTHIS IMAGE: ${s}` : s))((idea && vtype !== "carousel" ? idea : (tp.shots ?? [])[image.variant_index]) || undefined) || (tp.direction ? `CAMPAIGN ART DIRECTION (shared by every image): ${tp.direction}` : undefined),
         inspMode: tp.inspMode === "copy" ? "copy" : tp.inspMode === "loose" ? "loose" : undefined,
         layoutLine: vtype === "ad" ? textZoneLine(tp.textZone) : undefined,
+        seriesRef: !!series, seriesMode: !series ? undefined : vtype === "carousel" ? "carousel" : image.variant_index > 0 ? "campaign" : "sketch",
         others: others.map((o) => ({ product: o.product, n: 1 })), variation: variationHint(image.variant_index, shoot.no_people), nProductImages: imagePaths.length,
         hasModelRef: modelRefs.length > 0, nModelRefs: modelRefs.length, modelDescription: descs.join(" / "), noPeople: shoot.no_people, noProduct,
-        ...(vtype === "photo" ? {} : { typeLine: typeLine(vtype, tp, image.variant_index, nSlides), seriesRef: !!series, hasStyleRef: inspirations.length > 0, realism: vtype === "ba" ? REALISM_NATURAL : undefined }),
+        ...(vtype === "photo" ? {} : { typeLine: typeLine(vtype, tp, image.variant_index, nSlides), hasStyleRef: inspirations.length > 0, realism: vtype === "ba" ? REALISM_NATURAL : undefined }),
       });
       nInsp = inspirations.length;
       parts = [{ text: prompt + (prev ? "\n(The very last image after the style reference is the rejected previous attempt.)" : "") }, ...packshots.map((p) => imgPart(p.buf, p.mime)), ...(texture ? [imgPart(texture.buf, texture.mime)] : []), ...modelRefs.map((r) => imgPart(r.buf, r.mime)), ...(series ? [imgPart(series.buf, series.mime)] : []), ...inspirations.map((p) => imgPart(p.buf, p.mime)), ...(prev ? [imgPart(prev.buf, prev.mime)] : [])];

@@ -1,11 +1,12 @@
 import { createClient } from "@/lib/supabase/server";
 import NewShootForm from "@/components/studio/NewShootForm";
+import CampaignWizard from "@/components/studio/CampaignWizard";
 import { PageHeader } from "@/components/ui";
 import type { Role } from "@/types";
 
 export const dynamic = "force-dynamic";
 
-export default async function StudioPage({ searchParams }: { searchParams: { concept?: string; from?: string; product?: string; again?: string } }) {
+export default async function StudioPage({ searchParams }: { searchParams: { concept?: string; from?: string; product?: string; again?: string; classic?: string } }) {
   const sb = createClient();
   const { data: { user } } = await sb.auth.getUser();
   const { data: profile } = await sb.from("profiles").select("role, monthly_quota").eq("id", user!.id).single();
@@ -39,6 +40,25 @@ export default async function StudioPage({ searchParams }: { searchParams: { con
       const { count } = await sb.from("images").select("id", { count: "exact", head: true }).eq("shoot_id", sh.id).eq("kind", "generated");
       again = { visualType: sh.visual_type, typeParams: (sh.type_params as Record<string, any>) ?? {}, modelMode: sh.model_mode, noProduct: !!sh.no_product, productId: sh.product_id, productIds: (sh.product_ids as string[] | null) ?? undefined, productMode: sh.product_mode, projectId: sh.project_id, modelIds: sh.model_ids ?? [], noPeople: !!sh.no_people, prompt: sh.prompt, aspect: sh.aspect, size: sh.size, engine: sh.engine, variants: Math.min(12, Math.max(1, count ?? 6)), inspirationPaths: sh.inspiration_paths ?? [] };
     }
+  }
+
+  // Nouveau parcours guidé (par défaut) ; l'ancien formulaire reste pour les carrousels, les avant/après et « Recommencer »
+  const classic = !!(searchParams.classic || searchParams.again || searchParams.concept || searchParams.from) || profile?.role === "creator";
+  if (!classic) {
+    const [{ data: full }, { data: lib }] = await Promise.all([
+      sb.from("products").select("id, name, real_size, applied_look, product_images(id)").order("name"),
+      sb.from("inspiration_library").select("id, path, analysis, summary").order("created_at", { ascending: false }).limit(24),
+    ]);
+    const wProducts = (full ?? []).map((p: any) => ({
+      id: p.id as string, name: p.name as string,
+      missing: [!String(p.real_size ?? "").trim() ? "taille réelle" : "", !String(p.applied_look ?? "").trim() ? "couleur et texture du soin" : "", (p.product_images ?? []).length < 2 ? "une vraie photo en plus" : ""].filter(Boolean),
+    }));
+    return (
+      <div>
+        <PageHeader title="Nouvelle campagne" subtitle="Produits, brief, direction, image pilote : vous validez chaque étape avant de payer la suivante." />
+        <CampaignWizard products={wProducts} models={(models.data ?? []).map((m: any) => ({ id: m.id, name: m.name, path: m.path }))} library={lib ?? []} />
+      </div>
+    );
   }
 
   return (

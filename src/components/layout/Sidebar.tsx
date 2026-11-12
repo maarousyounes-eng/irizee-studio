@@ -11,7 +11,7 @@ import type { Role } from "@/types";
 
 type Item = { label: string; href: string; icon: React.ElementType; roles: Role[] };
 const MAIN: Item[] = [
-  { label: "Nouveau shooting", href: "/studio", icon: Sparkles, roles: ["admin", "employee", "creator"] },
+  { label: "Nouvelle campagne", href: "/studio", icon: Sparkles, roles: ["admin", "employee", "creator"] },
   { label: "Shootings", href: "/shoots", icon: Images, roles: ["admin", "employee", "creator"] },
   { label: "À valider", href: "/review", icon: CheckCircle2, roles: ["admin", "employee"] },
   { label: "Bibliothèque", href: "/library", icon: BookMarked, roles: ["admin", "employee", "creator"] },
@@ -26,6 +26,7 @@ const ADMIN: Item[] = [
   { label: "Projets", href: "/settings/projects", icon: FolderKanban, roles: ["admin"] },
   { label: "Équipe & quotas", href: "/settings/team", icon: Users, roles: ["admin"] },
   { label: "Règles de marque", href: "/settings/rules", icon: ListChecks, roles: ["admin"] },
+  { label: "DA et inspirations", href: "/settings/da", icon: BookMarked, roles: ["admin", "employee"] },
   { label: "Coûts IA", href: "/settings/costs", icon: Coins, roles: ["admin"] },
   { label: "Comparatif modèles", href: "/settings/benchmark", icon: FlaskConical, roles: ["admin"] },
 ];

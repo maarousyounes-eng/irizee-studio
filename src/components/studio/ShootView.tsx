@@ -14,7 +14,7 @@ import { imageLabel, normalizeSlides, typeName } from "@/lib/visualTypes";
 import { carouselToItems } from "@/components/ads3/fromCarousel";
 
 interface Props {
-  shoot: { id: string; prompt: string; aspect: string; product_id: string; created_by: string; created_at: string; analysis: string | null; inspiration_paths: string[]; engine: string; size: string; no_people?: boolean; visual_type?: string | null; type_params?: { slides?: unknown; shots?: string[]; direction?: string } | null };
+  shoot: { id: string; prompt: string; aspect: string; product_id: string; created_by: string; created_at: string; analysis: string | null; inspiration_paths: string[]; engine: string; size: string; no_people?: boolean; visual_type?: string | null; type_params?: { slides?: unknown; shots?: string[]; direction?: string; pilot?: string; count?: number } | null };
   productName: string;
   modelNames: string[];
   me: { id: string; name: string; role: Role };
@@ -70,6 +70,19 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
   const slideInfo = useMemo(() => normalizeSlides(shoot.type_params?.slides).map((x) => x.title || x.photo), [shoot.type_params]);
   const [dressing, setDressing] = useState(false);
   const [cropFor, setCropFor] = useState<ImageRow | null>(null);
+  // Campagne avec image pilote : les autres images ne sont créées qu'après validation du pilote
+  const [pilot, setPilot] = useState<string | undefined>(shoot.type_params?.pilot);
+  const [continuing, setContinuing] = useState(false);
+  const pilotImg = images.filter((i) => i.variant_index === 0 && i.kind !== "format" && i.state === "done" && i.path).sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at))[0];
+  async function validatePilot() {
+    setContinuing(true);
+    try {
+      const r = await api<{ imageIds: string[] }>(`/api/shoots/${shoot.id}/continue`, {});
+      setPilot("validated"); await load(); run(r.imageIds);
+      flash(`Pilote validé : ${r.imageIds.length} image(s) en cours de création, dans le même univers.`);
+    } catch (e) { flash(e instanceof Error ? e.message : "Erreur"); }
+    setContinuing(false);
+  }
   // « Autre idée » : l'IA propose une nouvelle idée pour une image, on la lit (et la modifie) avant de payer
   const [ideaFor, setIdeaFor] = useState<ImageRow | null>(null);
   const [ideaHint, setIdeaHint] = useState("");
@@ -347,6 +360,17 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
             {isStaff && <Btn size="sm" variant="danger" onClick={deleteShoot}><Trash2 size={13} /></Btn>}
           </div>
         </div>
+        {pilot === "pending" && (
+          <div className="mt-3 bg-[#EBF2FF] border border-[#C9D9F8] rounded-2xl px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+            <div className="text-sm text-[#1F3F7A] max-w-2xl">
+              <b>Étape 4 : l&apos;image pilote.</b> {pilotImg ? `Si elle vous plaît, validez-la : les ${Math.max(0, (shoot.type_params?.count ?? 1) - 1)} autres images seront créées à partir d'elle (même décor, même lumière, même style). Sinon, utilisez « Corriger » ou « Autre idée » sous l'image, ou changez de direction.` : "Elle est en cours de création (1 à 2 minutes). Vous n'avez payé qu'une image."}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Btn onClick={validatePilot} disabled={!pilotImg || continuing}>{continuing ? <Spinner className="border-white/40 border-t-white" /> : <Check size={14} />} Valider et créer les {Math.max(0, (shoot.type_params?.count ?? 1) - 1)} autres</Btn>
+              <Link href="/studio"><Btn variant="ghost">Changer de direction</Btn></Link>
+            </div>
+          </div>
+        )}
         {shoot.type_params?.direction && <p className="mt-3 text-[12px] text-[#3F3F46] bg-white border border-[#E4E4E7] rounded-2xl px-4 py-3 max-w-4xl"><b>Direction artistique :</b> {shoot.type_params.direction}</p>}
         {shoot.visual_type === "carousel" && normalizeSlides(shoot.type_params?.slides).length > 0 && (
           <details className="mt-3 bg-white border border-[#E4E4E7] rounded-2xl px-4 py-3">

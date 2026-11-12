@@ -43,7 +43,7 @@ const textsBlock = (p: Product) => (p.texts ?? []).map((t) => `- ${t}`).join("\n
 export function buildPrompt(a: {
   product: Product; rules: string[]; userPrompt: string; aspect: string; analysis: string;
   others?: { product: Product; n: number }[]; variation: string; nProductImages: number; hasModelRef: boolean; modelDescription?: string; noPeople: boolean; noProduct?: boolean;
-  nModelRefs?: number; seriesRef?: boolean; typeLine?: string; realism?: string; hasStyleRef?: boolean; hasTexture?: boolean; shot?: string; inspMode?: "copy" | "loose"; layoutLine?: string;
+  nModelRefs?: number; seriesRef?: boolean; typeLine?: string; realism?: string; hasStyleRef?: boolean; hasTexture?: boolean; shot?: string; inspMode?: "copy" | "loose"; layoutLine?: string; seriesMode?: "carousel" | "campaign" | "sketch";
 }) {
   const nModels = a.hasModelRef ? Math.max(1, a.nModelRefs ?? 1) : 0;
   // Version courte et cohérente : chaque consigne n'apparaît qu'une fois, sans ordres contradictoires.
@@ -60,7 +60,10 @@ export function buildPrompt(a: {
     ...oth.map((o) => `Next ${o.n} image(s): packshot of the real product "${o.product.name}".`),
     a.hasTexture ? "Next image: TEXTURE REFERENCE = how the formula of the product looks (colour, finish) out of the tube or on skin. Use it only for the formula, never as packaging." : "",
     nModels === 1 ? "Next image: the MODEL REFERENCE (the person to show)." : nModels > 1 ? `Next ${nModels} images: the MODEL REFERENCES (the ${nModels} persons to show, one image per person).` : "",
-    a.seriesRef ? "Next image: the SERIES REFERENCE = the first image of the same series: match its art direction, colour grade and photographic quality (and its person, if a person appears in both), but NEVER copy its subject, set or composition: this image shows what is described for it below." : "",
+    !a.seriesRef ? ""
+      : a.seriesMode === "sketch" ? "Next image: the CHOSEN SKETCH = a rough draft the client picked: keep its set, materials, colour palette, light and overall composition, and turn it into a finished, real photograph. Ignore its flaws (wrong label text, rough product): the product comes from the packshot."
+      : a.seriesMode === "campaign" ? "Next image: the PILOT IMAGE of this campaign, approved by the client: same set, materials, colour palette, light, colour grade and photographic style (and the same person, if a person appears). Create a DIFFERENT shot of the same campaign, as described in the idea for this image: never a copy of the pilot."
+      : "Next image: the SERIES REFERENCE = the first image of the same series: match its art direction, colour grade and photographic quality (and its person, if a person appears in both), but NEVER copy its subject, set or composition: this image shows what is described for it below.",
     a.hasStyleRef === false ? "" : "Last image(s): the STYLE REFERENCE.",
   ].filter(Boolean).join(" ");
   const person = a.noPeople
@@ -416,7 +419,7 @@ export function maskEditPrompt(a: { product: Product; rules: string[]; instructi
 }
 
 /** Idées d'images : un directeur artistique propose une idée forte et différente pour CHAQUE image, avant toute génération. */
-export function ideasPrompt(a: { brief: string; n: number; type: string; perImage: string[][]; products: string; rules: string[]; people: boolean; inspMode: "copy" | "loose"; nInsp: number; analysis: string; avoid: string[]; theme?: string; textZone?: string; oneCampaign?: boolean }) {
+export function ideasPrompt(a: { brief: string; n: number; type: string; perImage: string[][]; products: string; rules: string[]; people: boolean; inspMode: "copy" | "loose"; nInsp: number; analysis: string; avoid: string[]; theme?: string; textZone?: string; oneCampaign?: boolean; taste?: string }) {
   return [
     "You are the creative director of an award-winning beauty advertising agency (think of the best campaigns of Glossier, Aesop, Byredo, Rhode, Jacquemus beauty, Fenty). You must come up with the IDEAS for the images of a shoot for the French cosmetics brand Irizée.",
     `Client brief (French, absolute priority): "${a.brief}"`,
@@ -432,6 +435,7 @@ export function ideasPrompt(a: { brief: string; n: number; type: string; perImag
     a.theme ? `ONE SINGLE CAMPAIGN CONCEPT chosen by the client, used for ALL images: "${a.theme}". Every image belongs to this same concept (same set, materials, light, colour palette and art direction). Write ${a.n} shots of THIS concept, each a different take: change the framing (wide, medium, close-up, detail), the camera angle, the arrangement of the product(s) and of the props within the same set. Never introduce a different concept.` : "",
     !a.theme && a.oneCampaign ? `First invent ONE strong, original campaign art direction from the brief (central idea, set and materials, palette, light, attitude), then write ${a.n} shots of THIS single direction: same universe for every image, a different framing, angle and arrangement for each. Start every idea with the name of the direction.` : "",
     a.theme || a.oneCampaign ? "" : `Write ${a.n} ideas, ONE per image, each using a clearly DIFFERENT creative device. Devices to pick from (or better): play of scale (giant product, miniature set), sculptural set design (plaster, stone, blocks, sand), graphic hard shadows and light shapes, colour blocking, macro of the formula or ingredient as a landscape, water / splash / ripple frozen in motion, reflection and mirror games, levitation with real physical support, unexpected material contrast (chrome, ice, silk, velvet), tight crop on a detail of skin and product, still life with a story, raw ingredient (indigo powder cloud, plant) staged as art.`,
+    a.taste ? `BRAND TASTE (written by the client, follow it): ${a.taste}` : "",
     "Every idea is physically shootable in a real studio, premium and editorial, never cheesy: no roses, petals, decorative flowers or fruit, no generic aloe slices, no spa candles, no clichés, unless the brief asks for them. Each product appears exactly once, upright or naturally placed, at its real size, label facing camera, never an extreme close-up of the label.",
     a.avoid.length ? `Do not repeat these ideas: ${a.avoid.join(" | ")}` : "",
     TEXT_ZONES.find((x) => x.id === a.textZone)?.en ? `EVERY idea must leave ${TEXT_ZONES.find((x) => x.id === a.textZone)!.en} of the frame completely empty (plain background) for a headline: compose the scene in the rest of the frame.` : "",
@@ -461,7 +465,7 @@ export function textZoneLine(zone?: string) {
 }
 
 /** Directions artistiques : plusieurs univers de campagne cohérents, parmi lesquels le client choisit, AVANT les prises de vue. */
-export function directionsPrompt(a: { brief: string; n: number; type: string; products: string; rules: string[]; people: boolean; nInsp: number; analysis: string; avoid: string[]; textZone?: string; feedback?: string; previous?: string[] }) {
+export function directionsPrompt(a: { brief: string; n: number; type: string; products: string; rules: string[]; people: boolean; nInsp: number; analysis: string; avoid: string[]; textZone?: string; feedback?: string; previous?: string[]; taste?: string }) {
   return [
     "You are the creative director of an award-winning beauty advertising agency (the level of Aesop, Byredo, Rhode, Glossier, Jacquemus beauty campaigns). Propose ART DIRECTIONS for a whole campaign of the French cosmetics brand Irizée.",
     `Client brief (French, absolute priority; it can be vague, e.g. "I would like to do this": then YOU bring the creative ideas): "${a.brief}"`,
@@ -474,6 +478,7 @@ export function directionsPrompt(a: { brief: string; n: number; type: string; pr
     a.analysis ? `Description of the references:\n${a.analysis}` : "",
     TEXT_ZONES.find((x) => x.id === a.textZone)?.en ? `Every image of the campaign must leave ${TEXT_ZONES.find((x) => x.id === a.textZone)!.en} empty for a headline.` : "",
     a.avoid.length ? `Already proposed, do NOT repeat: ${a.avoid.join(" | ")}` : "",
+    a.taste ? `BRAND TASTE (written by the client, follow it): ${a.taste}` : "",
     `Propose ${a.n} CLEARLY DIFFERENT art directions. Each one is ONE coherent universe for the WHOLE campaign (all images share it): a strong central idea, the set and materials, the colour palette, the light, the attitude. Bold, editorial, premium and physically shootable; never cheesy (no roses, petals, decorative flowers or fruit, spa clichés) unless the brief asks.`,
     'Return JSON only: {"directions": [{"title": str (French, 2-5 words), "concept": str (French, 1-2 sentences: the central idea and why it sells), "set": str (French: décor et matières), "palette": str (French: couleurs), "light": str (French: lumière), "attitude": str (French: ton, énergie, cadrages typiques)}]}',
   ].filter(Boolean).join("\n");

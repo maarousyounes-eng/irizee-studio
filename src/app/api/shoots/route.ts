@@ -71,6 +71,13 @@ export async function POST(req: Request) {
     const ideasIn = (Array.isArray(tpIn.shots) ? tpIn.shots : []).map((x) => String(x ?? "").trim().slice(0, 700)).filter(Boolean).slice(0, 12);
     if (vtype !== "carousel" && vtype !== "ba") {
       if (ideasIn.length) tp.shots = Array.from({ length: n }, (_, i) => ideasIn[i % ideasIn.length]);
+      else if (tp.direction) {
+        // Direction choisie : les prises de vue de la campagne en découlent toutes
+        try {
+          const ideas = await withAiCtx({ sb, userId: user.id }, () => proposeIdeas(sb, { brief: prompt, n, type: vtype, productIds, productMode: productIds.length > 1 ? (["together", "split", "mix"].includes(b.productMode) ? b.productMode : "mix") : null, noProduct: !!b.noProduct, people: !b.noPeople, inspMode: "loose", inspirationPaths: [], analysis: "", textZone: vtype === "ad" ? tp.textZone : undefined, theme: tp.direction }));
+          if (ideas.length) tp.shots = Array.from({ length: n }, (_, i) => { const x = ideas[i % ideas.length]; return `${x.title} : ${x.idea}`; });
+        } catch { /* la direction seule */ }
+      }
       else if (!paths.length || tp.inspMode === "loose") {
         try {
           const ideas = await withAiCtx({ sb, userId: user.id }, () => proposeIdeas(sb, { brief: prompt, n, type: vtype, productIds, productMode: productIds.length > 1 ? (["together", "split", "mix"].includes(b.productMode) ? b.productMode : "mix") : null, noProduct: !!b.noProduct, people: !b.noPeople, inspMode: "loose", inspirationPaths: paths, analysis: analysis ?? "", textZone: vtype === "ad" ? tp.textZone : undefined, oneCampaign: true }));
@@ -78,6 +85,10 @@ export async function POST(req: Request) {
         } catch { /* sans idées : la consigne seule */ }
       }
     }
+    // Campagne avec image pilote : une seule image d'abord, les autres après validation
+    const pilot = !!b.pilot && vtype !== "carousel" && vtype !== "ba" && n > 1;
+    if (pilot) { tp.pilot = "pending"; tp.count = n; }
+    if (typeof b.sketchPath === "string" && /^sketches\/[\w\-./]+$/.test(b.sketchPath)) tp.sketch_path = b.sketchPath;
     const { data: shoot, error } = await sb.from("shoots").insert({
       project_id: b.projectId || null, product_id: productIds[0], product_ids: productIds.length > 1 ? productIds : null, product_mode: productIds.length > 1 ? (["together", "split", "mix"].includes(b.productMode) ? b.productMode : "mix") : null, model_id: modelIds[0] ?? null, model_ids: modelIds, concept_id: b.conceptId || null,
       prompt, visual_type: vtype, type_params: tp, model_mode: b.modelMode === "together" && modelIds.length > 1 ? "together" : "split", aspect: b.aspect, size: ["1K", "2K", "4K"].includes(b.size) ? b.size : "2K",
@@ -88,7 +99,7 @@ export async function POST(req: Request) {
 
     // Carrousel : pas d'image à générer pour les slides texte seules (elles sont faites dans l'éditeur Ads)
     const indexes = vtype === "carousel" ? slides.map((x, i) => (x.layout === "text" ? -1 : i)).filter((i) => i >= 0) : Array.from({ length: n }, (_, i) => i);
-    const rows = indexes.map((i) => ({
+    const rows = (pilot ? [0] : indexes).map((i) => ({
       shoot_id: shoot.id, kind: "generated", variant_index: i, aspect: b.aspect, created_by: user.id,
       // Carrousel : le même mannequin sur toutes les slides ; avant/après : le même dans la paire ; ensemble : tous (lus sur le shooting)
       model_id: b.noPeople || !modelIds.length || (b.modelMode === "together" && modelIds.length > 1) ? null

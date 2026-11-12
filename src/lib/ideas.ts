@@ -1,7 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { MODELS, gemini, imgPart, firstText, parseJson, type Part } from "./gemini";
 import { briefPrompt, directionsPrompt, ideasPrompt } from "./prompts";
-import { brandRules, download, loadProduct, productPlan } from "./generation";
+import { brandRules, brandTaste, download, loadProduct, productPlan } from "./generation";
+
+const tasteText = (t: { love: string; hate: string }) => [t.love ? `loves: ${t.love.replace(/\n+/g, "; ")}` : "", t.hate ? `refuses: ${t.hate.replace(/\n+/g, "; ")}` : ""].filter(Boolean).join(" · ");
 
 /**
  * Le directeur artistique : une idée forte et différente pour chaque image, AVANT de générer.
@@ -24,7 +26,7 @@ export async function proposeIdeas(sb: SupabaseClient, a: {
   }).join("\n");
   const rules = [...(await brandRules(sb)), ...prods.flatMap((x) => x!.product.rules ?? [])];
   const insp = (await Promise.all(a.inspirationPaths.slice(0, 4).map((p) => download(sb, p).catch(() => null)))).filter(Boolean) as { buf: Buffer; mime: string }[];
-  const parts: Part[] = [{ text: ideasPrompt({ brief: a.brief, n, type: a.type, perImage, products, rules, people: a.people, inspMode: a.inspMode, nInsp: insp.length, analysis: a.analysis, avoid: a.avoid ?? [], theme: a.theme, textZone: a.textZone, oneCampaign: a.oneCampaign }) }, ...insp.map((i) => imgPart(i.buf, i.mime))];
+  const parts: Part[] = [{ text: ideasPrompt({ brief: a.brief, n, type: a.type, perImage, products, rules, people: a.people, inspMode: a.inspMode, nInsp: insp.length, analysis: a.analysis, avoid: a.avoid ?? [], theme: a.theme, textZone: a.textZone, oneCampaign: a.oneCampaign, taste: tasteText(await brandTaste(sb)) }) }, ...insp.map((i) => imgPart(i.buf, i.mime))];
   const r = await gemini(MODELS.vision, parts, { purpose: "idées de shooting", json: true, timeoutMs: 75_000 });
   const raw = parseJson<{ ideas?: { title?: unknown; idea?: unknown }[] }>(firstText(r));
   return (raw.ideas ?? []).map((x) => ({ title: String(x.title ?? "").trim().slice(0, 60), idea: String(x.idea ?? "").trim().slice(0, 600) })).filter((x) => x.idea).slice(0, n);
@@ -48,7 +50,7 @@ export async function proposeDirections(sb: SupabaseClient, a: { brief: string; 
   const products = prods.map((x) => `"${x!.product.name}"${x!.product.look ? `: ${x!.product.look}` : ""}`).join("\n");
   const rules = [...(await brandRules(sb)), ...prods.flatMap((x) => x!.product.rules ?? [])];
   const insp = (await Promise.all(a.inspirationPaths.slice(0, 4).map((p) => download(sb, p).catch(() => null)))).filter(Boolean) as { buf: Buffer; mime: string }[];
-  const parts: Part[] = [{ text: directionsPrompt({ brief: a.brief, n: Math.min(5, Math.max(1, a.n)), type: a.type, products, rules, people: a.people, nInsp: insp.length, analysis: a.analysis, avoid: a.feedback ? [] : a.avoid ?? [], textZone: a.textZone, feedback: a.feedback, previous: a.previous }) }, ...insp.map((i) => imgPart(i.buf, i.mime))];
+  const parts: Part[] = [{ text: directionsPrompt({ brief: a.brief, n: Math.min(5, Math.max(1, a.n)), type: a.type, products, rules, people: a.people, nInsp: insp.length, analysis: a.analysis, avoid: a.feedback ? [] : a.avoid ?? [], textZone: a.textZone, feedback: a.feedback, previous: a.previous, taste: tasteText(await brandTaste(sb)) }) }, ...insp.map((i) => imgPart(i.buf, i.mime))];
   const r = await gemini(MODELS.vision, parts, { purpose: "directions artistiques", json: true, timeoutMs: 75_000 });
   const raw = parseJson<{ directions?: Partial<Direction>[] }>(firstText(r));
   const c = (x: unknown, n: number) => String(x ?? "").trim().slice(0, n);
