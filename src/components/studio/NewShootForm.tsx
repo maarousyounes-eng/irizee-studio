@@ -58,6 +58,27 @@ export default function NewShootForm(p: Props) {
   const [baAfter, setBaAfter] = useState<string>(tp0.baAfter ?? "");
   const [pairs, setPairs] = useState(1);
   const [inspMode, setInspMode] = useState<"copy" | "loose">(tp0.inspMode === "copy" ? "copy" : "loose");
+  // Idées d'images proposées par le directeur artistique, modifiables avant de générer
+  const [ideas, setIdeas] = useState<{ title: string; idea: string }[]>([]);
+  const [ideasBusy, setIdeasBusy] = useState<number | "all" | null>(null);
+  async function fetchIdeas(count: number, avoid: string[]) {
+    return (await api<{ ideas: { title: string; idea: string }[] }>("/api/shoots/ideas", {
+      brief: prompt, n: count, visualType: vtype, productIds: noProduct ? [] : [productId, ...extraIds.filter((x) => x !== productId)].slice(0, 4), productMode, noProduct, noPeople,
+      inspMode, inspirationPaths: inspirations, inspirationAnalyses: inspirations.map((p) => insp[p]?.state === "done" ? { analysis: insp[p].analysis, note: insp[p].note !== insp[p].summary ? insp[p].note : "" } : null).filter(Boolean), avoid,
+    })).ideas;
+  }
+  async function proposeAll() {
+    setError(null);
+    if (!prompt.trim()) return setError("Écris d'abord la consigne : les idées partent d'elle");
+    setIdeasBusy("all");
+    try { setIdeas(await fetchIdeas(variants, ideas.map((x) => x.title))); } catch (e) { setError(e instanceof Error ? e.message : "Erreur"); }
+    setIdeasBusy(null);
+  }
+  async function proposeOne(i: number) {
+    setIdeasBusy(i);
+    try { const [x] = await fetchIdeas(1, ideas.map((y) => `${y.title}: ${y.idea.slice(0, 80)}`)); if (x) setIdeas((all) => all.map((y, k) => (k === i ? x : y))); } catch (e) { setError(e instanceof Error ? e.message : "Erreur"); }
+    setIdeasBusy(null);
+  }
   const [uploading, setUploading] = useState(0);
   // Chaque inspiration est analysée dès son ajout : le client voit ce que l'IA a compris et peut le corriger avant de lancer
   const [insp, setInsp] = useState<Record<string, { state: "loading" | "done" | "error"; analysis: string; summary: string; note: string; phoneUi: boolean }>>({});
@@ -170,7 +191,7 @@ export default function NewShootForm(p: Props) {
           return { path: p, analysis: dropUi ? a.analysis.replace(/PHONE UI:\s*yes/gi, "PHONE UI: no") : a.analysis, note: edited ? a.note : "" };
         }).filter(Boolean),
         visualType: vtype, modelMode, slideCount: slides.length, pairs,
-        typeParams: { inspMode, socialStyle, textZone, slides, carouselStyle, baChange, baBefore, baAfter },
+        typeParams: { inspMode, shots: vtype === "carousel" || vtype === "ba" ? [] : ideas.filter((x) => x.idea.trim()).map((x) => `${x.title} : ${x.idea}`), socialStyle, textZone, slides, carouselStyle, baChange, baBefore, baAfter },
       });
       sessionStorage.setItem(`run:${r.shootId}`, JSON.stringify(r.imageIds));
       router.push(`/shoots/${r.shootId}`);
@@ -296,6 +317,32 @@ export default function NewShootForm(p: Props) {
             placeholder={vtype === "carousel" ? "Ex : le rituel du soir avec le Masque Nila, de la couverture jusqu'au résultat. Ambiance douce, tons sable." : vtype === "ba" ? "Ex : portrait de face, lumière neutre, cheveux attachés (facultatif)" : vtype === "free" ? "Ex : gros plan d'une goutte de texture sur une pierre sombre" : "Ex : même ambiance mais tout en bleu électrique : chemise, lunettes et rayons au sol. Lumière douce du matin."} />
           <p className="text-[11px] text-[#A0A0A8] mt-1">Les règles de la marque sont appliquées automatiquement à chaque génération.</p>
         </div>
+
+        {vtype !== "carousel" && vtype !== "ba" && (
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Label>Les idées de chaque image</Label>
+              <Btn size="sm" onClick={proposeAll} disabled={ideasBusy !== null || inspPending}>{ideasBusy === "all" ? <Spinner className="border-white/40 border-t-white" /> : <Wand2 size={13} />} {ideas.length ? "Reproposer toutes les idées" : `Proposer ${variants} idées (gratuit)`}</Btn>
+            </div>
+            {ideas.length === 0 ? (
+              <p className="text-[12px] text-[#6B6B72]">Un directeur artistique propose une idée forte et différente pour chaque image, à partir de votre consigne{inspirations.length ? " et de l'ambiance de vos inspirations" : ""}. Vous les lisez et les modifiez avant de payer la moindre image.{inspirations.length && inspMode === "loose" ? " Si vous ne le faites pas, les idées seront proposées automatiquement au lancement." : ""}</p>
+            ) : (
+              <div className="space-y-2">
+                {ideas.map((x, i) => (
+                  <div key={i} className="rounded-2xl border border-[#E4E4E7] bg-white p-3 space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold w-16 shrink-0">Image {i + 1}</span>
+                      <input className={INPUT + " !py-1.5 text-sm font-semibold"} value={x.title} onChange={(e) => setIdeas(ideas.map((y, k) => (k === i ? { ...y, title: e.target.value } : y)))} aria-label={`Titre de l'idée ${i + 1}`} />
+                      <Btn size="sm" variant="ghost" onClick={() => proposeOne(i)} disabled={ideasBusy !== null} title="Une autre idée pour cette image">{ideasBusy === i ? <Spinner /> : "Autre idée"}</Btn>
+                    </div>
+                    <textarea className={INPUT + " min-h-[70px] !text-[13px]"} value={x.idea} onChange={(e) => setIdeas(ideas.map((y, k) => (k === i ? { ...y, idea: e.target.value } : y)))} aria-label={`Idée ${i + 1}`} />
+                  </div>
+                ))}
+                {ideas.length !== variants && <p className="text-[11px] text-[#B45309]">Vous avez {ideas.length} idées pour {variants} images : les idées seront réutilisées dans l&apos;ordre. Reproposez pour en avoir une par image.</p>}
+              </div>
+            )}
+          </div>
+        )}
 
         {vtype === "carousel" && (
           <div className="space-y-3">

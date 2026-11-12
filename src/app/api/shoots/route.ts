@@ -5,7 +5,7 @@ import { ANALYZE_PROMPT } from "@/lib/prompts";
 import { FORMATS } from "@/types";
 import { isVisualType, BA_CHANGES, SOCIAL_STYLES, TEXT_ZONES, CAROUSEL_STYLES, normalizeSlides, emptySlide, type Slide, type TypeParams } from "@/lib/visualTypes";
 import { planSlides } from "@/lib/slides";
-import { planShots } from "@/lib/shots";
+import { proposeIdeas } from "@/lib/ideas";
 
 export const maxDuration = 120;
 
@@ -66,10 +66,16 @@ export async function POST(req: Request) {
       try { analysis = await withAiCtx({ sb, userId: user.id }, () => analyzeInspirations(sb, paths, ANALYZE_PROMPT)); } catch { analysis = null; }
     }
 
-    // Le photographe prépare une prise de vue précise par image (sauf carrousel et avant/après, qui ont leur propre plan)
-    // Avec des inspirations, ce sont elles qui donnent les prises de vue : pas de plan inventé par-dessus
-    if (false && vtype !== "carousel" && vtype !== "ba" && !paths.length) { // désactivé : il inventait des éléments non demandés
-      try { tp.shots = await withAiCtx({ sb, userId: user.id }, () => planShots(sb, { brief: prompt, analysis: analysis ?? "", n, type: vtype, productIds, productMode: productIds.length > 1 ? (["together", "split", "mix"].includes(b.productMode) ? b.productMode : "mix") : null, noProduct: !!b.noProduct, people: b.noPeople ? 0 : b.modelMode === "together" ? Math.min(3, modelIds.length) : 1 })); } catch { /* sans plan : la consigne seule */ }
+    // Idées d'images : celles choisies par le client dans le formulaire ; sinon, avec des inspirations en mode « s'inspirer », le directeur artistique les propose
+    const ideasIn = (Array.isArray(tpIn.shots) ? tpIn.shots : []).map((x) => String(x ?? "").trim().slice(0, 700)).filter(Boolean).slice(0, 12);
+    if (vtype !== "carousel" && vtype !== "ba") {
+      if (ideasIn.length) tp.shots = Array.from({ length: n }, (_, i) => ideasIn[i % ideasIn.length]);
+      else if (paths.length && tp.inspMode === "loose") {
+        try {
+          const ideas = await withAiCtx({ sb, userId: user.id }, () => proposeIdeas(sb, { brief: prompt, n, type: vtype, productIds, productMode: productIds.length > 1 ? (["together", "split", "mix"].includes(b.productMode) ? b.productMode : "mix") : null, noProduct: !!b.noProduct, people: !b.noPeople, inspMode: "loose", inspirationPaths: paths, analysis: analysis ?? "" }));
+          if (ideas.length) tp.shots = Array.from({ length: n }, (_, i) => { const x = ideas[i % ideas.length]; return `${x.title} : ${x.idea}`; });
+        } catch { /* sans idées : la consigne seule */ }
+      }
     }
     const { data: shoot, error } = await sb.from("shoots").insert({
       project_id: b.projectId || null, product_id: productIds[0], product_ids: productIds.length > 1 ? productIds : null, product_mode: productIds.length > 1 ? (["together", "split", "mix"].includes(b.productMode) ? b.productMode : "mix") : null, model_id: modelIds[0] ?? null, model_ids: modelIds, concept_id: b.conceptId || null,

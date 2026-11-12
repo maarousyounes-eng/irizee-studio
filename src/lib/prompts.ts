@@ -100,7 +100,7 @@ export function buildPrompt(a: {
     "",
     `CLIENT BRIEF (priority over the style reference when they differ): ${a.userPrompt}`,
     a.typeLine ? `\n${a.typeLine}` : "",
-    a.shot ? `\nPHOTOGRAPHER'S SHOT SPEC for this image (lens, framing, light and pose; the client brief always wins if they differ; if it mentions any product that is not listed under PRODUCT above, ignore that product completely: it must NOT appear): ${a.shot}` : "",
+    a.shot ? `\nTHE IDEA FOR THIS IMAGE (create exactly this concept, as a real photograph; the client brief wins if they conflict; if it mentions any product that is not listed under PRODUCT above, ignore that product completely: it must NOT appear): ${a.shot}` : "",
     "",
     person,
     a.noPeople ? "" : a.noProduct ? "Hands are anatomically correct: five fingers per hand, natural joints." : "Hands are anatomically correct: five fingers per hand, natural joints and a firm, plausible grip on the product.",
@@ -407,5 +407,26 @@ export function maskEditPrompt(a: { product: Product; rules: string[]; instructi
     "The result must look like the same real photograph, retouched by an expert: same light direction, same colour grade, same grain and sharpness, real skin texture with pores, realistic materials (a cosmetic product applied on skin keeps a real cream or clay texture and lets the skin show through where it is thin; never flat paint or a graphic shape).",
     PRODUCT_LOCK, NO_MIRROR,
     texts,
+  ].filter(Boolean).join("\n");
+}
+
+/** Idées d'images : un directeur artistique propose une idée forte et différente pour CHAQUE image, avant toute génération. */
+export function ideasPrompt(a: { brief: string; n: number; type: string; perImage: string[][]; products: string; rules: string[]; people: boolean; inspMode: "copy" | "loose"; nInsp: number; analysis: string; avoid: string[] }) {
+  return [
+    "You are the creative director of an award-winning beauty advertising agency (think of the best campaigns of Glossier, Aesop, Byredo, Rhode, Jacquemus beauty, Fenty). You must come up with the IDEAS for the images of a shoot for the French cosmetics brand Irizée.",
+    `Client brief (French, absolute priority): "${a.brief}"`,
+    a.products ? `Products, exactly as they are (never invent another packaging, colour or product):\n${a.products}` : "No product appears in these images.",
+    a.rules.length ? `Brand rules:\n${numbered(a.rules)}` : "",
+    a.people ? "A model can appear when it serves the idea." : "No person appears in these images.",
+    a.type === "social" ? "Use: organic Instagram posts." : a.type === "ad" ? "Use: paid social ads: the product must be the hero and the image must stop the scroll." : "",
+    a.nInsp ? (a.inspMode === "copy"
+      ? `The ${a.nInsp} attached image(s) are references the client wants REPRODUCED: keep their composition, and only vary the staging details from one image to the next.`
+      : `The ${a.nInsp} attached image(s) are MOOD references only. Take their level of quality, light and colour mood, but NEVER their concept or composition: an idea that looks like "the same photo with our product" is a failure.`) : "",
+    a.analysis ? `Description of the references:\n${a.analysis}` : "",
+    a.perImage.length ? `PRODUCTS PER IMAGE (mandatory):\n${a.perImage.map((p, i) => `Image ${i + 1}: ${p.join(" + ") || "no product"}`).join("\n")}` : "",
+    `Write ${a.n} ideas, ONE per image, each using a clearly DIFFERENT creative device. Devices to pick from (or better): play of scale (giant product, miniature set), sculptural set design (plaster, stone, blocks, sand), graphic hard shadows and light shapes, colour blocking, macro of the formula or ingredient as a landscape, water / splash / ripple frozen in motion, reflection and mirror games, levitation with real physical support, unexpected material contrast (chrome, ice, silk, velvet), tight crop on a detail of skin and product, still life with a story, raw ingredient (indigo powder cloud, plant) staged as art.`,
+    "Every idea is physically shootable in a real studio, premium and editorial, never cheesy: no roses, petals, decorative flowers or fruit, no generic aloe slices, no spa candles, no clichés, unless the brief asks for them. Each product appears exactly once, upright or naturally placed, at its real size, label facing camera, never an extreme close-up of the label.",
+    a.avoid.length ? `Do not repeat these ideas: ${a.avoid.join(" | ")}` : "",
+    'Return JSON only: {"ideas": [{"title": str (French, 2-5 words), "idea": str (French, 35-60 words: concept, set and background, light, how the product is staged, framing)}]}',
   ].filter(Boolean).join("\n");
 }

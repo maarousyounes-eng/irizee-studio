@@ -13,7 +13,7 @@ import { imageLabel, normalizeSlides, typeName } from "@/lib/visualTypes";
 import { carouselToItems } from "@/components/ads3/fromCarousel";
 
 interface Props {
-  shoot: { id: string; prompt: string; aspect: string; product_id: string; created_by: string; created_at: string; analysis: string | null; inspiration_paths: string[]; engine: string; size: string; visual_type?: string | null; type_params?: { slides?: unknown } | null };
+  shoot: { id: string; prompt: string; aspect: string; product_id: string; created_by: string; created_at: string; analysis: string | null; inspiration_paths: string[]; engine: string; size: string; visual_type?: string | null; type_params?: { slides?: unknown; shots?: string[] } | null };
   productName: string;
   modelNames: string[];
   me: { id: string; name: string; role: Role };
@@ -452,6 +452,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
                     <Badge tone={REVIEW[img.review_status].tone}>{REVIEW[img.review_status].label}</Badge>
                     {img.feedback && <span className="text-[11px] text-[#A0A0A8] truncate" title={img.feedback}>{img.feedback}</span>}
                   </div>
+                  {img.kind === "generated" && (img.params?.idea || shoot.type_params?.shots?.[img.variant_index]) && <p className="text-[#3F3F46] bg-[#F4F4F5] rounded-lg px-2.5 py-1.5 leading-snug"><span className="font-semibold">Idée :</span> {String(img.params?.idea ?? shoot.type_params?.shots?.[img.variant_index])}</p>}
                   {img.params?.understood && <p className="text-[#2B6EE8] bg-[#EBF2FF] rounded-lg px-2.5 py-1.5 leading-snug"><span className="font-semibold">Compris :</span> {String(img.params.understood)}</p>}
                   {img.kind === "correction" && qc && qc.instruction_followed !== undefined && (
                     <p className={`leading-snug font-semibold ${qc.instruction_followed && !qc.ghost_or_duplicate ? "text-[#16A249]" : "text-[#E8444A]"}`}>
