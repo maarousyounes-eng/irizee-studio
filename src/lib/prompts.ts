@@ -488,3 +488,20 @@ export function directionsPrompt(a: { brief: string; n: number; type: string; pr
     'Return JSON only: {"directions": [{"title": str (French, 2-5 words), "concept": str (French, 1-2 sentences: the central idea and why it sells), "set": str (French: décor et matières), "palette": str (French: couleurs), "light": str (French: lumière), "attitude": str (French: ton, énergie, cadrages typiques)}]}',
   ].filter(Boolean).join("\n");
 }
+
+/** Générateur de concepts de campagne : des idées complètes, à partir d'un objectif, d'un canal et d'un temps fort. */
+export function conceptsPrompt(a: { products: string; goal: string; channel: string; moment: string; words: string; taste: string; rules: string[]; avoid: string[]; like?: string; n: number }) {
+  return [
+    "You are the creative director of an award-winning beauty advertising agency (the level of the best campaigns of Aesop, Byredo, Rhode, Glossier, Fenty, Jacquemus beauty). Invent CAMPAIGN CONCEPTS for the French cosmetics brand Irizée.",
+    a.products ? `Products of the campaign, exactly as they are (never invent another packaging):\n${a.products}` : "No specific product: brand campaign.",
+    `Objective: ${a.goal}. Channel: ${a.channel}.${a.moment ? ` Moment of the year: ${a.moment}.` : ""}`,
+    a.words ? `The client's words about what they want: "${a.words}" (priority).` : "",
+    a.taste ? `BRAND TASTE (written by the client and learned from their choices, follow it): ${a.taste}` : "",
+    a.rules.length ? `Brand rules:\n${numbered(a.rules)}` : "",
+    a.like ? `The client liked this concept: "${a.like}". Propose ${a.n} VARIATIONS of it: same spirit, different executions.` : `Propose ${a.n} CLEARLY DIFFERENT concepts (different central idea, set, colour world and attitude).`,
+    a.avoid.length ? `Already seen, do NOT repeat: ${a.avoid.join(" | ")}` : "",
+    "Each concept is one strong, original, memorable idea that can carry a whole campaign, shot as REAL photography of real objects and sets (never graphic design, illustration or 3D render), premium and editorial, never cheesy (no roses, petals, decorative plants, towels, spa clichés) unless the client asks.",
+    "COMPLIANCE (French cosmetics advertising): no medical or therapeutic claim, no guaranteed or quantified result, no before/after promise, never invent a price, discount, number, study or review.",
+    'Return JSON only, all texts in French: {"concepts": [{"name": str (2-5 words), "idea": str (1-2 sentences: the central idea), "why": str (1 sentence: why it stops the scroll / sells), "set": str (décor et matières), "palette": str (couleurs), "light": str (lumière), "attitude": str (ton, énergie, cadrages), "shots": [str] (3 or 4 short photo descriptions of the series), "hook": str (accroche publicitaire, max 45 characters), "keywords": [str] (3 to 5 Pinterest search keywords, in English)}]}',
+  ].filter(Boolean).join("\n");
+}

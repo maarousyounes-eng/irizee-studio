@@ -6,12 +6,13 @@ import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
-import { Megaphone, Sparkles, Images, CheckCircle2, BookMarked, Trash2, Package, UserRound, FolderKanban, Users, ListChecks, Coins, FlaskConical, LogOut, Menu, X } from "lucide-react";
+import { Lightbulb, Megaphone, Sparkles, Images, CheckCircle2, BookMarked, Trash2, Package, UserRound, FolderKanban, Users, ListChecks, Coins, FlaskConical, LogOut, Menu, X } from "lucide-react";
 import type { Role } from "@/types";
 
 type Item = { label: string; href: string; icon: React.ElementType; roles: Role[] };
 const MAIN: Item[] = [
   { label: "Nouvelle campagne", href: "/studio", icon: Sparkles, roles: ["admin", "employee", "creator"] },
+  { label: "Idées de campagne", href: "/idees", icon: Lightbulb, roles: ["admin", "employee"] },
   { label: "Shootings", href: "/shoots", icon: Images, roles: ["admin", "employee", "creator"] },
   { label: "À valider", href: "/review", icon: CheckCircle2, roles: ["admin", "employee"] },
   { label: "Bibliothèque", href: "/library", icon: BookMarked, roles: ["admin", "employee", "creator"] },

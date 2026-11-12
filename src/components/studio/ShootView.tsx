@@ -284,6 +284,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
     const { error } = await sb.from("images").update({ review_status: status }).eq("id", img.id);
     if (error) return flash(error.message.includes("équipe") ? "Seule l'équipe Irizée peut valider" : error.message);
     if (comment?.trim()) await sb.from("comments").insert({ image_id: img.id, user_id: me.id, body: comment.trim(), author_name: me.name, author_role: me.role });
+    if (status === "approved" || status === "rejected") fetch("/api/learn", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}", keepalive: true }).catch(() => {});
     flash(status === "pending" ? "Soumise à validation" : status === "approved" ? "Image approuvée" : status === "rejected" ? "Image refusée" : "Remise en brouillon");
     load(); router.refresh();
   }

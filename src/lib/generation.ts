@@ -32,8 +32,10 @@ export async function brandRules(sb: SupabaseClient): Promise<string[]> {
 /** DA de marque : ce que le client adore et ce qu'il refuse (écrit une fois, appliqué partout). */
 export async function brandTaste(sb: SupabaseClient): Promise<{ love: string; hate: string }> {
   try {
-    const { data } = await sb.from("brand_kit").select("da_love, da_hate").eq("id", 1).single();
-    return { love: String(data?.da_love ?? "").trim().slice(0, 800), hate: String(data?.da_hate ?? "").trim().slice(0, 800) };
+    const { data } = await sb.from("brand_kit").select("da_love, da_hate, learned_love, learned_hate").eq("id", 1).single();
+    // ce que le client a écrit + ce que la plateforme a appris de ses choix
+    const join = (written: unknown, learned: unknown) => [String(written ?? "").trim(), ...((learned as string[] | null) ?? [])].filter(Boolean).join("\n").slice(0, 1400);
+    return { love: join(data?.da_love, data?.learned_love), hate: join(data?.da_hate, data?.learned_hate) };
   } catch { return { love: "", hate: "" }; }
 }
 

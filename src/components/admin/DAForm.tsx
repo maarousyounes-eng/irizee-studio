@@ -3,11 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 import { ImagePlus, Trash2 } from "lucide-react";
 import { Btn, Card, INPUT, Label, Spinner } from "@/components/ui";
-import { api, imgUrl, uploadImage, useSupabase } from "@/lib/client";
+import { X } from "lucide-react";
+import { api, apiJob, imgUrl, uploadImage, useSupabase } from "@/lib/client";
 
 interface Item { id: string; path: string; summary: string }
 
-export default function DAForm({ love: love0, hate: hate0, library }: { love: string; hate: string; library: Item[] }) {
+export default function DAForm({ love: love0, hate: hate0, library, learned }: { love: string; hate: string; library: Item[]; learned: { love: string[]; hate: string[]; at: string | null } }) {
   const sb = useSupabase();
   const fileRef = useRef<HTMLInputElement>(null);
   const [love, setLove] = useState(love0);
@@ -16,6 +17,27 @@ export default function DAForm({ love: love0, hate: hate0, library }: { love: st
   const [items, setItems] = useState<Item[]>(library);
   const [adding, setAdding] = useState(0);
   const [err, setErr] = useState<string | null>(null);
+
+  // Ce que la plateforme a appris de vos choix : visible, et chaque ligne se retire d'un clic
+  const [ll, setLl] = useState<string[]>(learned.love);
+  const [lh, setLh] = useState<string[]>(learned.hate);
+  const [learnedAt, setLearnedAt] = useState<string | null>(learned.at);
+  const [learning, setLearning] = useState(false);
+  const [learnMsg, setLearnMsg] = useState<string | null>(null);
+  async function relearn() {
+    setLearning(true); setLearnMsg(null);
+    try {
+      const r = await apiJob<{ love: string[]; hate: string[]; tooFew?: boolean }>(sb, "/api/learn", { force: true });
+      setLl(r.love); setLh(r.hate); setLearnedAt(new Date().toISOString());
+      if (r.tooFew) setLearnMsg("Pas encore assez de choix à analyser : approuvez ou refusez quelques images d'abord.");
+    } catch (e) { setLearnMsg(e instanceof Error ? e.message : "Erreur"); }
+    setLearning(false);
+  }
+  async function dropLearned(kind: "love" | "hate", i: number) {
+    const next = (kind === "love" ? ll : lh).filter((_, k) => k !== i);
+    if (kind === "love") setLl(next); else setLh(next);
+    await sb.from("brand_kit").update(kind === "love" ? { learned_love: next } : { learned_hate: next }).eq("id", 1);
+  }
 
   async function save() {
     setSaved("saving");
@@ -87,6 +109,22 @@ export default function DAForm({ love: love0, hate: hate0, library }: { love: st
         <Btn onClick={save} disabled={saved === "saving"}>{saved === "saving" ? <Spinner className="border-white/40 border-t-white" /> : null} Enregistrer</Btn>
         {saved === "ok" && <p className="text-xs text-[#14532D]">Enregistré. Appliqué dès la prochaine campagne.</p>}
         {saved === "error" && <p className="text-xs text-[#E8444A]">Enregistrement impossible.</p>}
+        <div className="border-t border-[#E4E4E7] pt-3 space-y-2">
+          <h3 className="text-sm font-semibold">Appris de vos choix</h3>
+          <p className="text-[12px] text-[#52525B]">La plateforme regarde vos images approuvées, refusées et jetées, et lit vos demandes de correction. Elle en tire ces règles, appliquées à toutes les idées et images. Retirez celles qui sont fausses.</p>
+          {ll.length > 0 && <p className="text-[11px] font-bold text-[#14532D]">Vous aimez</p>}
+          {ll.map((t, i) => (
+            <div key={`l${i}`} className="flex items-start gap-2 text-[12px] bg-[#E7F6EC] rounded-lg px-2.5 py-1.5"><span className="flex-1">{t}</span><button type="button" aria-label="Retirer cette règle" onClick={() => dropLearned("love", i)} className="text-[#52525B] hover:text-[#E8444A] p-1"><X size={13} /></button></div>
+          ))}
+          {lh.length > 0 && <p className="text-[11px] font-bold text-[#7A1F1F]">Vous refusez</p>}
+          {lh.map((t, i) => (
+            <div key={`h${i}`} className="flex items-start gap-2 text-[12px] bg-[#FDECEC] rounded-lg px-2.5 py-1.5"><span className="flex-1">{t}</span><button type="button" aria-label="Retirer cette règle" onClick={() => dropLearned("hate", i)} className="text-[#52525B] hover:text-[#E8444A] p-1"><X size={13} /></button></div>
+          ))}
+          {!ll.length && !lh.length && <p className="text-[12px] text-[#6B6B72]">Rien d&apos;appris pour l&apos;instant.</p>}
+          <Btn size="sm" variant="ghost" onClick={relearn} disabled={learning}>{learning ? <><Spinner /> Analyse de vos choix (environ 1 minute)…</> : "Mettre à jour depuis mes choix"}</Btn>
+          {learnedAt && <p className="text-[11px] text-[#6B6B72]">Dernière mise à jour : {new Date(learnedAt).toLocaleString("fr-FR")}. Se met aussi à jour quand vous approuvez ou refusez des images.</p>}
+          {learnMsg && <p className="text-[11px] text-[#7A4B00]">{learnMsg}</p>}
+        </div>
       </Card>
     </div>
   );

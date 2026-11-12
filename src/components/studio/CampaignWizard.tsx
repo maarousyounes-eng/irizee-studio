@@ -45,6 +45,32 @@ export default function CampaignWizard({ products, models, library }: Props) {
   const [busy, setBusy] = useState<"" | "brief" | "dirs" | "launch">("");
   const [error, setError] = useState<string | null>(null);
 
+  // Arrivée depuis « Idées de campagne » : brief rempli et direction déjà proposée (avec son esquisse)
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (seeded.current) return;
+    seeded.current = true;
+    try {
+      const raw = sessionStorage.getItem("wizard:prefill");
+      if (!raw) return;
+      sessionStorage.removeItem("wizard:prefill");
+      const p = JSON.parse(raw) as { brief?: string; vtype?: string; productIds?: string[]; direction?: Dir };
+      if (p.brief) setBrief(p.brief);
+      if (p.vtype) setVtype(p.vtype);
+      const pids = (p.productIds ?? []).filter((id) => products.some((x) => x.id === id));
+      if (pids.length) setProductIds(pids);
+      if (p.direction?.title) {
+        const d = p.direction;
+        setDirs([d]); setChosen(0); setChosenText(dirText(d));
+        setSketches({ [d.title]: { state: "loading" } });
+        apiJob<{ path: string }>(sb, "/api/shoots/sketch", { direction: dirText(d), productIds: pids, noProduct: !pids.length, noPeople: true })
+          .then((s) => setSketches((m) => ({ ...m, [d.title]: { state: "done", path: s.path } })))
+          .catch(() => setSketches((m) => ({ ...m, [d.title]: { state: "error" } })));
+      }
+    } catch { /* rien à préremplir */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const ids = noProduct ? [] : productIds;
   const chip = (on: boolean) => `px-3.5 py-2.5 rounded-full text-sm border transition ${on ? "bg-[#EBF2FF] border-[#2B6EE8] text-[#1F55BC] font-semibold" : "bg-white border-[#E4E4E7] text-[#0A0A0B] hover:bg-[#F4F4F5]"}`;
 
