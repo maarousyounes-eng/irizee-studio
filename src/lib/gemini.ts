@@ -70,6 +70,46 @@ export async function resolveOpenAIModel(key: string): Promise<string> {
   return cands[0];
 }
 
+/** Meilleur modèle de TEXTE OpenAI du compte (le plus récent « gpt-N », hors mini / nano / audio / image). */
+let openaiText: { name: string; at: number } | null = null;
+async function resolveOpenAITextModel(key: string): Promise<string> {
+  if (process.env.OPENAI_TEXT_MODEL) return process.env.OPENAI_TEXT_MODEL;
+  if (openaiText && Date.now() - openaiText.at < 3600_000) return openaiText.name;
+  const res = await fetch("https://api.openai.com/v1/models", { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(20_000) });
+  const j = await res.json();
+  if (!res.ok) throw new Error(`OpenAI ${res.status}: ${JSON.stringify(j).slice(0, 200)}`);
+  const ids: string[] = (j.data ?? []).map((m: { id: string }) => m.id);
+  const ver = (id: string) => (id.match(/^gpt-(\d+(?:\.\d+)?)/)?.[1] ?? "0").split(".").map(Number).reduce((a, n, i) => a + n / 10 ** (i * 2), 0);
+  const cands = ids.filter((id) => /^gpt-\d/i.test(id) && !/mini|nano|audio|realtime|image|search|tts|transcribe|codex|chat-latest|pro|oss|instruct|\d{4}-\d{2}-\d{2}/i.test(id))
+    .sort((a, b) => ver(b) - ver(a) || a.length - b.length);
+  openaiText = { name: cands[0] ?? "gpt-4o", at: Date.now() };
+  return openaiText.name;
+}
+
+/** Texte (et lecture d'images) via OpenAI, au format de réponse Gemini : sert de relais quand Gemini n'a plus de crédit. */
+async function callOpenAIText(parts: Part[], o: { purpose?: string; json?: boolean; timeoutMs?: number; signal?: AbortSignal }) {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) throw new Error("OPENAI_API_KEY manquante côté serveur");
+  const name = await resolveOpenAITextModel(key);
+  const content = parts.map((p) => ("text" in p ? { type: "text", text: p.text } : { type: "image_url", image_url: { url: `data:${p.inline_data.mime_type};base64,${p.inline_data.data}` } }));
+  const t0 = Date.now();
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST", headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ model: name, messages: [{ role: "user", content }], ...(o.json ? { response_format: { type: "json_object" } } : {}) }),
+    signal: o.signal ? AbortSignal.any([o.signal, AbortSignal.timeout(o.timeoutMs ?? 120_000)]) : AbortSignal.timeout(o.timeoutMs ?? 120_000),
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    await logCall({ purpose: o.purpose ?? "autre", model: name, status: "error", http: res.status, ms: Date.now() - t0, note: JSON.stringify(j).slice(0, 150) });
+    throw new Error(`OpenAI ${res.status}: ${JSON.stringify(j).slice(0, 300)}`);
+  }
+  const text = String(j.choices?.[0]?.message?.content ?? "");
+  const u = j.usage ?? {};
+  // estimation : 2,5 $ / M en entrée, 10 $ / M en sortie
+  await logCall({ purpose: o.purpose ?? "autre", model: name, status: "ok", ms: Date.now() - t0, note: "relais OpenAI", cost: ((u.prompt_tokens ?? 0) * 2.5 + (u.completion_tokens ?? 0) * 10) / 1e6 * 0.92 });
+  return { candidates: [{ content: { parts: [{ text }] } }] };
+}
+
 async function fitAspect(buf: Buffer, aspect?: string) {
   if (!aspect) return buf;
   const [aw, ah] = aspect.split(":").map(Number);
@@ -129,6 +169,19 @@ interface Opts { purpose?: string; image?: boolean; json?: boolean; aspect?: str
 
 export async function gemini(model: string, parts: Part[], { purpose, image, json, aspect, size, timeoutMs, signal, mask }: Opts = {}) {
   if (model.startsWith("openai:")) return callOpenAI(model, parts, { purpose, aspect, timeoutMs, signal, mask });
+  // Textes (consigne, idées, contrôle…) : relais OpenAI si demandé, ou si Gemini n'a plus de crédit
+  if (!image && process.env.TEXT_ENGINE === "openai") return callOpenAIText(parts, { purpose, json, timeoutMs, signal });
+  if (!image) {
+    try { return await geminiCall(model, parts, { purpose, image, json, aspect, size, timeoutMs, signal }); }
+    catch (e) {
+      if (e instanceof Error && /^Gemini (402|403|429)/.test(e.message) && process.env.OPENAI_API_KEY) return callOpenAIText(parts, { purpose, json, timeoutMs, signal });
+      throw e;
+    }
+  }
+  return geminiCall(model, parts, { purpose, image, json, aspect, size, timeoutMs, signal });
+}
+
+async function geminiCall(model: string, parts: Part[], { purpose, image, json, aspect, size, timeoutMs, signal }: Opts = {}) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new Error("GEMINI_API_KEY manquante côté serveur");
   const generationConfig: Record<string, unknown> = image
