@@ -165,6 +165,8 @@ async function callOpenAI(model: string, parts: Part[], o: { purpose?: string; a
   throw lastErr;
 }
 
+let geminiDownUntil = 0;
+
 interface Opts { purpose?: string; image?: boolean; json?: boolean; aspect?: string; size?: string; timeoutMs?: number; signal?: AbortSignal; mask?: Buffer }
 
 export async function gemini(model: string, parts: Part[], { purpose, image, json, aspect, size, timeoutMs, signal, mask }: Opts = {}) {
@@ -172,9 +174,14 @@ export async function gemini(model: string, parts: Part[], { purpose, image, jso
   // Textes (consigne, idées, contrôle…) : relais OpenAI si demandé, ou si Gemini n'a plus de crédit
   if (!image && process.env.TEXT_ENGINE === "openai") return callOpenAIText(parts, { purpose, json, timeoutMs, signal });
   if (!image) {
+    // Gemini sans crédit : on passe directement par OpenAI pendant 10 minutes, sans le retenter à chaque appel
+    if (geminiDownUntil > Date.now() && process.env.OPENAI_API_KEY) return callOpenAIText(parts, { purpose, json, timeoutMs, signal });
     try { return await geminiCall(model, parts, { purpose, image, json, aspect, size, timeoutMs, signal }); }
     catch (e) {
-      if (e instanceof Error && /^Gemini (402|403|429)/.test(e.message) && process.env.OPENAI_API_KEY) return callOpenAIText(parts, { purpose, json, timeoutMs, signal });
+      if (e instanceof Error && /^Gemini (402|403|429)/.test(e.message) && process.env.OPENAI_API_KEY) {
+        if (/^Gemini 402/.test(e.message)) geminiDownUntil = Date.now() + 10 * 60_000;
+        return callOpenAIText(parts, { purpose, json, timeoutMs, signal });
+      }
       throw e;
     }
   }
