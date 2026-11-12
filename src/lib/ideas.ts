@@ -43,12 +43,12 @@ export interface Direction { title: string; concept: string; set: string; palett
 export const directionText = (d: Direction) => `${d.title}. ${d.concept} Décor et matières : ${d.set}. Couleurs : ${d.palette}. Lumière : ${d.light}. Attitude : ${d.attitude}.`;
 
 /** Plusieurs directions artistiques de campagne (texte seul), le client en choisit une. */
-export async function proposeDirections(sb: SupabaseClient, a: { brief: string; n: number; type: string; productIds: string[]; noProduct: boolean; people: boolean; inspirationPaths: string[]; analysis: string; avoid?: string[]; textZone?: string }): Promise<Direction[]> {
+export async function proposeDirections(sb: SupabaseClient, a: { brief: string; n: number; type: string; productIds: string[]; noProduct: boolean; people: boolean; inspirationPaths: string[]; analysis: string; avoid?: string[]; textZone?: string; feedback?: string; previous?: string[] }): Promise<Direction[]> {
   const prods = a.noProduct ? [] : (await Promise.all(a.productIds.slice(0, 4).map((id) => loadProduct(sb, id).catch(() => null)))).filter(Boolean);
   const products = prods.map((x) => `"${x!.product.name}"${x!.product.look ? `: ${x!.product.look}` : ""}`).join("\n");
   const rules = [...(await brandRules(sb)), ...prods.flatMap((x) => x!.product.rules ?? [])];
   const insp = (await Promise.all(a.inspirationPaths.slice(0, 4).map((p) => download(sb, p).catch(() => null)))).filter(Boolean) as { buf: Buffer; mime: string }[];
-  const parts: Part[] = [{ text: directionsPrompt({ brief: a.brief, n: Math.min(5, Math.max(1, a.n)), type: a.type, products, rules, people: a.people, nInsp: insp.length, analysis: a.analysis, avoid: a.avoid ?? [], textZone: a.textZone }) }, ...insp.map((i) => imgPart(i.buf, i.mime))];
+  const parts: Part[] = [{ text: directionsPrompt({ brief: a.brief, n: Math.min(5, Math.max(1, a.n)), type: a.type, products, rules, people: a.people, nInsp: insp.length, analysis: a.analysis, avoid: a.feedback ? [] : a.avoid ?? [], textZone: a.textZone, feedback: a.feedback, previous: a.previous }) }, ...insp.map((i) => imgPart(i.buf, i.mime))];
   const r = await gemini(MODELS.vision, parts, { purpose: "directions artistiques", json: true, timeoutMs: 75_000 });
   const raw = parseJson<{ directions?: Partial<Direction>[] }>(firstText(r));
   const c = (x: unknown, n: number) => String(x ?? "").trim().slice(0, n);

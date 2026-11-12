@@ -68,7 +68,8 @@ export default function NewShootForm(p: Props) {
   const [dirBusy, setDirBusy] = useState(false);
   const [chosenDir, setChosenDir] = useState<string | null>(null);
   const dirText = (d: Dir) => `${d.title}. ${d.concept} Décor et matières : ${d.set}. Couleurs : ${d.palette}. Lumière : ${d.light}. Attitude : ${d.attitude}.`;
-  async function proposeDirs() {
+  const [dirFeedback, setDirFeedback] = useState("");
+  async function proposeDirs(feedback = "") {
     setError(null);
     if (!prompt.trim()) return setError("Écris d'abord la consigne : les directions partent d'elle");
     setDirBusy(true);
@@ -76,9 +77,9 @@ export default function NewShootForm(p: Props) {
       const r = await api<{ directions: Dir[] }>("/api/shoots/directions", {
         brief: prompt, n: 3, visualType: vtype, productIds: noProduct ? [] : [productId, ...extraIds.filter((x) => x !== productId)].slice(0, 4), noProduct, noPeople, textZone,
         inspirationPaths: inspirations, inspirationAnalyses: inspirations.map((p) => insp[p]?.state === "done" ? { analysis: insp[p].analysis, note: insp[p].note !== insp[p].summary ? insp[p].note : "" } : null).filter(Boolean),
-        avoid: dirs.map((d) => d.title),
+        avoid: dirs.map((d) => d.title), feedback, previous: feedback ? dirs.map((d) => `${d.title}: ${d.concept}`) : [],
       });
-      setDirs(r.directions);
+      setDirs(r.directions); if (feedback) setDirFeedback("");
     } catch (e) { setError(e instanceof Error ? e.message : "Erreur"); }
     setDirBusy(false);
   }
@@ -353,7 +354,7 @@ export default function NewShootForm(p: Props) {
         <div>
           <Label>Consigne</Label>
           <textarea className={INPUT + " min-h-[110px]"} value={prompt} onChange={(e) => setPrompt(e.target.value)}
-            placeholder={vtype === "carousel" ? "Ex : le rituel du soir avec le Masque Nila, de la couverture jusqu'au résultat. Ambiance douce, tons sable." : vtype === "ba" ? "Ex : portrait de face, lumière neutre, cheveux attachés (facultatif)" : vtype === "free" ? "Ex : gros plan d'une goutte de texture sur une pierre sombre" : "Ex : même ambiance mais tout en bleu électrique : chemise, lunettes et rayons au sol. Lumière douce du matin."} />
+            placeholder={vtype === "carousel" ? "Ex : le rituel du soir avec le Masque Nila, de la couverture jusqu'au résultat. Ambiance douce, tons sable." : vtype === "ba" ? "Ex : portrait de face, lumière neutre, cheveux attachés (facultatif)" : vtype === "free" ? "Ex : gros plan d'une goutte de texture sur une pierre sombre" : "Dites ce que vous aimeriez faire, même vaguement : ex. « une campagne hiver pour le Masque Nila, luxe et mode ». L'IA vous propose ensuite des directions, que vous retravaillez."} />
           <div className="flex flex-wrap items-center gap-2 mt-1.5">
             <Btn size="sm" variant="ghost" onClick={improve} disabled={briefBusy || !prompt.trim()}>{briefBusy ? <Spinner /> : <Wand2 size={13} />} Améliorer ma consigne (gratuit)</Btn>
             {prevPrompt !== null && <button type="button" className="text-[11px] font-semibold text-[#6B6B72]" onClick={() => { setPrompt(prevPrompt); setPrevPrompt(null); }}>Revenir à ma version</button>}
@@ -365,7 +366,7 @@ export default function NewShootForm(p: Props) {
           <div className="space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <Label>1. Direction artistique de la campagne</Label>
-              <Btn size="sm" onClick={proposeDirs} disabled={dirBusy || inspPending}>{dirBusy ? <Spinner className="border-white/40 border-t-white" /> : <Wand2 size={13} />} {dirs.length ? "Autres directions" : "Proposer 3 directions (gratuit)"}</Btn>
+              <Btn size="sm" onClick={() => proposeDirs()} disabled={dirBusy || inspPending}>{dirBusy ? <Spinner className="border-white/40 border-t-white" /> : <Wand2 size={13} />} {dirs.length ? "Autres directions" : "Proposer 3 directions (gratuit)"}</Btn>
             </div>
             {!dirs.length && !chosenDir && <p className="text-[12px] text-[#6B6B72]">Plusieurs univers de campagne complets (idée centrale, décor, couleurs, lumière, attitude). Vous en choisissez un, puis toutes les images de la campagne sont faites dedans. Rien n&apos;est payé à cette étape.</p>}
             {dirs.length > 0 && (
@@ -384,6 +385,12 @@ export default function NewShootForm(p: Props) {
                     </div>
                   );
                 })}
+              </div>
+            )}
+            {dirs.length > 0 && (
+              <div className="flex flex-wrap gap-2 items-center">
+                <input className={INPUT + " flex-1 min-w-[240px] !py-2 !text-[13px]"} value={dirFeedback} onChange={(e) => setDirFeedback(e.target.value)} placeholder="Retravailler : ex. j'aime la 2, mais plus sombre et plus mode, sans pierre" aria-label="Retravailler les directions" onKeyDown={(e) => { if (e.key === "Enter" && dirFeedback.trim()) proposeDirs(dirFeedback); }} />
+                <Btn size="sm" variant="ghost" onClick={() => proposeDirs(dirFeedback)} disabled={dirBusy || !dirFeedback.trim()}>{dirBusy ? <Spinner /> : null} Ajuster les directions</Btn>
               </div>
             )}
             {chosenDir !== null && (

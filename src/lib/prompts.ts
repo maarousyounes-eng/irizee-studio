@@ -458,10 +458,11 @@ export function textZoneLine(zone?: string) {
 }
 
 /** Directions artistiques : plusieurs univers de campagne cohérents, parmi lesquels le client choisit, AVANT les prises de vue. */
-export function directionsPrompt(a: { brief: string; n: number; type: string; products: string; rules: string[]; people: boolean; nInsp: number; analysis: string; avoid: string[]; textZone?: string }) {
+export function directionsPrompt(a: { brief: string; n: number; type: string; products: string; rules: string[]; people: boolean; nInsp: number; analysis: string; avoid: string[]; textZone?: string; feedback?: string; previous?: string[] }) {
   return [
     "You are the creative director of an award-winning beauty advertising agency (the level of Aesop, Byredo, Rhode, Glossier, Jacquemus beauty campaigns). Propose ART DIRECTIONS for a whole campaign of the French cosmetics brand Irizée.",
-    `Client brief (French, absolute priority): "${a.brief}"`,
+    `Client brief (French, absolute priority; it can be vague, e.g. "I would like to do this": then YOU bring the creative ideas): "${a.brief}"`,
+    a.feedback ? `The client reacted to your previous proposals${a.previous?.length ? ` (${a.previous.join(" | ")})` : ""}: "${a.feedback}". Rework the directions according to this feedback (keep what they liked, change what they asked).` : "",
     a.products ? `Products of the campaign, exactly as they are (never invent another packaging):\n${a.products}` : "No product appears.",
     a.rules.length ? `Brand rules:\n${numbered(a.rules)}` : "",
     a.people ? "A model can appear if it serves the direction." : "No person appears in this campaign.",

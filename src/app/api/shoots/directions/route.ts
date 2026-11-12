@@ -18,6 +18,8 @@ export async function POST(req: Request) {
       brief, n: Number(b.n) || 3, type: String(b.visualType ?? "photo"), productIds, noProduct: !!b.noProduct, people: !b.noPeople,
       inspirationPaths: paths, analysis, avoid: (Array.isArray(b.avoid) ? b.avoid : []).map((x: unknown) => String(x).slice(0, 120)).slice(0, 12),
       textZone: b.visualType === "ad" ? String(b.textZone ?? "") : undefined,
+      feedback: b.feedback ? String(b.feedback).slice(0, 800) : undefined,
+      previous: (Array.isArray(b.previous) ? b.previous : []).map((x: unknown) => String(x).slice(0, 300)).slice(0, 5),
     }));
     if (!directions.length) throw new HttpError(502, "Pas de direction reçue, réessayez");
     return { directions };
