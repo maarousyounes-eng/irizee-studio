@@ -1,5 +1,5 @@
 import { requireUser, handle, HttpError } from "@/lib/api";
-import { checkQuota, loadProduct } from "@/lib/generation";
+import { checkQuota, loadProduct, productPlan } from "@/lib/generation";
 import { MODELS, gemini, firstText, parseJson, withAiCtx } from "@/lib/gemini";
 import { anotherIdeaPrompt } from "@/lib/prompts";
 import { normalizeSlides, type TypeParams } from "@/lib/visualTypes";
@@ -36,7 +36,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     }
 
     const current = String((img.params as any)?.idea ?? slide?.photo ?? (tp.shots ?? [])[vi] ?? "");
-    const prods = shoot.no_product ? [] : (await Promise.all([shoot.product_id, ...((shoot.product_ids as string[] | null) ?? [])].filter(Boolean).slice(0, 4).map((id: string) => loadProduct(sb, id).catch(() => null)))).filter(Boolean);
+    const pl = productPlan(shoot, { variant_index: vi });
+    const prods = shoot.no_product ? [] : (await Promise.all([pl.mainId, ...pl.otherIds].filter(Boolean).map((id: string) => loadProduct(sb, id).catch(() => null)))).filter(Boolean);
     const products = Array.from(new Map(prods.map((x) => [x!.product.id, x!.product])).values())
       .map((p) => [`"${p.name}"${p.look ? `: ${p.look}` : ""}`, p.real_size ? `Real size: ${p.real_size}.` : "", p.applied_look ? `Formula: ${p.applied_look}.` : ""].filter(Boolean).join(" ")).join("\n");
     const r = await withAiCtx({ sb, userId: user.id, shootId: img.shoot_id, imageId: img.id }, () => gemini(MODELS.vision, [{ text: anotherIdeaPrompt({

@@ -69,7 +69,7 @@ export async function POST(req: Request) {
     // Le photographe prépare une prise de vue précise par image (sauf carrousel et avant/après, qui ont leur propre plan)
     // Avec des inspirations, ce sont elles qui donnent les prises de vue : pas de plan inventé par-dessus
     if (vtype !== "carousel" && vtype !== "ba" && !paths.length) {
-      try { tp.shots = await withAiCtx({ sb, userId: user.id }, () => planShots(sb, { brief: prompt, analysis: analysis ?? "", n, type: vtype, productIds, noProduct: !!b.noProduct, people: b.noPeople ? 0 : b.modelMode === "together" ? Math.min(3, modelIds.length) : 1 })); } catch { /* sans plan : la consigne seule */ }
+      try { tp.shots = await withAiCtx({ sb, userId: user.id }, () => planShots(sb, { brief: prompt, analysis: analysis ?? "", n, type: vtype, productIds, productMode: productIds.length > 1 ? (["together", "split", "mix"].includes(b.productMode) ? b.productMode : "mix") : null, noProduct: !!b.noProduct, people: b.noPeople ? 0 : b.modelMode === "together" ? Math.min(3, modelIds.length) : 1 })); } catch { /* sans plan : la consigne seule */ }
     }
     const { data: shoot, error } = await sb.from("shoots").insert({
       project_id: b.projectId || null, product_id: productIds[0], product_ids: productIds.length > 1 ? productIds : null, product_mode: productIds.length > 1 ? (["together", "split", "mix"].includes(b.productMode) ? b.productMode : "mix") : null, model_id: modelIds[0] ?? null, model_ids: modelIds, concept_id: b.conceptId || null,

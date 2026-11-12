@@ -98,7 +98,7 @@ export function buildPrompt(a: {
     "",
     `CLIENT BRIEF (priority over the style reference when they differ): ${a.userPrompt}`,
     a.typeLine ? `\n${a.typeLine}` : "",
-    a.shot ? `\nPHOTOGRAPHER'S SHOT SPEC for this image (lens, framing, light and pose; the client brief always wins if they differ): ${a.shot}` : "",
+    a.shot ? `\nPHOTOGRAPHER'S SHOT SPEC for this image (lens, framing, light and pose; the client brief always wins if they differ; if it mentions any product that is not listed under PRODUCT above, ignore that product completely: it must NOT appear): ${a.shot}` : "",
     "",
     person,
     a.noPeople ? "" : a.noProduct ? "Hands are anatomically correct: five fingers per hand, natural joints." : "Hands are anatomically correct: five fingers per hand, natural joints and a firm, plausible grip on the product.",
@@ -362,7 +362,7 @@ export function slidesPlanPrompt(a: { idea: string; n: number; style: string; pr
 }
 
 /** Le « photographe » : un plan de prises de vue (une par image) avant toute génération. */
-export function shotListPrompt(a: { brief: string; analysis: string; n: number; type: string; products: string; people: number; noProduct: boolean }) {
+export function shotListPrompt(a: { brief: string; analysis: string; n: number; type: string; products: string; people: number; noProduct: boolean; perShot?: string[][] }) {
   return [
     "You are an award-winning commercial beauty photographer and art director preparing the SHOT LIST of a professional photo shoot for the French cosmetics brand Irizée.",
     `Client brief (in French): "${a.brief}"`,
@@ -371,6 +371,7 @@ export function shotListPrompt(a: { brief: string; analysis: string; n: number; 
     a.people ? `Model(s): ${a.people} real person(s) (identity given separately), directed like a professional model.` : "No person in these photos.",
     a.type === "social" ? "Use: organic Instagram posts, natural and authentic." : a.type === "ad" ? "Use: paid social ads, the product is the hero." : "",
     "STRICT: never invent anything the brief does not ask for. Every shot is ONE single clean photograph: no diptych, no collage, no split frame, no phone interface, no grid, no icon, no text or graphic overlay. The product is held naturally and upright (label facing the camera), at its real small size (no longer than the model's hand). Only describe the formula on the skin if the brief mentions applying it.",
+    a.perShot?.length ? `PRODUCTS PER SHOT (mandatory: each shot shows EXACTLY these products and never mentions or shows any other product):\n${a.perShot.map((ps, i) => `Shot ${i + 1}: ${ps.join(" + ")}`).join("\n")}` : "",
     `Write ${a.n} shots that together form a coherent, varied professional series (vary framing: wide / medium / close-up / detail; vary angles and gestures), all in the same set, light and colour mood.`,
     "For each shot write ONE dense English paragraph (60-90 words) a photographer would follow: framing and camera angle, lens and aperture (e.g. 85mm f/2.8), light setup (key light type and direction, fill, rim, natural window light...), set and props, exact pose and gesture direction for the model (where the hands are, how the product is held so the label faces the camera at a natural angle and realistic size), expression, styling, colour grade. Physically plausible, never an extreme close-up of the label unless the brief asks.",
     'Return JSON only: {"shots": [str]}',
