@@ -47,7 +47,7 @@ const textsBlock = (p: Product) => (p.texts ?? []).map((t) => `- ${t}`).join("\n
 export function buildPrompt(a: {
   product: Product; rules: string[]; userPrompt: string; aspect: string; analysis: string;
   others?: { product: Product; n: number }[]; variation: string; nProductImages: number; hasModelRef: boolean; modelDescription?: string; noPeople: boolean; noProduct?: boolean;
-  nModelRefs?: number; seriesRef?: boolean; typeLine?: string; realism?: string; hasStyleRef?: boolean; hasTexture?: boolean; shot?: string; inspMode?: "copy" | "loose";
+  nModelRefs?: number; seriesRef?: boolean; typeLine?: string; realism?: string; hasStyleRef?: boolean; hasTexture?: boolean; shot?: string; inspMode?: "copy" | "loose"; layoutLine?: string;
 }) {
   const nModels = a.hasModelRef ? Math.max(1, a.nModelRefs ?? 1) : 0;
   // Version courte et cohérente : chaque consigne n'apparaît qu'une fois, sans ordres contradictoires.
@@ -106,6 +106,7 @@ export function buildPrompt(a: {
     a.noPeople ? "" : a.noProduct ? "Hands are anatomically correct: five fingers per hand, natural joints." : "Hands are anatomically correct: five fingers per hand, natural joints and a firm, plausible grip on the product.",
     "",
     a.realism ?? REALISM,
+    a.layoutLine ?? "",
     `Format: aspect ratio ${a.aspect}. Do NOT add any text, letters, words, typography, logo or watermark to the image: the only text allowed is what is printed on the real products${wantsPhoneUi(a.analysis, a.userPrompt) ? " (and the labels of the wanted phone camera interface)" : ""}.`,
     a.noProduct ? "" : NO_MIRROR,
   ].filter((l, i, arr) => l !== "" || arr[i - 1] !== "").join("\n");
@@ -179,8 +180,10 @@ export function qcPromptNoProduct(correction?: { instruction: string; refCount?:
   ].filter(Boolean).join("\n");
 }
 
-export function qcPrompt(p: Product, correction?: { instruction: string; refCount?: number }, opts?: { modelRef?: boolean; others?: Product[]; overlay?: boolean }) {
+export function qcPrompt(p: Product, correction?: { instruction: string; refCount?: number }, opts?: { modelRef?: boolean; others?: Product[]; overlay?: boolean; textZone?: string }) {
+  const tz = TEXT_ZONES.find((x) => x.id === opts?.textZone)?.en;
   return [
+    tz ? `TEXT AREA: ${tz} of image 2 must be empty plain background (reserved for a headline). Set text_zone_clear to false and add an issue in French if any product, prop, person or busy detail is in that area.` : "",
     opts?.overlay ? OVERLAY_OK : "",
     "You are a strict quality inspector for a cosmetics brand.",
     "Image 1 = the REAL product packshot. Image 2 = a generated advertising photo that must show this exact product." + (correction ? " Image 3 = the same photo BEFORE a correction was applied." + (correction.refCount ? ` The last ${correction.refCount} image(s) are REFERENCE image(s) supplied by the client showing what they wanted.` : "") : ""),
@@ -195,7 +198,7 @@ export function qcPrompt(p: Product, correction?: { instruction: string; refCoun
     "Judge the texts ONLY on the largest, most prominent product of image 2 (the hero product): ignore small, distant, blurred or partially hidden copies for the text check. For each expected text, answer: 'ok' (visible and exactly right), 'wrong' (visible and legible but misspelled, garbled, mirrored or different), 'unreadable' (visible but too small or blurred to read), or 'hidden' (that part of the label is NOT visible in the photo, which is NORMAL and must never count against the image: covered by a hand, finger, hair or object, turned away from the camera, wrapped around the curve of the tube or bottle, cut by the edge of the frame, or lost in shadow or glare). Only a visible and legible text that is spelled differently counts as 'wrong'. Ignore differences of capitalization (upper/lower case), line breaks, spacing, hyphenation and apostrophe style when comparing with the expected text: only different, missing or invented letters or words count, and never report capitalization as an issue. Never mark 'wrong' a text you simply cannot see.",
     "added_text = true if the image contains text, letters, typography, a big logo or graphic shapes that are NOT printed on a real product label (slogans, giant brand letters, captions, watermarks). Also judge: color/material/shape/cap versus the real packshot (shape_ok must be false if the bottle, cap, neck, collar or pipette differ from the packshot, or if the product's proportions or perspective are distorted compared with the packshot: a tube that is too wide, too flat, stretched, bent or with an impossible perspective, for example a different cap shape, a transparent neck where the packshot is opaque, or a redesigned bottle: then say so in issues); count how many product instances (bottles/tubes) are visible in total, and whether the other instances are faithful copies: set all_copies_exact to false ONLY if a copy has a clearly different silhouette, color, cap or logo layout than the real packshot; illegible or tiny text on small, blurred or background decorative copies is acceptable and must NOT cause a failure; whether the printed text direction on the product matches the packshot (not rotated or restyled); any foreign brand logo; natural anatomy of hands/fingers/face; whether the skin looks like real photographed skin (fine pores and texture still visible, brows with individual hair strokes, even with glamorous makeup and polished retouching) rather than plastic, blurred or AI-smooth skin; and composition (product height as % of the image height, product is a hero in the foreground, realistic scale versus hand/body, natural perspective).",
     "REALISM (be very demanding): realism_0_10 = would an expert photo editor believe this is a REAL photograph shot by a professional photographer? Give 8+ only if nothing betrays AI; give 5 or less for plastic, waxy or airbrushed skin, doll-like faces, an over-glossy CGI look, oversaturated glow, perfect symmetry, a product that looks pasted, floating or wrongly lit, missing contact shadows, or melted details. skin_natural = false if the skin has no visible pores and texture.",
-    `Return JSON only: {"texts":[{"expected":str,"status":"ok|wrong|unreadable|hidden","read":str}],"color_ok":bool,"shape_ok":bool,"foreign_logo":bool,"anatomy_ok":bool,"skin_natural":bool,"product_count":int,"all_copies_exact":bool,"label_orientation_ok":bool,"product_height_pct":int,"hero_foreground":bool,"proportion_ok":bool,"angle_ok":bool,"human":{"present":bool,"hands_ok":bool,"fingers_count_ok":bool,"grip_ok":bool,"face_ok":bool,"limbs_ok":bool,"body_ok":bool,"accessories_ok":bool},"artifacts_ok":bool,"issues":[str] (every visible defect you found about the texts, proportions, anatomy, artifacts or product, as short French sentences, max 5, empty array if none)${opts?.modelRef ? ",\"face_matches_model\":bool" : ""},"realism_0_10":int,"comment":str (one short sentence in French)${correction ? ",\"instruction_followed\":bool,\"unwanted_changes\":str,\"ghost_or_duplicate\":bool,\"edit_quality_0_10\":int,\"edit_defects\":str" + (correction.refCount ? ",\"matches_reference\":bool" : "") : ""}}`,
+    `Return JSON only: {"texts":[{"expected":str,"status":"ok|wrong|unreadable|hidden","read":str}],"color_ok":bool,"shape_ok":bool,"foreign_logo":bool,"anatomy_ok":bool,"skin_natural":bool,"product_count":int,"all_copies_exact":bool,"label_orientation_ok":bool,"product_height_pct":int,"hero_foreground":bool,"proportion_ok":bool,"angle_ok":bool,"human":{"present":bool,"hands_ok":bool,"fingers_count_ok":bool,"grip_ok":bool,"face_ok":bool,"limbs_ok":bool,"body_ok":bool,"accessories_ok":bool},"artifacts_ok":bool,"issues":[str] (every visible defect you found about the texts, proportions, anatomy, artifacts or product, as short French sentences, max 5, empty array if none)${opts?.modelRef ? ",\"face_matches_model\":bool" : ""},"realism_0_10":int,${tz ? "\"text_zone_clear\":bool," : ""}"comment":str (one short sentence in French)${correction ? ",\"instruction_followed\":bool,\"unwanted_changes\":str,\"ghost_or_duplicate\":bool,\"edit_quality_0_10\":int,\"edit_defects\":str" + (correction.refCount ? ",\"matches_reference\":bool" : "") : ""}}`,
   ].filter(Boolean).join("\n");
 }
 
@@ -298,7 +301,7 @@ export function typeLine(type: string, tp: TypeParams, vi: number, nSlides: numb
     const z = TEXT_ZONES.find((x) => x.id === tp.textZone);
     return [
       "VISUAL TYPE: a PAID SOCIAL AD visual: the product is the clear hero, bold and simple scroll-stopping composition, premium and clean, strong contrast.",
-      z?.en ? `Keep ${z.en} of the frame calm and uncluttered (simple background, no important element, no person's face) so that a headline can be added there later. Do not write anything there.` : "",
+      // la zone de texte est imposée en fin de consigne (layoutLine), pour passer avant l'idée et l'inspiration
     ].filter(Boolean).join(" ");
   }
   if (type === "carousel") {
@@ -411,7 +414,7 @@ export function maskEditPrompt(a: { product: Product; rules: string[]; instructi
 }
 
 /** Idées d'images : un directeur artistique propose une idée forte et différente pour CHAQUE image, avant toute génération. */
-export function ideasPrompt(a: { brief: string; n: number; type: string; perImage: string[][]; products: string; rules: string[]; people: boolean; inspMode: "copy" | "loose"; nInsp: number; analysis: string; avoid: string[]; theme?: string }) {
+export function ideasPrompt(a: { brief: string; n: number; type: string; perImage: string[][]; products: string; rules: string[]; people: boolean; inspMode: "copy" | "loose"; nInsp: number; analysis: string; avoid: string[]; theme?: string; textZone?: string }) {
   return [
     "You are the creative director of an award-winning beauty advertising agency (think of the best campaigns of Glossier, Aesop, Byredo, Rhode, Jacquemus beauty, Fenty). You must come up with the IDEAS for the images of a shoot for the French cosmetics brand Irizée.",
     `Client brief (French, absolute priority): "${a.brief}"`,
@@ -428,6 +431,7 @@ export function ideasPrompt(a: { brief: string; n: number; type: string; perImag
     a.theme ? "" : `Write ${a.n} ideas, ONE per image, each using a clearly DIFFERENT creative device. Devices to pick from (or better): play of scale (giant product, miniature set), sculptural set design (plaster, stone, blocks, sand), graphic hard shadows and light shapes, colour blocking, macro of the formula or ingredient as a landscape, water / splash / ripple frozen in motion, reflection and mirror games, levitation with real physical support, unexpected material contrast (chrome, ice, silk, velvet), tight crop on a detail of skin and product, still life with a story, raw ingredient (indigo powder cloud, plant) staged as art.`,
     "Every idea is physically shootable in a real studio, premium and editorial, never cheesy: no roses, petals, decorative flowers or fruit, no generic aloe slices, no spa candles, no clichés, unless the brief asks for them. Each product appears exactly once, upright or naturally placed, at its real size, label facing camera, never an extreme close-up of the label.",
     a.avoid.length ? `Do not repeat these ideas: ${a.avoid.join(" | ")}` : "",
+    TEXT_ZONES.find((x) => x.id === a.textZone)?.en ? `EVERY idea must leave ${TEXT_ZONES.find((x) => x.id === a.textZone)!.en} of the frame completely empty (plain background) for a headline: compose the scene in the rest of the frame.` : "",
     'Return JSON only: {"ideas": [{"title": str (French, 2-5 words), "idea": str (French, 35-60 words: concept, set and background, light, how the product is staged, framing)}]}',
   ].filter(Boolean).join("\n");
 }
@@ -444,4 +448,11 @@ export function briefPrompt(a: { brief: string; type: string; products: string; 
     "Structure, short and concrete (max 170 words): Objectif · Message · Direction artistique (décor, matières, lumière, couleurs, cadrage) · Mise en scène du produit · À éviter.",
     'Return JSON only: {"brief": str}',
   ].filter(Boolean).join("\n");
+}
+
+/** Zone réservée au texte (visuel pub) : consigne de mise en page prioritaire. */
+export function textZoneLine(zone?: string) {
+  const z = TEXT_ZONES.find((x) => x.id === zone);
+  if (!z?.en) return "";
+  return `LAYOUT (mandatory, it overrides the idea and the style reference): ${z.en} of the frame must stay COMPLETELY EMPTY: only plain, smooth background there, no product, no prop, no person, no shadow detail, no texture, so that a headline can be added later. Place the product(s) and all props in the rest of the frame. Do not write anything in that empty area.`;
 }

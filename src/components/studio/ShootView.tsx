@@ -21,9 +21,9 @@ interface Props {
 }
 
 const VERDICT: Record<string, { label: string; tone: "green" | "amber" | "red" }> = {
-  valid: { label: "Validée par le contrôle", tone: "green" },
-  review: { label: "À vérifier", tone: "amber" },
-  rejected: { label: "Rejetée par le contrôle", tone: "red" },
+  valid: { label: "Aucun défaut repéré", tone: "green" },
+  review: { label: "Défaut possible", tone: "amber" },
+  rejected: { label: "Défauts repérés", tone: "red" },
 };
 const REVIEW: Record<string, { label: string; tone: "gray" | "blue" | "green" | "red" }> = {
   draft: { label: "Brouillon", tone: "gray" },
@@ -367,9 +367,9 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
 
       <div className="flex flex-wrap items-center gap-2 mb-5">
         {chip("all", "Toutes", images.length)}
-        {chip("valid", "Validées", counts.valid)}
-        {chip("review", "À vérifier", counts.review)}
-        {chip("rejected", "Rejetées", counts.rejected)}
+        {chip("valid", "Aucun défaut repéré", counts.valid)}
+        {chip("review", "Défaut possible", counts.review)}
+        {chip("rejected", "Défauts repérés", counts.rejected)}
         <span className="w-px h-5 bg-[#E4E4E7] mx-1" />
         {chip("pending", "En validation", counts.pending)}
         {chip("approved", "Approuvées", counts.approved)}
@@ -395,7 +395,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
             <option value="score">Meilleur score d&apos;abord</option>
           </select>
         </label>
-        <label className="flex items-center gap-1.5 text-xs text-[#6B6B72]"><input type="checkbox" checked={hideRejected} onChange={(e) => setHideRejected(e.target.checked)} /> Masquer les rejetées</label>
+        <label className="flex items-center gap-1.5 text-xs text-[#6B6B72]"><input type="checkbox" checked={hideRejected} onChange={(e) => setHideRejected(e.target.checked)} /> Masquer celles avec défauts</label>
         {archivedCount > 0 && <label className="flex items-center gap-1.5 text-xs text-[#6B6B72]"><input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} /> Afficher les essais écartés ({archivedCount})</label>}
       </div>
       {counts.generating > 0 && <div className="text-xs text-[#6B6B72] mb-3 flex flex-wrap items-center gap-3"><span className="flex items-center gap-2"><Spinner /> {counts.generating} image(s) en cours de génération — tu peux rester sur cette page.</span><Btn size="sm" variant="danger" onClick={() => { if (confirm(`Annuler les ${counts.generating} générations en cours ?`)) cancelImages(images.filter((i) => i.state === "generating")); }}><X size={12} /> Tout annuler</Btn></div>}
@@ -441,7 +441,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
                       {img.id === latestFixId && <Badge tone="blue" className="bg-white/95">★ Dernière corrigée</Badge>}
                       {img.params?.archived && <Badge tone="gray" className="bg-white/95">Écartée</Badge>}
                     </div>
-                    {img.score !== null && <span className="bg-black/65 text-white rounded-full px-2 py-0.5 text-[11px] font-bold">{img.score}/100</span>}
+                    {/* plus de note sur 100 : le contrôle signale des défauts, il ne juge pas la qualité */}
                   </div>
                 )}
               </div>

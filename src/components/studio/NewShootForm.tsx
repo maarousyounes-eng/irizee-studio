@@ -84,7 +84,7 @@ export default function NewShootForm(p: Props) {
   async function fetchIdeas(count: number, avoid: string[], themeText?: string) {
     return (await api<{ ideas: { title: string; idea: string }[] }>("/api/shoots/ideas", {
       brief: prompt, n: count, visualType: vtype, productIds: noProduct ? [] : [productId, ...extraIds.filter((x) => x !== productId)].slice(0, 4), productMode, noProduct, noPeople,
-      inspMode, inspirationPaths: inspirations, inspirationAnalyses: inspirations.map((p) => insp[p]?.state === "done" ? { analysis: insp[p].analysis, note: insp[p].note !== insp[p].summary ? insp[p].note : "" } : null).filter(Boolean), avoid, theme: themeText,
+      inspMode, inspirationPaths: inspirations, inspirationAnalyses: inspirations.map((p) => insp[p]?.state === "done" ? { analysis: insp[p].analysis, note: insp[p].note !== insp[p].summary ? insp[p].note : "" } : null).filter(Boolean), avoid, theme: themeText, textZone,
     })).ideas;
   }
   async function proposeAll() {
