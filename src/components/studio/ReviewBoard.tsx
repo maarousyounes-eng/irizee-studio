@@ -78,7 +78,7 @@ export default function ReviewBoard({ me }: { me: { id: string; name: string; ro
                 </div>
                 <p className="text-[#6B6B72] line-clamp-2">{r.shoots?.prompt}</p>
                 <div className="flex flex-wrap gap-1.5">
-                  {r.score !== null && <Badge tone={r.verdict === "valid" ? "green" : r.verdict === "review" ? "amber" : "red"}>Contrôle {r.score}/100</Badge>}
+                  {r.score !== null && <Badge tone={r.verdict === "valid" ? "green" : r.verdict === "review" ? "amber" : "red"}>{r.verdict === "valid" ? "Aucun défaut repéré" : r.verdict === "review" ? "Défaut possible" : "Défauts repérés"}</Badge>}
                   <Link href={`/shoots/${r.shoot_id}`} className="text-[11px] text-[#2B6EE8] font-semibold self-center">Voir le shooting →</Link>
                 </div>
                 <div className="flex flex-wrap gap-1.5 pt-1">

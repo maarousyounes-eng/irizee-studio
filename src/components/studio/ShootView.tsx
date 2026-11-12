@@ -88,10 +88,10 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
   const [ideaHint, setIdeaHint] = useState("");
   const [ideaText, setIdeaText] = useState("");
   const [ideaBusy, setIdeaBusy] = useState<"" | "propose" | "create">("");
-  async function proposeIdea() {
+  async function proposeIdea(hint?: string) {
     if (!ideaFor) return;
     setIdeaBusy("propose");
-    try { const r = await api<{ idea: string }>(`/api/images/${ideaFor.id}/idea`, { action: "propose", hint: ideaHint }); setIdeaText(r.idea); }
+    try { const r = await api<{ idea: string }>(`/api/images/${ideaFor.id}/idea`, { action: "propose", hint: hint ?? ideaHint }); setIdeaText(r.idea); }
     catch (e) { flash(e instanceof Error ? e.message : "Erreur"); }
     setIdeaBusy("");
   }
@@ -464,7 +464,6 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
                       {v ? <Badge tone={v.tone} className="bg-white/95">{v.label}</Badge> : <Badge tone="gray" className="bg-white/95"><Spinner className="w-3 h-3" /> Contrôle…</Badge>}
                       {(img.kind !== "generated" || img.version > 1) && <Badge tone="blue" className="bg-white/95">{img.kind === "format" ? `Format ${FORMATS[img.aspect ?? ""]?.short ?? img.aspect}` : img.params?.n > 1 ? `Proposition ${img.params.i}/${img.params.n}` : `Version ${img.version}`}</Badge>}
                       {imageLabel(shoot.visual_type, img.variant_index) && <Badge tone="gray" className="bg-white/95">{imageLabel(shoot.visual_type, img.variant_index)}{shoot.visual_type === "carousel" && slideInfo[img.variant_index] ? ` · ${slideInfo[img.variant_index].slice(0, 40)}` : ""}</Badge>}
-                      {img.params?.maskEdit && <Badge tone="blue" className="bg-white/95">Test : retouche au masque</Badge>}
                       {img.id === latestFixId && <Badge tone="blue" className="bg-white/95">★ Dernière corrigée</Badge>}
                       {img.params?.archived && <Badge tone="gray" className="bg-white/95">Écartée</Badge>}
                     </div>
@@ -533,11 +532,16 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
                       {img.kind === "correction" && img.params?.n > 1 && !img.params?.archived && <Btn size="sm" onClick={() => { archiveGroup(img); flash("Proposition gardée, les autres sont écartées"); }}><Check size={12} /> Garder celle-ci</Btn>}
                       {img.kind === "format" && !img.params?.archived && <Btn size="sm" variant="ghost" onClick={() => retryFormat(img)} title="Refait cette déclinaison depuis la même image"><RotateCcw size={12} /> Réessayer</Btn>}
                       {img.kind === "correction" && !img.params?.archived && <Btn size="sm" variant="ghost" onClick={() => retryFix(img)} title="Relance en tenant compte de ce qui n'a pas marché"><RotateCcw size={12} /> Réessayer</Btn>}
-                      {img.parent_id && img.kind !== "format" && <Btn size="sm" variant="ghost" onClick={() => setCompare(img.id)}>Avant / après</Btn>}
-                      <Btn size="sm" variant="ghost" onClick={() => submitFix(img, "label")} title="Corrige uniquement le texte de l'étiquette"><Type size={12} /> Étiquette</Btn>
                       {img.path && <Btn size="sm" variant="ghost" onClick={() => setCropFor(img)} title="Recadrer ou créer un autre format, à la souris (gratuit)"><LayoutTemplate size={12} /> Formats</Btn>}
-                      <Btn size="sm" variant="ghost" onClick={() => { setFormatFor(img.id); setFormats([]); }} title="L'IA redessine l'image dans un autre format (payant)">Recomposer (IA)</Btn>
-                      {url && <a href={url} download={fileName(img)} className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-xl border border-[#E4E4E7] hover:bg-[#F4F4F5]"><Download size={12} /></a>}
+                      <details className="relative">
+                        <summary className="list-none cursor-pointer inline-flex items-center px-3 py-1.5 text-xs font-semibold rounded-xl border border-[#E4E4E7] bg-white hover:bg-[#F4F4F5]">Plus</summary>
+                        <div className="absolute z-10 mt-1 left-0 w-60 bg-white border border-[#E4E4E7] rounded-xl shadow-lg p-1.5 flex flex-col gap-0.5">
+                          {img.parent_id && img.kind !== "format" && <button type="button" className="text-left text-xs px-2.5 py-2 rounded-lg hover:bg-[#F4F4F5]" onClick={() => setCompare(img.id)}>Comparer avant / après</button>}
+                          <button type="button" className="text-left text-xs px-2.5 py-2 rounded-lg hover:bg-[#F4F4F5]" onClick={() => submitFix(img, "label")}>Réparer le texte de l&apos;étiquette (1 image payante)</button>
+                          <button type="button" className="text-left text-xs px-2.5 py-2 rounded-lg hover:bg-[#F4F4F5]" onClick={() => { setFormatFor(img.id); setFormats([]); }}>Faire redessiner dans un autre format par l&apos;IA (payant)</button>
+                          {url && <a href={url} download={fileName(img)} className="text-left text-xs px-2.5 py-2 rounded-lg hover:bg-[#F4F4F5] text-[#0A0A0B]">Télécharger l&apos;image</a>}
+                        </div>
+                      </details>
                       {(isStaff || mine) && <Btn size="sm" variant="ghost" onClick={() => setOpen({ ...open, [img.id]: !open[img.id] })}><MessageSquare size={12} /></Btn>}
                       {isStaff && <Btn size="sm" variant="danger" onClick={() => removeImage(img)}><Trash2 size={12} /></Btn>}
                     </div>
@@ -605,7 +609,12 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
               <Label>Une envie pour la nouvelle idée ? (facultatif)</Label>
               <input className={INPUT} value={ideaHint} onChange={(e) => setIdeaHint(e.target.value)} placeholder="Ex : plutôt une main qui étale le masque, fond bleu cobalt" />
             </div>
-            <Btn variant="ghost" onClick={proposeIdea} disabled={!!ideaBusy}>{ideaBusy === "propose" ? <Spinner /> : <Lightbulb size={13} />} {ideaText ? "Proposer une autre idée" : "Proposer une idée (gratuit)"}</Btn>
+            <div className="flex flex-wrap gap-1.5">
+              {([["Plus comme ça", "Garde le même univers, le même décor et la même lumière que l'image actuelle, avec une autre prise de vue."], ["Autre angle", "Même scène, mais un angle de caméra et un cadrage nettement différents."], ["Autre décor", "Même produit et même attitude, dans un décor et des matières différents."], ["Autre couleur", "Même idée, avec une autre palette de couleurs."]] as const).map(([l, h]) => (
+                <button key={l} type="button" disabled={!!ideaBusy} onClick={() => { setIdeaHint(h); proposeIdea(h); }} className="px-3 py-2 rounded-full text-xs font-semibold border border-[#C9D9F8] bg-[#EBF2FF] text-[#1F55BC]">{l}</button>
+              ))}
+            </div>
+            <Btn variant="ghost" onClick={() => proposeIdea()} disabled={!!ideaBusy}>{ideaBusy === "propose" ? <Spinner /> : <Lightbulb size={13} />} {ideaText ? "Proposer une autre idée" : "Proposer une idée (gratuit)"}</Btn>
             {ideaText && (
               <div>
                 <Label>L&apos;idée (modifiable)</Label>

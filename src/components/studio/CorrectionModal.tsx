@@ -45,7 +45,6 @@ export default function CorrectionModal({ bases, currentId, aspect, isStaff, onC
   const [draft, setDraft] = useState<Zone | null>(null);
   const [text, setText] = useState("");
   const [remember, setRemember] = useState(false);
-  const [maskEdit, setMaskEdit] = useState(false);
   const [busy, setBusy] = useState(false);
   const sb = useSupabase();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -105,7 +104,7 @@ export default function CorrectionModal({ bases, currentId, aspect, isStaff, onC
   }
   async function apply() {
     setBusy(true);
-    try { await onSubmit({ feedback: text.trim(), zones, remember, refs: refs.map((r) => r.path), baseId, pre: check?.pre ?? undefined, maskEdit }); } finally { setBusy(false); }
+    try { await onSubmit({ feedback: text.trim(), zones, remember, refs: refs.map((r) => r.path), baseId, pre: check?.pre ?? undefined }); } finally { setBusy(false); }
   }
 
   return (
@@ -124,7 +123,7 @@ export default function CorrectionModal({ bases, currentId, aspect, isStaff, onC
                   </button>
                 ))}
               </div>
-              {bases.length >= 4 && <p className="text-[11px] text-[#B45309] mt-1">Cette image a déjà {bases.length - 1} corrections successives : à chaque régénération la qualité peut se dégrader. Repars plutôt d&apos;une version précédente.</p>}
+              {bases.length >= 3 && <p className="text-[12px] text-[#7A4B00] bg-[#FFF4D6] rounded-lg px-2.5 py-1.5 mt-1.5">Cette image a déjà {bases.length - 1} corrections. Chaque retouche abîme un peu l&apos;image : au-delà de 2, mieux vaut « Autre idée » ou refaire la photo que corriger encore.</p>}
             </div>
           )}
           <Label>1. Entoure les zones concernées <span className="normal-case tracking-normal font-normal">(facultatif, jusqu&apos;à 5)</span></Label>
@@ -199,12 +198,6 @@ export default function CorrectionModal({ bases, currentId, aspect, isStaff, onC
             <label className="flex items-start gap-2 text-[12px] text-[#6B6B72]">
               <input type="checkbox" className="mt-0.5" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
               <span>Retenir cette consigne pour ce produit <span className="text-[#A0A0A8]">(l&apos;erreur ne reviendra plus sur les prochains shootings)</span></span>
-            </label>
-          )}
-          {isStaff && (
-            <label className="flex items-start gap-2 text-[12px] text-[#6B6B72] p-2.5 rounded-xl border border-dashed border-[#C9D9F8] bg-[#F7FAFF]">
-              <input type="checkbox" className="mt-0.5" checked={maskEdit} onChange={(e) => setMaskEdit(e.target.checked)} />
-              <span><b className="text-[#1F55BC]">Test : nouvelle retouche</b> (photo entière + masque, comme ChatGPT). Le reste de la photo ne bouge pas d&apos;un pixel. Comparez avec l&apos;ancienne méthode.</span>
             </label>
           )}
           {check && (check.clarify ? (
