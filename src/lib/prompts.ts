@@ -32,6 +32,8 @@ export const REALISM =
 export const wantsPhoneUi = (analysis: string, brief: string) =>
   /PHONE UI:\s*yes/i.test(analysis) || /interface (du |de |d'un )?t[ée]l[ée]phone|mode photo|appareil photo de l'iphone|écran de l'appareil photo|grille (de l'appareil|photo)/i.test(brief);
 const OVERLAY_OK = "INTENDED STYLE: the client deliberately asked for a phone camera interface overlay (viewfinder grid, camera icons, phone frame). It is NOT a defect: never count it as added text, graphic element, artifact or issue, and do not lower any score for it.";
+/** Toujours un rendu réel (demande permanente du client) : jamais un graphisme. */
+export const REAL_LOOK = "Everything looks REAL, never like a graphic: a true photograph of real physical objects. The product is a real 3D object with its real material (brushed metal with soft real reflections, frosted glass, ribbed plastic cap), and its label is really printed on the surface and follows its curve. The packshot may be a clean studio render: take the design from it, but photograph the product as a real object. Never a flat graphic, illustration, 3D render, mockup or cut-out.";
 /** Le texte imprimé ne doit jamais sortir à l'envers (effet miroir des selfies). */
 export const NO_MIRROR = "Every text printed on the product reads normally, left to right, NEVER mirrored or reversed, even in a selfie, a front-camera shot or a mirror reflection.";
 /** Pendant une retouche, le produit ne change jamais. */
@@ -109,6 +111,7 @@ export function buildPrompt(a: {
     "",
     "HARD RULES:",
     numbered([
+      REAL_LOOK,
       ...a.rules, ...products.flatMap((p) => p.rules ?? []),
       phone ? "The smartphone camera interface asked for by the client is reproduced as described; no other graphic element." : "One single photograph: no phone interface, grid, icons, frame, split screen or collage.",
       `No added text, letters, logo or watermark${a.noProduct ? "" : ": the only text is what is printed on the real products"}${phone ? " (plus the labels of the phone interface)" : ""}.`,
@@ -436,6 +439,7 @@ export function ideasPrompt(a: { brief: string; n: number; type: string; perImag
     !a.theme && a.oneCampaign ? `First invent ONE strong, original campaign art direction from the brief (central idea, set and materials, palette, light, attitude), then write ${a.n} shots of THIS single direction: same universe for every image, a different framing, angle and arrangement for each. Start every idea with the name of the direction.` : "",
     a.theme || a.oneCampaign ? "" : `Write ${a.n} ideas, ONE per image, each using a clearly DIFFERENT creative device. Devices to pick from (or better): play of scale (giant product, miniature set), sculptural set design (plaster, stone, blocks, sand), graphic hard shadows and light shapes, colour blocking, macro of the formula or ingredient as a landscape, water / splash / ripple frozen in motion, reflection and mirror games, levitation with real physical support, unexpected material contrast (chrome, ice, silk, velvet), tight crop on a detail of skin and product, still life with a story, raw ingredient (indigo powder cloud, plant) staged as art.`,
     a.taste ? `BRAND TASTE (written by the client, follow it): ${a.taste}` : "",
+    "Always REAL photography of real physical objects and real sets: never graphic design, illustration, 3D render or collage.",
     "Every idea is physically shootable in a real studio, premium and editorial, never cheesy: no roses, petals, decorative flowers or fruit, no generic aloe slices, no spa candles, no clichés, unless the brief asks for them. Each product appears exactly once, upright or naturally placed, at its real size, label facing camera, never an extreme close-up of the label.",
     a.avoid.length ? `Do not repeat these ideas: ${a.avoid.join(" | ")}` : "",
     TEXT_ZONES.find((x) => x.id === a.textZone)?.en ? `EVERY idea must leave ${TEXT_ZONES.find((x) => x.id === a.textZone)!.en} of the frame completely empty (plain background) for a headline: compose the scene in the rest of the frame.` : "",
@@ -479,6 +483,7 @@ export function directionsPrompt(a: { brief: string; n: number; type: string; pr
     TEXT_ZONES.find((x) => x.id === a.textZone)?.en ? `Every image of the campaign must leave ${TEXT_ZONES.find((x) => x.id === a.textZone)!.en} empty for a headline.` : "",
     a.avoid.length ? `Already proposed, do NOT repeat: ${a.avoid.join(" | ")}` : "",
     a.taste ? `BRAND TASTE (written by the client, follow it): ${a.taste}` : "",
+    "Always REAL photography of real physical objects and real sets: never graphic design, illustration, 3D render or collage.",
     `Propose ${a.n} CLEARLY DIFFERENT art directions. Each one is ONE coherent universe for the WHOLE campaign (all images share it): a strong central idea, the set and materials, the colour palette, the light, the attitude. Bold, editorial, premium and physically shootable; never cheesy (no roses, petals, decorative flowers or fruit, spa clichés) unless the brief asks.`,
     'Return JSON only: {"directions": [{"title": str (French, 2-5 words), "concept": str (French, 1-2 sentences: the central idea and why it sells), "set": str (French: décor et matières), "palette": str (French: couleurs), "light": str (French: lumière), "attitude": str (French: ton, énergie, cadrages typiques)}]}',
   ].filter(Boolean).join("\n");

@@ -21,6 +21,7 @@ export async function POST(req: Request) {
       `ART DIRECTION: ${direction}`,
       prods.length ? `The attached image(s) are the real product packshot(s) (${prods.map((p) => `"${p!.product.name}"`).join(", ")}): show ${prods.length > 1 ? "exactly one of each" : "exactly one"}, same shape and colours, entirely visible, at a realistic size.` : "No product in the image.",
       b.noPeople ? "No person in the image." : "",
+      "A real photograph of real objects, never a graphic, illustration or 3D render.",
       "No added text, logo, frame or collage. No flowers, towels or spa props unless the direction asks for them.",
     ].filter(Boolean).join("\n");
     const parts: Part[] = [{ text: prompt }, ...packs.map((p) => imgPart(p.buf, p.mime))];

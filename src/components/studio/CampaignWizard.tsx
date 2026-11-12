@@ -280,14 +280,14 @@ export default function CampaignWizard({ products, models, library }: Props) {
                   <div className="relative aspect-[4/5] rounded-xl overflow-hidden bg-[#F4F4F5] flex items-center justify-center">
                     {sk?.state === "done" && sk.path
                       /* eslint-disable-next-line @next/next/no-img-element */
-                      ? <img src={imgUrl(sk.path)} alt={`Esquisse : ${d.title}`} className="w-full h-full object-cover" />
+                      ? <img src={imgUrl(sk.path)} alt={`Esquisse : ${d.title}`} className="absolute inset-0 w-full h-full object-cover" />
                       : sk?.state === "error" ? <span className="text-[11px] text-[#52525B] px-3 text-center">Esquisse indisponible : le texte décrit la direction.</span>
                       : <span className="text-[11px] text-[#52525B] flex items-center gap-1.5"><Spinner className="w-3 h-3" /> Esquisse en cours…</span>}
                     <span className="absolute top-2 left-2 text-[10px] font-bold bg-white rounded-md px-1.5 py-0.5">Esquisse</span>
                   </div>
                   <p className="text-sm font-semibold">{d.title}</p>
                   <p className="text-[12px] leading-snug">{d.concept}</p>
-                  <p className="text-[11px] text-[#52525B] leading-snug">{d.set} · {d.palette} · {d.light}</p>
+                  <p className="text-[11px] text-[#52525B] leading-snug line-clamp-4">{d.set} · {d.palette} · {d.light}</p>
                   <Btn size="sm" variant={on ? "primary" : "ghost"} className="mt-auto" onClick={() => { setChosen(i); setChosenText(dirText(d)); }}>{on ? "Direction choisie" : "Choisir"}</Btn>
                 </div>
               );
