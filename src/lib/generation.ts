@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { MODELS, gemini, imgPart, firstImage, firstText, noImageReason, parseJson, withAiCtx, type Part } from "./gemini";
 import sharp from "sharp";
-import { wantsPhoneUi, baAfterPrompt, typeLine, REALISM_NATURAL, buildPrompt, correctionPrompt, qcPromptNoProduct, sizeLine, formatPrompt, interpretPrompt, localEditPrompt, LOCATE_PRODUCT_PROMPT, READ_LABEL_PROMPT, qcPrompt, variationHint } from "./prompts";
+import { maskEditPrompt, wantsPhoneUi, baAfterPrompt, typeLine, REALISM_NATURAL, buildPrompt, correctionPrompt, qcPromptNoProduct, sizeLine, formatPrompt, interpretPrompt, localEditPrompt, LOCATE_PRODUCT_PROMPT, READ_LABEL_PROMPT, qcPrompt, variationHint } from "./prompts";
 import { normalizeSlides, type TypeParams } from "./visualTypes";
 import { cropBoxFor, cropImage, pasteBack, unionZones, zoneFromBox, zonesFromBoxes, type CropBox, type Zone } from "./localedit";
 import type { ImageRow, Product, QC } from "@/types";
@@ -99,6 +99,42 @@ async function localEditCrop(a: {
     try { edited = firstImage(await gemini(a.model, lp, { purpose: a.mode === "label" ? "réparation étiquette" : "retouche locale", image: true, aspect: box.ratio, size: t === 0 ? (a.mode === "label" || Math.max(box.width, box.height) > 1100 ? "2K" : "1K") : undefined, signal: a.signal, timeoutMs: a.timeoutMs })); } catch { /* nouvelle tentative */ }
   }
   return edited ? { edited, box } : null;
+}
+
+/**
+ * Retouche au masque (test) : la photo ENTIÈRE est envoyée à OpenAI, complétée par des bords en miroir pour avoir
+ * exactement un format qu'il sait produire (rien n'est déformé ni décalé), avec un masque qui ne laisse modifier que la zone.
+ * On ne garde ensuite que la zone retouchée : le reste de la photo est identique au pixel près.
+ */
+async function maskEditOpenAI(a: {
+  prev: Buffer; W: number; H: number; region: Zone | null; instruction: string; product: Product; rules: string[];
+  refs: Img[]; packshots: Img[]; signal?: AbortSignal; timeoutMs?: number;
+}): Promise<Buffer | null> {
+  const r = a.W / a.H;
+  const [TW, TH] = r > 1.2 ? [1536, 1024] : r < 0.83 ? [1024, 1536] : [1024, 1024];
+  const scale = Math.min(TW / a.W, TH / a.H);
+  const sw = Math.round(a.W * scale), sh = Math.round(a.H * scale);
+  const padL = Math.floor((TW - sw) / 2), padT = Math.floor((TH - sh) / 2);
+  const padded = await sharp(a.prev).resize(sw, sh).extend({ top: padT, bottom: TH - sh - padT, left: padL, right: TW - sw - padL, extendWith: "mirror" }).png().toBuffer();
+  let mask: Buffer | undefined;
+  if (a.region) {
+    const raw = Buffer.alloc(TW * TH * 4, 255);
+    const g = 0.02; // un peu de marge autour de la zone
+    const x0 = Math.max(0, Math.floor(padL + (a.region.x - g) * sw)), y0 = Math.max(0, Math.floor(padT + (a.region.y - g) * sh));
+    const x1 = Math.min(TW, Math.ceil(padL + (a.region.x + a.region.w + g) * sw)), y1 = Math.min(TH, Math.ceil(padT + (a.region.y + a.region.h + g) * sh));
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) raw[(y * TW + x) * 4 + 3] = 0;
+    mask = await sharp(raw, { raw: { width: TW, height: TH, channels: 4 } }).png().toBuffer();
+  }
+  const parts: Part[] = [{ text: maskEditPrompt({ product: a.product, rules: a.rules, instruction: a.instruction, hasRegion: !!a.region, refCount: a.refs.length }) }, imgPart(padded, "image/png"), ...a.refs.map((x) => imgPart(x.buf, x.mime)), ...a.packshots.map((x) => imgPart(x.buf, x.mime))];
+  const out = firstImage(await gemini(IMAGE_MODEL, parts, { purpose: "retouche au masque", image: true, aspect: TW > TH ? "3:2" : TW < TH ? "2:3" : "1:1", mask, signal: a.signal, timeoutMs: a.timeoutMs }));
+  if (!out) return null;
+  // On retire les bords ajoutés et on revient à la taille d'origine
+  const full = await sharp(await sharp(out).resize(TW, TH, { fit: "fill" }).toBuffer()).extract({ left: padL, top: padT, width: sw, height: sh }).resize(a.W, a.H, { fit: "fill" }).png().toBuffer();
+  if (!a.region) return full;
+  const box = cropBoxFor(a.region, a.W, a.H);
+  if (!box) return full;
+  const editedCrop = await sharp(full).extract({ left: box.left, top: box.top, width: box.width, height: box.height }).png().toBuffer();
+  return pasteBack(a.prev, editedCrop, box, a.region, a.W, a.H);
 }
 
 /** Netteté globale (variance du Laplacien sur une version normalisée) : sert à détecter une retouche qui « lisse » l'image. */
@@ -445,6 +481,10 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
       } catch { region = null; }
     }
 
+    // Test « retouche au masque » (photo entière + masque, sans découpe déformée)
+    if (!buf && prm.maskEdit && editMode === "edit" && image.kind === "correction" && W && H) {
+      try { buf = await maskEditOpenAI({ prev: prev.buf, W, H, region, instruction, product, rules, refs, packshots, signal, timeoutMs: left() }); } catch { buf = null; }
+    }
     // Retouche LOCALE : seule la zone est modifiée, le reste de l'image est strictement conservé.
     if (!buf && region && W && H && image.kind !== "format") {
       const lr = { prev: prev.buf, W, H, region, instruction, mode: editMode, product, rules, refs: [], packshots, original, model, signal } as Parameters<typeof localEditCrop>[0];

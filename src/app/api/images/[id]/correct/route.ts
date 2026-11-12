@@ -44,7 +44,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       shoot_id: parent.shoot_id, parent_id: parent.id, kind: mode === "label" ? "label" : "correction",
       version: (parent.version ?? 1) + 1, variant_index: parent.variant_index, aspect: parent.aspect, model_id: parent.model_id,
       feedback: mode === "label" ? "Réparation de l'étiquette" : feedback,
-      params: { ...(zone ? { zone } : {}), ...(zones.length ? { zones } : {}), group, n, i: i + 1, original: feedback, ...(refs.length ? { refs } : {}), round: Math.min(2, Math.max(0, Number(b.round) || 0)), ...(avoid ? { avoid } : {}), ...(pre ? { pre, instruction: pre.instruction, understood: pre.understood, ...(pre.redo ? { redo: true } : {}) } : {}) },
+      params: { ...(zone ? { zone } : {}), ...(zones.length ? { zones } : {}), group, n, i: i + 1, original: feedback, ...(refs.length ? { refs } : {}), round: Math.min(2, Math.max(0, Number(b.round) || 0)), ...(avoid ? { avoid } : {}), ...(pre ? { pre, instruction: pre.instruction, understood: pre.understood, ...(pre.redo ? { redo: true } : {}) } : {}), ...(b.maskEdit === true ? { maskEdit: true } : {}) },
       created_by: user.id,
     }));
     const { data: imgs, error } = await sb.from("images").insert(rows).select("id");

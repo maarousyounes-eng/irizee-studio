@@ -210,9 +210,9 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
     generating: images.filter((i) => i.state === "generating").length,
   }), [images]);
 
-  async function submitFix(img: ImageRow, mode: "edit" | "label", v?: { feedback: string; zones: NoteZone[]; remember: boolean; refs?: string[]; pre?: unknown }, avoid?: string, round = 0) {
+  async function submitFix(img: ImageRow, mode: "edit" | "label", v?: { feedback: string; zones: NoteZone[]; remember: boolean; refs?: string[]; pre?: unknown; maskEdit?: boolean }, avoid?: string, round = 0) {
     try {
-      const r = await api<{ imageIds: string[] }>(`/api/images/${img.id}/correct`, { mode, feedback: v?.feedback ?? "", zones: v?.zones ?? [], remember: !!v?.remember, refs: v?.refs ?? [], avoid, round, candidates: 1, pre: v?.pre ?? null });
+      const r = await api<{ imageIds: string[] }>(`/api/images/${img.id}/correct`, { mode, feedback: v?.feedback ?? "", zones: v?.zones ?? [], remember: !!v?.remember, refs: v?.refs ?? [], avoid, round, candidates: 1, pre: v?.pre ?? null, maskEdit: !!v?.maskEdit });
       setFix(null);
       await load(); run(r.imageIds);
       flash(mode === "label" ? "Réparation de l'étiquette lancée" : round > 0 ? `La correction n'a pas marché : je réessaie automatiquement (essai ${round + 1}/2) avec une consigne plus précise` : v?.remember ? "Correction lancée — consigne mémorisée pour ce produit" : "Correction lancée : le résultat sera vérifié automatiquement");
@@ -243,7 +243,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
     ].filter(Boolean).join("; ");
     // les anciennes propositions sont écartées pour ne pas encombrer la page
     await archiveGroup(img, null);
-    await submitFix(parent, "edit", { feedback: String(img.params?.original ?? img.feedback ?? ""), zones: ((img.params?.zones as NoteZone[]) ?? (img.params?.zone ? [{ ...(img.params.zone as object), note: "" } as NoteZone] : [])), remember: false, refs: (img.params?.refs as string[]) ?? [], pre: img.params?.redo ? img.params?.pre : undefined }, issues || "the result did not match the request");
+    await submitFix(parent, "edit", { feedback: String(img.params?.original ?? img.feedback ?? ""), zones: ((img.params?.zones as NoteZone[]) ?? (img.params?.zone ? [{ ...(img.params.zone as object), note: "" } as NoteZone] : [])), remember: false, refs: (img.params?.refs as string[]) ?? [], pre: img.params?.redo ? img.params?.pre : undefined, maskEdit: !!img.params?.maskEdit }, issues || "the result did not match the request");
   }
 
   /** Garde cette proposition et écarte les autres essais du même groupe. */
@@ -437,6 +437,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
                       {v ? <Badge tone={v.tone} className="bg-white/95">{v.label}</Badge> : <Badge tone="gray" className="bg-white/95"><Spinner className="w-3 h-3" /> Contrôle…</Badge>}
                       {(img.kind !== "generated" || img.version > 1) && <Badge tone="blue" className="bg-white/95">{img.kind === "format" ? `Format ${FORMATS[img.aspect ?? ""]?.short ?? img.aspect}` : img.params?.n > 1 ? `Proposition ${img.params.i}/${img.params.n}` : `Version ${img.version}`}</Badge>}
                       {imageLabel(shoot.visual_type, img.variant_index) && <Badge tone="gray" className="bg-white/95">{imageLabel(shoot.visual_type, img.variant_index)}{shoot.visual_type === "carousel" && slideInfo[img.variant_index] ? ` · ${slideInfo[img.variant_index].slice(0, 40)}` : ""}</Badge>}
+                      {img.params?.maskEdit && <Badge tone="blue" className="bg-white/95">Test : retouche au masque</Badge>}
                       {img.id === latestFixId && <Badge tone="blue" className="bg-white/95">★ Dernière corrigée</Badge>}
                       {img.params?.archived && <Badge tone="gray" className="bg-white/95">Écartée</Badge>}
                     </div>

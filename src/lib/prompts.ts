@@ -391,3 +391,18 @@ export function anotherIdeaPrompt(a: { brief: string; type: string; slide?: { ti
     'Return JSON only: {"idea": str (French, 25 to 45 words: subject, framing, set and background, light)}',
   ].filter(Boolean).join("\n");
 }
+
+/** Retouche « au masque » (comme dans ChatGPT) : la photo entière est envoyée, seule la zone du masque peut changer. */
+export function maskEditPrompt(a: { product: Product; rules: string[]; instruction: string; hasRegion: boolean; refCount?: number }) {
+  const texts = a.product.texts?.length ? `Texts that must appear exactly on the product:\n${textsBlock(a.product)}` : "";
+  return [
+    "You are a high-end photo retoucher working on an advertising photograph for the cosmetics brand Irizée.",
+    "Image 1 = the FULL photo to retouch (its outer edges may be a mirrored padding: ignore them)." + (a.refCount ? ` ${refNote(a.refCount)}` : "") + " The following image(s) = the REAL product packshot(s).",
+    a.rules.length || a.product.rules?.length ? `NON-NEGOTIABLE RULES:\n${numbered([...a.rules, ...(a.product.rules ?? [])])}` : "",
+    `RETOUCH: ${a.instruction}`,
+    a.hasRegion ? "Change ONLY the area left editable by the mask; everything else must stay exactly as it is." : "Keep the same framing, person, face, outfit, background and light: change only what is asked.",
+    "The result must look like the same real photograph, retouched by an expert: same light direction, same colour grade, same grain and sharpness, real skin texture with pores, realistic materials (a cosmetic product applied on skin keeps a real cream or clay texture and lets the skin show through where it is thin; never flat paint or a graphic shape).",
+    PRODUCT_LOCK, NO_MIRROR,
+    texts,
+  ].filter(Boolean).join("\n");
+}

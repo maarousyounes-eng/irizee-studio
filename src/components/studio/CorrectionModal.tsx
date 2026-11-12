@@ -32,7 +32,7 @@ interface Props {
   aspect: string;
   isStaff: boolean;
   onClose: () => void;
-  onSubmit: (v: { feedback: string; zones: NoteZone[]; remember: boolean; refs: string[]; baseId: string; pre?: unknown }) => Promise<void> | void;
+  onSubmit: (v: { feedback: string; zones: NoteZone[]; remember: boolean; refs: string[]; baseId: string; pre?: unknown; maskEdit?: boolean }) => Promise<void> | void;
 }
 
 export default function CorrectionModal({ bases, currentId, aspect, isStaff, onClose, onSubmit }: Props) {
@@ -45,6 +45,7 @@ export default function CorrectionModal({ bases, currentId, aspect, isStaff, onC
   const [draft, setDraft] = useState<Zone | null>(null);
   const [text, setText] = useState("");
   const [remember, setRemember] = useState(false);
+  const [maskEdit, setMaskEdit] = useState(false);
   const [busy, setBusy] = useState(false);
   const sb = useSupabase();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -104,7 +105,7 @@ export default function CorrectionModal({ bases, currentId, aspect, isStaff, onC
   }
   async function apply() {
     setBusy(true);
-    try { await onSubmit({ feedback: text.trim(), zones, remember, refs: refs.map((r) => r.path), baseId, pre: check?.pre ?? undefined }); } finally { setBusy(false); }
+    try { await onSubmit({ feedback: text.trim(), zones, remember, refs: refs.map((r) => r.path), baseId, pre: check?.pre ?? undefined, maskEdit }); } finally { setBusy(false); }
   }
 
   return (
@@ -198,6 +199,12 @@ export default function CorrectionModal({ bases, currentId, aspect, isStaff, onC
             <label className="flex items-start gap-2 text-[12px] text-[#6B6B72]">
               <input type="checkbox" className="mt-0.5" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
               <span>Retenir cette consigne pour ce produit <span className="text-[#A0A0A8]">(l&apos;erreur ne reviendra plus sur les prochains shootings)</span></span>
+            </label>
+          )}
+          {isStaff && (
+            <label className="flex items-start gap-2 text-[12px] text-[#6B6B72] p-2.5 rounded-xl border border-dashed border-[#C9D9F8] bg-[#F7FAFF]">
+              <input type="checkbox" className="mt-0.5" checked={maskEdit} onChange={(e) => setMaskEdit(e.target.checked)} />
+              <span><b className="text-[#1F55BC]">Test : nouvelle retouche</b> (photo entière + masque, comme ChatGPT). Le reste de la photo ne bouge pas d&apos;un pixel. Comparez avec l&apos;ancienne méthode.</span>
             </label>
           )}
           {check && (check.clarify ? (

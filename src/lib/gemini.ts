@@ -84,7 +84,7 @@ async function fitAspect(buf: Buffer, aspect?: string) {
 }
 
 /** Appel OpenAI (édition d'image avec références) ; renvoie une réponse au format Gemini pour que le reste du code ne change pas. */
-async function callOpenAI(model: string, parts: Part[], o: { purpose?: string; aspect?: string; timeoutMs?: number; signal?: AbortSignal }) {
+async function callOpenAI(model: string, parts: Part[], o: { purpose?: string; aspect?: string; timeoutMs?: number; signal?: AbortSignal; mask?: Buffer }) {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error("OPENAI_API_KEY manquante côté serveur");
   const name = model === "openai:auto" ? await resolveOpenAIModel(key) : model.slice(7);
@@ -98,6 +98,8 @@ async function callOpenAI(model: string, parts: Part[], o: { purpose?: string; a
     const t0 = Date.now();
     const fd = new FormData();
     fd.append("model", name); fd.append("prompt", prompt); fd.append("size", size); fd.append("quality", "high"); fd.append("n", "1");
+    // Masque : zone transparente = seule zone que le modèle a le droit de modifier dans la PREMIÈRE image (même taille qu'elle)
+    if (o.mask && imgs.length) fd.append("mask", new Blob([new Uint8Array(o.mask)], { type: "image/png" }), "mask.png");
     imgs.forEach((p, k) => fd.append("image[]", new Blob([new Uint8Array(Buffer.from(p.inline_data.data, "base64"))], { type: p.inline_data.mime_type }), `ref${k}.${p.inline_data.mime_type.includes("png") ? "png" : "jpg"}`));
     let res: Response;
     try {
@@ -123,10 +125,10 @@ async function callOpenAI(model: string, parts: Part[], o: { purpose?: string; a
   throw lastErr;
 }
 
-interface Opts { purpose?: string; image?: boolean; json?: boolean; aspect?: string; size?: string; timeoutMs?: number; signal?: AbortSignal }
+interface Opts { purpose?: string; image?: boolean; json?: boolean; aspect?: string; size?: string; timeoutMs?: number; signal?: AbortSignal; mask?: Buffer }
 
-export async function gemini(model: string, parts: Part[], { purpose, image, json, aspect, size, timeoutMs, signal }: Opts = {}) {
-  if (model.startsWith("openai:")) return callOpenAI(model, parts, { purpose, aspect, timeoutMs, signal });
+export async function gemini(model: string, parts: Part[], { purpose, image, json, aspect, size, timeoutMs, signal, mask }: Opts = {}) {
+  if (model.startsWith("openai:")) return callOpenAI(model, parts, { purpose, aspect, timeoutMs, signal, mask });
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new Error("GEMINI_API_KEY manquante côté serveur");
   const generationConfig: Record<string, unknown> = image
