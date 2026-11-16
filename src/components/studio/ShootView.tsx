@@ -377,7 +377,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
               <b>{isBa ? "Étape 3 : la photo « avant »." : isCar ? "Étape 5 : la slide de couverture." : "Étape 4 : l'image pilote."}</b>{" "}
               {!pilotImg ? "Elle est en cours de création (1 à 2 minutes). Vous n'avez payé qu'une image."
                 : isBa ? `Si elle vous plaît, validez-la : la photo « après » sera créée à partir d'elle (même personne, même cadrage, même lumière, seule la peau change)${rest > 1 ? `, puis les ${(rest - 1) / 2} autre(s) paire(s)` : ""}. Sinon, utilisez « Corriger » sous l'image.`
-                : isCar ? `Si elle vous plaît, validez-la : les ${rest} autres photos du carrousel seront créées dans le même univers (même style, même lumière, même mannequin). Sinon, utilisez « Corriger » ou « Autre idée » sous l'image, ou changez de direction.`
+                : isCar ? `Si elle vous plaît, validez-la : les ${rest} autres photos du carrousel seront créées dans le même univers (même style, même lumière${shoot.no_people ? "" : ", même mannequin"}). Sinon, utilisez « Corriger » ou « Autre idée » sous l'image, ou changez de direction.`
                 : `Si elle vous plaît, validez-la : les ${rest} autres images seront créées à partir d'elle (même décor, même lumière, même style). Sinon, utilisez « Corriger » ou « Autre idée » sous l'image, ou changez de direction.`}
               {pilotVersions.length > 1 && <span className="block mt-1 text-[12px]">Il y a {pilotVersions.length} versions : c&apos;est la plus récente qui sert de modèle. Mettez à la corbeille celles que vous ne voulez pas.</span>}
             </div>

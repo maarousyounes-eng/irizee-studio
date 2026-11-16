@@ -290,11 +290,12 @@ export function productPlan(shoot: { product_id: string; product_ids?: string[] 
 }
 
 /** Dernière version terminée d'une image du shooting (corrections comprises, hors formats et essais écartés) : c'est elle qui sert de référence. */
-async function latestVersionPath(sb: SupabaseClient, shootId: string, variantIndex: number): Promise<string | null> {
+async function latestVersion(sb: SupabaseClient, shootId: string, variantIndex: number): Promise<{ path: string; params: Record<string, any> | null } | null> {
   const { data } = await sb.from("images").select("path, params").eq("shoot_id", shootId).eq("variant_index", variantIndex).neq("kind", "format").eq("state", "done").is("deleted_at", null).not("path", "is", null).order("created_at", { ascending: false }).limit(8);
   const rows = (data ?? []) as { path: string; params: Record<string, any> | null }[];
-  return (rows.find((r) => !r.params?.archived) ?? rows[0])?.path ?? null;
+  return rows.find((r) => !r.params?.archived) ?? rows[0] ?? null;
 }
+const latestVersionPath = async (sb: SupabaseClient, shootId: string, variantIndex: number) => (await latestVersion(sb, shootId, variantIndex))?.path ?? null;
 
 export const generateImage = (sb: SupabaseClient, image: ImageRow, userId: string, signal?: AbortSignal) =>
   withAiCtx({ sb, userId, shootId: image.shoot_id, imageId: image.id }, () => generateImageInner(sb, image, userId, signal));
@@ -323,6 +324,7 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
   let prevImg: { buf: Buffer; mime: string } | null = null;
   let origImg: { buf: Buffer; mime: string } | null = null;
   let nInsp = 0;
+  let sameCrop: { x: number; y: number; w: number; h: number } | null = null; // avant/après : le recadrage de l'« avant », repris tel quel
   let skipChangeCheck = false; // réparation d'étiquette : le texte ne change que quelques pixels, c'est normal
 
   const prm0 = (image.params ?? {}) as Record<string, any>;
@@ -340,10 +342,14 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
     // Avant / après : l'« après » est la même photo que l'« avant », seule la peau change
     if (vtype === "ba" && image.variant_index % 2 === 1 && !redo) {
       // la dernière version de l'« avant » (corrections comprises) : c'est celle que le client a validée
-      const befPath = await latestVersionPath(sb, shoot.id, image.variant_index - 1);
-      if (!befPath) throw new Error("La photo « avant » de cette paire n'est pas encore prête : relance « après » une fois l'avant terminé");
-      const before = await download(sb, befPath);
-      parts = [{ text: baAfterPrompt({ tp, rules: [...rules, ...(noProduct ? [] : product.rules ?? [])], hasProduct: !noProduct, aspect }) }, imgPart(before.buf, before.mime), ...packshots.map((p) => imgPart(p.buf, p.mime))];
+      const bef = await latestVersion(sb, shoot.id, image.variant_index - 1);
+      if (!bef) throw new Error("La photo « avant » de cette paire n'est pas encore prête : relance « après » une fois l'avant terminé");
+      // Même cadrage garanti : l'« après » est refait sur l'image entière de l'« avant », puis recadré exactement au même endroit
+      const c = bef.params?.crop as { x: number; y: number; w: number; h: number } | undefined;
+      const full = bef.params?.master_path && c ? await download(sb, String(bef.params.master_path)).catch(() => null) : null;
+      if (full && c) sameCrop = c;
+      const before = full ?? (await download(sb, bef.path));
+      parts = [{ text: baAfterPrompt({ tp, rules: [...rules, ...(noProduct ? [] : product.rules ?? [])], hasProduct: !noProduct, aspect, sameFrame: !!sameCrop }) }, imgPart(before.buf, before.mime), ...packshots.map((p) => imgPart(p.buf, p.mime))];
     } else {
       // Une inspiration par variante : l'image i suit SON inspiration (pose, cadrage, lumière, style) ; elles tournent s'il y a plus de variantes que d'inspirations.
       // Carrousel : la même inspiration pour toutes les slides (cohérence de la série).
@@ -615,9 +621,13 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
     const MW = mm.width ?? 0, MH = mm.height ?? 0;
     const [aw, ah] = String(aspect).split(":").map(Number);
     if (MW && MH && aw && ah && Math.abs(MW / MH - aw / ah) > 0.01) {
-      const subject = await locateSubject({ buf, mime: "image/png" });
+      const subject = sameCrop ? null : await locateSubject({ buf, mime: "image/png" });
       const tz = String(shoot.visual_type) === "ad" ? String((shoot.type_params as TypeParams | null)?.textZone ?? "") : "";
-      const win = cropWindow(MW, MH, String(aspect), subject, { textZone: tz });
+      const fromBefore = (c: { x: number; y: number; w: number; h: number }) => {
+        const width = Math.min(MW, Math.max(1, Math.round(c.w * MW))), height = Math.min(MH, Math.max(1, Math.round(c.h * MH)));
+        return { left: Math.min(MW - width, Math.max(0, Math.round(c.x * MW))), top: Math.min(MH - height, Math.max(0, Math.round(c.y * MH))), width, height, fits: true };
+      };
+      const win = sameCrop ? fromBefore(sameCrop) : cropWindow(MW, MH, String(aspect), subject, { textZone: tz });
       const masterPath = `generated/${shoot.id}/${image.id}_m.jpg`;
       const master = await sharp(buf).jpeg({ quality: 94, chromaSubsampling: "4:4:4", mozjpeg: true }).toBuffer();
       const upM = await sb.storage.from(BUCKET).upload(masterPath, master, { contentType: "image/jpeg", upsert: true });

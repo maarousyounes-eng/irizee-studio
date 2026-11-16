@@ -338,7 +338,7 @@ export const REALISM_NATURAL =
   "SKIN & DETAIL QUALITY: realistic, unretouched skin with natural pores and texture, true-to-life colours, crisp detail. Never plastic, waxy or blurred. Keep every styling detail exactly as described.";
 
 /** L'après : la même photo, seule la peau change. */
-export function baAfterPrompt(a: { tp: TypeParams; rules: string[]; hasProduct: boolean; aspect: string }) {
+export function baAfterPrompt(a: { tp: TypeParams; rules: string[]; hasProduct: boolean; aspect: string; sameFrame?: boolean }) {
   const c = BA_CHANGES.find((x) => x.id === a.tp.baChange) ?? BA_CHANGES[0];
   const after = (c.id === "autre" ? a.tp.baAfter : c.after) || "healthier, more radiant skin";
   return [
@@ -347,7 +347,7 @@ export function baAfterPrompt(a: { tp: TypeParams; rules: string[]; hasProduct: 
     a.rules.length ? `BRAND RULES:\n${numbered(a.rules)}` : "",
     "TASK: recreate EXACTLY the same photo: same person (same face, features, hair, expression), same pose, same framing and camera angle, same background, same lighting, same clothes" + (a.hasProduct ? ", same product placement (the product stays identical to its packshot)" : "") + ".",
     `ONLY the skin changes: it now shows ${after}. The improvement is realistic and credible, never exaggerated: real pores and natural texture stay visible, no beauty filter, no added makeup.`,
-    `Format: aspect ratio ${a.aspect}. Do NOT add any text, letters, arrows, labels or graphic elements.`,
+    `${a.sameFrame ? "Format: exactly the same image format and framing as the BEFORE photo, pixel for pixel (never zoom, crop or shift the subject)" : `Format: aspect ratio ${a.aspect}`}. Do NOT add any text, letters, arrows, labels or graphic elements.`,
   ].filter(Boolean).join("\n");
 }
 

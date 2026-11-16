@@ -26,7 +26,7 @@ export async function POST(req: Request) {
     let slides: Slide[] = [];
     if (vtype === "carousel") { tp.carouselStyle = CAROUSEL_STYLES.some((x) => x.id === tpIn.carouselStyle) ? tpIn.carouselStyle : "edu"; slides = normalizeSlides(tpIn.slides); }
     let prompt = s(b.prompt, 4000);
-    if (!prompt && (vtype === "carousel" || vtype === "ba")) prompt = vtype === "ba" ? "Natural beauty portrait." : "Showcase the product.";
+    if (!prompt && (vtype === "carousel" || vtype === "ba")) prompt = vtype === "ba" ? "Portrait beauté naturel, de face." : "Mettre le produit en valeur.";
     if (!prompt) throw new HttpError(400, "Écris une consigne");
     if (!FORMATS[b.aspect]) throw new HttpError(400, "Format invalide");
     let n = Math.min(12, Math.max(1, Number(b.variants) || 4));
