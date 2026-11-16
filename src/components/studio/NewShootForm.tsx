@@ -6,7 +6,8 @@ import { ImagePlus, X, Wand2 } from "lucide-react";
 import { Btn, Card, INPUT, Label, Spinner, Badge } from "@/components/ui";
 import { api, uploadImage, useSignedUrls, useSupabase } from "@/lib/client";
 import { FORMATS, type Role } from "@/types";
-import { VISUAL_TYPES, SOCIAL_STYLES, TEXT_ZONES, BA_CHANGES, CAROUSEL_STYLES, SLIDE_LAYOUTS, SLIDE_ZONES, emptySlide, normalizeSlides, type Slide, type VisualType } from "@/lib/visualTypes";
+import { VISUAL_TYPES, SOCIAL_STYLES, TEXT_ZONES, BA_CHANGES, CAROUSEL_STYLES, emptySlide, normalizeSlides, type Slide, type VisualType } from "@/lib/visualTypes";
+import SlideCards from "./SlideCards";
 
 interface Props {
   role: Role;
@@ -51,7 +52,6 @@ export default function NewShootForm(p: Props) {
   const [textZone, setTextZone] = useState<string>(tp0.textZone ?? "top");
   const [slides, setSlides] = useState<Slide[]>(normalizeSlides(tp0.slides).length ? normalizeSlides(tp0.slides) : Array.from({ length: 5 }, emptySlide));
   const [carouselStyle, setCarouselStyle] = useState<string>(tp0.carouselStyle ?? "edu");
-  const setSlide = (i: number, p: Partial<Slide>) => setSlides((all) => all.map((x, k) => (k === i ? { ...x, ...p } : x)));
   const [planning, setPlanning] = useState(false);
   const [baChange, setBaChange] = useState<string>(tp0.baChange ?? "terne");
   const [baBefore, setBaBefore] = useState<string>(tp0.baBefore ?? "");
@@ -442,29 +442,7 @@ export default function NewShootForm(p: Props) {
                 <Btn size="sm" onClick={proposeSlides} disabled={planning}>{planning ? <Spinner className="border-white/40 border-t-white" /> : <Wand2 size={13} />} L&apos;IA propose le plan et les textes</Btn>
               </div>
             </div>
-            <div className="space-y-2">
-              {slides.map((x, i) => (
-                <div key={i} className="rounded-2xl border border-[#E4E4E7] bg-white p-3 space-y-2">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-xs font-bold w-14 shrink-0">Slide {i + 1}</span>
-                    <select aria-label={`Mise en page de la slide ${i + 1}`} className={INPUT + " !w-auto !py-1.5 text-xs"} value={x.layout} onChange={(e) => setSlide(i, { layout: e.target.value as Slide["layout"] })}>
-                      {SLIDE_LAYOUTS.filter((l) => i > 0 || l.id !== "text").map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
-                    </select>
-                    <select aria-label={`Place du texte, slide ${i + 1}`} className={INPUT + " !w-auto !py-1.5 text-xs"} value={x.zone} onChange={(e) => setSlide(i, { zone: e.target.value as Slide["zone"] })}>
-                      {SLIDE_ZONES.map((z) => <option key={z.id} value={z.id}>{z.label}</option>)}
-                    </select>
-                  </div>
-                  {x.layout !== "text" && (
-                    <input className={INPUT} value={x.photo} onChange={(e) => setSlide(i, { photo: e.target.value })} aria-label={`Photo de la slide ${i + 1}`}
-                      placeholder={i === 0 ? "Photo : ex. le tube posé sur une pierre claire, lumière douce" : "Photo à créer (vide : l'IA décide)"} />
-                  )}
-                  <div className="grid sm:grid-cols-[1fr_1.4fr] gap-2">
-                    <input className={INPUT} value={x.title} maxLength={80} onChange={(e) => setSlide(i, { title: e.target.value })} aria-label={`Titre de la slide ${i + 1}`} placeholder="Titre" />
-                    <input className={INPUT} value={x.body} maxLength={220} onChange={(e) => setSlide(i, { body: e.target.value })} aria-label={`Texte de la slide ${i + 1}`} placeholder="Petit texte (facultatif)" />
-                  </div>
-                </div>
-              ))}
-            </div>
+            <SlideCards slides={slides} onChange={setSlides} />
             <p className="text-[11px] text-[#A0A0A8]">Les photos sont générées sans texte, avec de la place pour lui. Les textes sont posés ensuite, exactement comme écrits ici, avec « Habiller le carrousel » sur la page du shooting. Les slides texte seules ne coûtent rien. Slides vides : l&apos;IA propose le plan au lancement.</p>
           </div>
         )}

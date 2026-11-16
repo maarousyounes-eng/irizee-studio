@@ -7,7 +7,8 @@ import { ImagePlus, Wand2, X } from "lucide-react";
 import { Btn, Card, INPUT, Label, Spinner } from "@/components/ui";
 import { api, apiJob, imgUrl, uploadImage, useSupabase } from "@/lib/client";
 import { FORMATS } from "@/types";
-import { TEXT_ZONES } from "@/lib/visualTypes";
+import { TEXT_ZONES, BA_CHANGES, CAROUSEL_STYLES, emptySlide, type Slide } from "@/lib/visualTypes";
+import SlideCards from "./SlideCards";
 
 interface Props {
   products: { id: string; name: string; missing: string[] }[];
@@ -16,15 +17,20 @@ interface Props {
 }
 type Dir = { title: string; concept: string; set: string; palette: string; light: string; attitude: string };
 type Sketch = { state: "loading" | "done" | "error"; path?: string };
-const TYPES = [["photo", "Shooting photo"], ["social", "Visuel réseaux"], ["ad", "Visuel pub"], ["free", "Libre"]] as const;
+const TYPES = [["photo", "Shooting photo"], ["social", "Visuel réseaux"], ["ad", "Visuel pub"], ["carousel", "Carrousel"], ["ba", "Avant / après"], ["free", "Libre"]] as const;
+type Step = "setup" | "brief" | "direction" | "plan";
 const dirText = (d: Dir) => `${d.title}. ${d.concept} Décor et matières : ${d.set}. Couleurs : ${d.palette}. Lumière : ${d.light}. Attitude : ${d.attitude}.`;
 
-/** Nouveau parcours : Produits → Brief → Direction (esquisses) → Image pilote. Rien n'est payé en haute qualité avant l'image pilote. */
+/**
+ * Nouveau parcours : Produits → Brief → Direction (esquisses) → Image pilote. Rien n'est payé en haute qualité avant l'image pilote.
+ * Carrousel : une étape de plus, le plan des slides (photo + textes), puis la couverture comme image pilote.
+ * Avant / après : pas de direction (le portrait reste neutre) ; la photo « avant » est l'image pilote.
+ */
 export default function CampaignWizard({ products, models, library }: Props) {
   const sb = useSupabase();
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
-  const [step, setStep] = useState(1);
+  const [step, setStep] = useState<Step>("setup");
   const [vtype, setVtype] = useState<string>("ad");
   const [noProduct, setNoProduct] = useState(false);
   const [productIds, setProductIds] = useState<string[]>(products[0] ? [products[0].id] : []);
@@ -42,7 +48,29 @@ export default function CampaignWizard({ products, models, library }: Props) {
   const [chosen, setChosen] = useState<number | null>(null);
   const [chosenText, setChosenText] = useState("");
   const [rework, setRework] = useState("");
-  const [busy, setBusy] = useState<"" | "brief" | "dirs" | "launch">("");
+  const [busy, setBusy] = useState<"" | "brief" | "dirs" | "launch" | "plan">("");
+  // Carrousel
+  const [carouselStyle, setCarouselStyle] = useState("edu");
+  const [slideCount, setSlideCount] = useState(5);
+  const [slides, setSlides] = useState<Slide[]>([]);
+  const [planFor, setPlanFor] = useState("");
+  const [planRework, setPlanRework] = useState("");
+  // Avant / après
+  const [baChange, setBaChange] = useState("terne");
+  const [baBefore, setBaBefore] = useState("");
+  const [baAfter, setBaAfter] = useState("");
+  const [pairs, setPairs] = useState(1);
+  const isCar = vtype === "carousel";
+  const isBa = vtype === "ba";
+  const flow: Step[] = isBa ? ["setup", "brief"] : isCar ? ["setup", "brief", "direction", "plan"] : ["setup", "brief", "direction"];
+  const noPeople = isBa ? false : modelIds.length === 0;
+
+  function pickType(k: string) {
+    if (k === "ba") setNoProduct(true); else if (vtype === "ba") setNoProduct(false);
+    if (k === "carousel" && modelIds.length > 1) setModelIds(modelIds.slice(0, 1));
+    if ((k === "carousel" || k === "ba" || k === "social" || k === "ad") && aspect === "16:9") setAspect("4:5");
+    setVtype(k);
+  }
   const [error, setError] = useState<string | null>(null);
 
   // Arrivée depuis « Idées de campagne » : brief rempli et direction déjà proposée (avec son esquisse)
@@ -56,7 +84,7 @@ export default function CampaignWizard({ products, models, library }: Props) {
       sessionStorage.removeItem("wizard:prefill");
       const p = JSON.parse(raw) as { brief?: string; vtype?: string; productIds?: string[]; direction?: Dir };
       if (p.brief) setBrief(p.brief);
-      if (p.vtype) setVtype(p.vtype);
+      if (p.vtype && p.vtype !== "ba") setVtype(p.vtype);
       const pids = (p.productIds ?? []).filter((id) => products.some((x) => x.id === id));
       if (pids.length) setProductIds(pids);
       if (p.direction?.title) {
@@ -93,7 +121,7 @@ export default function CampaignWizard({ products, models, library }: Props) {
     } catch (e) { setError(e instanceof Error ? e.message : "Envoi impossible"); }
   }
   useEffect(() => {
-    const onPaste = (e: ClipboardEvent) => { const fs = Array.from(e.clipboardData?.files ?? []); if (fs.length && step === 2) addFiles(fs); };
+    const onPaste = (e: ClipboardEvent) => { const fs = Array.from(e.clipboardData?.files ?? []); if (fs.length && step === "brief") addFiles(fs); };
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -106,7 +134,7 @@ export default function CampaignWizard({ products, models, library }: Props) {
     setBusy("");
   }
 
-  const common = () => ({ brief, visualType: vtype, productIds: ids, noProduct, noPeople: modelIds.length === 0, textZone, inspirationPaths: inspirations.map((x) => x.path), inspirationAnalyses: inspirations.filter((x) => x.state === "done").map((x) => ({ analysis: x.analysis, note: x.note })) });
+  const common = () => ({ brief, visualType: vtype, productIds: ids, noProduct, noPeople, textZone, inspirationPaths: inspirations.map((x) => x.path), inspirationAnalyses: inspirations.filter((x) => x.state === "done").map((x) => ({ analysis: x.analysis, note: x.note })) });
 
   async function proposeDirs(feedback = "") {
     setError(null); setBusy("dirs");
@@ -118,7 +146,7 @@ export default function CampaignWizard({ products, models, library }: Props) {
       r.directions.forEach((d) => { next[d.title] = { state: "loading" }; });
       setSketches(next);
       r.directions.forEach((d) => {
-        apiJob<{ path: string }>(sb, "/api/shoots/sketch", { direction: dirText(d), productIds: ids, noProduct, noPeople: modelIds.length === 0 })
+        apiJob<{ path: string }>(sb, "/api/shoots/sketch", { direction: dirText(d), productIds: ids, noProduct, noPeople })
           .then((s) => setSketches((m) => ({ ...m, [d.title]: { state: "done", path: s.path } })))
           .catch(() => setSketches((m) => ({ ...m, [d.title]: { state: "error" } })));
       });
@@ -126,24 +154,47 @@ export default function CampaignWizard({ products, models, library }: Props) {
     setBusy("");
   }
 
-  async function launch() {
+  // Carrousel : le plan des slides (photo + textes), dans la direction choisie. Texte seul : quelques centimes.
+  async function proposePlan(feedback = "") {
+    setError(null); setBusy("plan");
+    try {
+      const r = await apiJob<{ slides: Slide[] }>(sb, "/api/shoots/slides", {
+        idea: brief, n: slides.length || slideCount, style: carouselStyle, productIds: ids, productMode, noProduct, people: !noPeople,
+        direction: chosenText, feedback, previous: feedback ? slides : [],
+      });
+      setSlides(r.slides); setPlanFor(chosenText); setPlanRework("");
+    } catch (e) { setError(e instanceof Error ? e.message : "Erreur"); }
+    setBusy("");
+  }
+  function goPlan() {
     if (chosen === null || !chosenText.trim()) return setError("Choisissez d'abord une direction");
+    setError(null); setStep("plan");
+    if (!slides.length) proposePlan();
+  }
+  const photoSlides = slides.filter((x) => x.layout !== "text").length;
+
+  async function launch() {
+    if (!isBa && (chosen === null || !chosenText.trim())) return setError("Choisissez d'abord une direction");
+    if (isCar && photoSlides < 1) return setError("Il faut au moins une slide avec photo");
     setError(null); setBusy("launch");
     try {
-      const d = dirs[chosen];
+      const d = chosen !== null ? dirs[chosen] : null;
       const r = await apiJob<{ shootId: string; imageIds: string[] }>(sb, "/api/shoots", {
-        productId: productIds[0] ?? products[0]?.id, productIds, productMode, noProduct, modelIds, noPeople: modelIds.length === 0, modelMode: "split",
-        prompt: brief, aspect, size: "2K", variants: count, visualType: vtype, pilot: true, sketchPath: sketches[d.title]?.path ?? null,
+        productId: productIds[0] ?? products[0]?.id, productIds, productMode, noProduct, modelIds, noPeople, modelMode: "split",
+        prompt: brief, aspect, size: "2K", variants: count, slideCount: slides.length, pairs, visualType: vtype, pilot: true, sketchPath: d ? sketches[d.title]?.path ?? null : null,
         inspirationPaths: inspirations.map((x) => x.path), inspirationAnalyses: inspirations.filter((x) => x.state === "done").map((x) => ({ path: x.path, analysis: x.analysis, note: "" })),
-        typeParams: { inspMode, direction: chosenText, textZone, socialStyle: "feed" },
+        typeParams: isBa ? { inspMode, baChange, baBefore, baAfter }
+          : isCar ? { inspMode, direction: chosenText, carouselStyle, slides }
+          : { inspMode, direction: chosenText, textZone, socialStyle: "feed" },
       });
       sessionStorage.setItem(`run:${r.shootId}`, JSON.stringify(r.imageIds));
       router.push(`/shoots/${r.shootId}`);
     } catch (e) { setError(e instanceof Error ? e.message : "Erreur"); setBusy(""); }
   }
 
-  const steps = ["1. Produits", "2. Brief", "3. Direction", "4. Image pilote", "5. Campagne"];
-  const canNext1 = noProduct || productIds.length > 0;
+  const steps = (isBa ? ["Réglages", "Brief", "Photo « avant »", "Avant / après"] : isCar ? ["Produits", "Brief", "Direction", "Plan des slides", "Slide de couverture", "Carrousel"] : ["Produits", "Brief", "Direction", "Image pilote", "Campagne"]).map((l, i) => `${i + 1}. ${l}`);
+  const at = flow.indexOf(step);
+  const canNext1 = (noProduct || productIds.length > 0) && (!isBa || baChange !== "autre" || (!!baBefore.trim() && !!baAfter.trim()));
   const pendingInsp = inspirations.some((x) => x.state === "loading");
 
   return (
@@ -151,26 +202,52 @@ export default function CampaignWizard({ products, models, library }: Props) {
       <div className="flex flex-wrap items-center justify-between gap-3 bg-white border border-[#E4E4E7] rounded-2xl px-4 py-3">
         <div className="flex flex-wrap gap-1.5">
           {steps.map((s, i) => (
-            <button key={s} type="button" disabled={i + 1 > step || i > 2} onClick={() => setStep(i + 1)}
-              className={`px-3.5 py-2 rounded-full text-xs font-semibold border ${i + 1 < step ? "bg-[#0A0A0B] text-white border-[#0A0A0B]" : i + 1 === step ? "border-[#0A0A0B] text-[#0A0A0B] bg-white" : "border-[#E4E4E7] text-[#6B6B72] bg-white"}`}>{s}</button>
+            <button key={s} type="button" disabled={i > at || i >= flow.length} onClick={() => setStep(flow[i])}
+              className={`px-3.5 py-2 rounded-full text-xs font-semibold border ${i < at ? "bg-[#0A0A0B] text-white border-[#0A0A0B]" : i === at ? "border-[#0A0A0B] text-[#0A0A0B] bg-white" : "border-[#E4E4E7] text-[#6B6B72] bg-white"}`}>{s}</button>
           ))}
         </div>
-        <span className="text-xs text-[#52525B]">{step < 3 ? "Rien de payé jusqu'ici" : "Esquisses : quelques centimes. Aucune image en haute qualité payée avant le pilote."}</span>
+        <span className="text-xs text-[#52525B]">{step === "setup" || step === "brief" ? "Rien de payé jusqu'ici" : step === "plan" ? "Le plan est du texte : quelques centimes. Aucune photo payée avant la couverture." : "Esquisses : quelques centimes. Aucune image en haute qualité payée avant le pilote."}</span>
       </div>
       {error && <div className="p-3 rounded-xl bg-red-50 border border-red-100 text-sm text-red-700">{error}</div>}
 
-      {step === 1 && (
+      {step === "setup" && (
         <Card className="p-5 space-y-5">
           <h2 className="text-lg font-semibold">Que voulez-vous créer ?</h2>
           <div>
             <Label>Type de visuel</Label>
             <div className="flex flex-wrap gap-2">
-              {TYPES.map(([k, l]) => <button key={k} type="button" className={chip(vtype === k)} onClick={() => setVtype(k)}>{l}</button>)}
-              <Link href="/studio?classic=1" className={chip(false)}>Carrousel ou avant / après</Link>
+              {TYPES.map(([k, l]) => <button key={k} type="button" className={chip(vtype === k)} onClick={() => pickType(k)}>{l}</button>)}
             </div>
+            {isCar && <p className="text-[12px] text-[#52525B] mt-2">3 à 10 slides qui se suivent, dans un seul univers. Vous validez la direction, puis le plan (photos et textes), puis la couverture, avant de créer les autres photos.</p>}
+            {isBa && <p className="text-[12px] text-[#52525B] mt-2">Même personne, même cadrage, même lumière : seule la peau change. Vous validez la photo « avant », puis l&apos;« après » est créé à partir d&apos;elle.</p>}
           </div>
+          {isCar && (
+            <div className="grid sm:grid-cols-[1fr_auto] gap-4">
+              <div>
+                <Label>Style de carrousel</Label>
+                <div className="flex flex-wrap gap-2">{CAROUSEL_STYLES.map((x) => <button key={x.id} type="button" className={chip(carouselStyle === x.id)} onClick={() => setCarouselStyle(x.id)}>{x.label}</button>)}</div>
+              </div>
+              <div>
+                <Label>Nombre de slides</Label>
+                <select className={INPUT} value={slideCount} aria-label="Nombre de slides" onChange={(e) => { setSlideCount(+e.target.value); setSlides([]); }}>{[3, 4, 5, 6, 7, 8, 9, 10].map((n) => <option key={n} value={n}>{n} slides</option>)}</select>
+              </div>
+            </div>
+          )}
+          {isBa && (
+            <div className="space-y-2">
+              <Label>Ce qui change entre l&apos;avant et l&apos;après</Label>
+              <div className="flex flex-wrap gap-2">{BA_CHANGES.map((x) => <button key={x.id} type="button" className={chip(baChange === x.id)} onClick={() => setBaChange(x.id)}>{x.label}</button>)}</div>
+              {baChange === "autre" && (
+                <div className="grid sm:grid-cols-2 gap-2">
+                  <input className={INPUT} value={baBefore} onChange={(e) => setBaBefore(e.target.value)} aria-label="La peau avant" placeholder="Avant : ex. peau déshydratée, ridules visibles" />
+                  <input className={INPUT} value={baAfter} onChange={(e) => setBaAfter(e.target.value)} aria-label="La peau après" placeholder="Après : ex. peau rebondie, ridules atténuées" />
+                </div>
+              )}
+              <p className="text-[12px] p-2.5 rounded-xl bg-[#FFF4D6] text-[#7A4B00]">Rappel : en publicité payante, Meta et la réglementation française refusent un « résultat » trompeur. Un avant/après créé par IA ne doit pas être présenté comme un vrai résultat client. C&apos;est plus souple en publication classique.</p>
+            </div>
+          )}
           <div>
-            <Label>Produits (4 maximum)</Label>
+            <Label>{isBa ? "Produit dans la photo" : "Produits (4 maximum)"}</Label>
             <div className="flex flex-wrap gap-2 mb-2">
               <button type="button" className={chip(!noProduct)} onClick={() => setNoProduct(false)}>Avec produit</button>
               <button type="button" className={chip(noProduct)} onClick={() => setNoProduct(true)}>Sans produit</button>
@@ -203,15 +280,25 @@ export default function CampaignWizard({ products, models, library }: Props) {
           <div>
             <Label>Personne sur les photos</Label>
             <div className="flex flex-wrap gap-2">
-              <button type="button" className={chip(modelIds.length === 0)} onClick={() => setModelIds([])}>Sans personne</button>
-              {models.map((m) => { const on = modelIds.includes(m.id); return <button key={m.id} type="button" className={chip(on)} onClick={() => setModelIds(on ? modelIds.filter((x) => x !== m.id) : [...modelIds, m.id])}>{m.name}</button>; })}
+              <button type="button" className={chip(modelIds.length === 0)} onClick={() => setModelIds([])}>{isBa ? "Visage inventé par l'IA" : "Sans personne"}</button>
+              {models.map((m) => { const on = modelIds.includes(m.id); return <button key={m.id} type="button" className={chip(on)} onClick={() => setModelIds(on ? modelIds.filter((x) => x !== m.id) : isCar ? [m.id] : [...modelIds, m.id])}>{m.name}</button>; })}
             </div>
+            {isCar && <p className="text-[11px] text-[#6B6B72] mt-1.5">Un carrousel garde le même mannequin sur toutes les slides.</p>}
+            {isBa && <p className="text-[11px] text-[#6B6B72] mt-1.5">Chaque paire avant/après garde la même personne. Avec plusieurs mannequins, chaque paire a le sien.</p>}
           </div>
           <div className="grid sm:grid-cols-3 gap-4">
-            <div>
-              <Label>Nombre d&apos;images</Label>
-              <div className="flex flex-wrap gap-2">{[2, 4, 6, 8].map((n) => <button key={n} type="button" className={chip(count === n)} onClick={() => setCount(n)}>{n}</button>)}</div>
-            </div>
+            {isBa ? (
+              <div>
+                <Label>Paires avant / après</Label>
+                <div className="flex flex-wrap gap-2">{[1, 2, 3].map((n) => <button key={n} type="button" className={chip(pairs === n)} onClick={() => setPairs(n)}>{n}</button>)}</div>
+                <p className="text-[11px] text-[#6B6B72] mt-1">{pairs * 2} images au total.</p>
+              </div>
+            ) : !isCar && (
+              <div>
+                <Label>Nombre d&apos;images</Label>
+                <div className="flex flex-wrap gap-2">{[2, 4, 6, 8].map((n) => <button key={n} type="button" className={chip(count === n)} onClick={() => setCount(n)}>{n}</button>)}</div>
+              </div>
+            )}
             <div>
               <Label>Format de départ</Label>
               <select className={INPUT} value={aspect} onChange={(e) => setAspect(e.target.value)}>{Object.entries(FORMATS).map(([k, v]) => <option key={k} value={k}>{v.short}</option>)}</select>
@@ -224,25 +311,32 @@ export default function CampaignWizard({ products, models, library }: Props) {
               </div>
             )}
           </div>
-          <div className="flex justify-end"><Btn onClick={() => setStep(2)} disabled={!canNext1}>Continuer</Btn></div>
+          <div className="flex justify-end"><Btn onClick={() => setStep("brief")} disabled={!canNext1}>Continuer</Btn></div>
         </Card>
       )}
 
-      {step === 2 && (
+      {step === "brief" && (
         <div className="grid lg:grid-cols-[1fr_340px] gap-4 items-start">
           <Card className="p-5 space-y-4">
-            <h2 className="text-lg font-semibold">Dites ce que vous aimeriez faire</h2>
-            <p className="text-sm text-[#52525B]">Même en une phrase vague. Les idées, c&apos;est l&apos;étape suivante qui les apporte.</p>
+            <h2 className="text-lg font-semibold">{isBa ? "Précisions sur le portrait (facultatif)" : isCar ? "Racontez votre carrousel" : "Dites ce que vous aimeriez faire"}</h2>
+            <p className="text-sm text-[#52525B]">{isBa ? "Cadrage, lumière, coiffure, âge… Laissez vide pour un portrait de face, en lumière neutre."
+              : isCar ? "Le sujet et le message, même en une phrase. Si vous avez déjà votre plan slide par slide, collez-le ici : il sera suivi tel quel. Le plan détaillé vous est proposé à l'étape 4."
+              : "Même en une phrase vague. Les idées, c'est l'étape suivante qui les apporte."}</p>
             <textarea className={INPUT + " min-h-[130px]"} value={brief} onChange={(e) => setBrief(e.target.value)} aria-label="Votre brief" autoFocus
-              placeholder="Ex. : une campagne hiver pour le Masque Nila, luxe et mode, pas nunuche." />
-            <div className="flex flex-wrap items-center gap-2">
-              <Btn size="sm" variant="ghost" onClick={improve} disabled={busy !== "" || !brief.trim()}>{busy === "brief" ? <Spinner /> : <Wand2 size={13} />} Améliorer mon brief</Btn>
-              {prevBrief !== null && <button type="button" className="text-xs font-semibold text-[#52525B]" onClick={() => { setBrief(prevBrief); setPrevBrief(null); }}>Revenir à ma version</button>}
+              placeholder={isBa ? "Ex. : portrait de face, cheveux attachés, fond clair." : isCar ? "Ex. : pourquoi le nila bleu illumine le teint, du geste jusqu'au résultat. Ton direct, pas nunuche." : "Ex. : une campagne hiver pour le Masque Nila, luxe et mode, pas nunuche."} />
+            {!isBa && (
+              <div className="flex flex-wrap items-center gap-2">
+                <Btn size="sm" variant="ghost" onClick={improve} disabled={busy !== "" || !brief.trim()}>{busy === "brief" ? <Spinner /> : <Wand2 size={13} />} Améliorer mon brief</Btn>
+                {prevBrief !== null && <button type="button" className="text-xs font-semibold text-[#52525B]" onClick={() => { setBrief(prevBrief); setPrevBrief(null); }}>Revenir à ma version</button>}
+              </div>
+            )}
+            <div className="flex flex-wrap justify-between gap-2">
+              <Btn variant="ghost" onClick={() => setStep("setup")}>Retour</Btn>
+              {isBa
+                ? <Btn onClick={launch} disabled={busy !== "" || pendingInsp}>{busy === "launch" ? <><Spinner className="border-white/40 border-t-white" /> Préparation…</> : pendingInsp ? "Analyse des inspirations…" : "Créer la photo « avant » (1 image payante)"}</Btn>
+                : <Btn onClick={() => { setStep("direction"); if (!dirs.length) proposeDirs(); }} disabled={!brief.trim() || pendingInsp}>{pendingInsp ? "Analyse des inspirations…" : "Voir des directions"}</Btn>}
             </div>
-            <div className="flex justify-between">
-              <Btn variant="ghost" onClick={() => setStep(1)}>Retour</Btn>
-              <Btn onClick={() => { setStep(3); if (!dirs.length) proposeDirs(); }} disabled={!brief.trim() || pendingInsp}>{pendingInsp ? "Analyse des inspirations…" : "Voir des directions"}</Btn>
-            </div>
+            {isBa && <p className="text-[11px] text-[#6B6B72]">Une seule image est générée d&apos;abord : la photo « avant ». Vous la validez, puis l&apos;« après » est créé à partir d&apos;elle{pairs > 1 ? `, ainsi que les ${pairs - 1} autre${pairs > 2 ? "s" : ""} paire${pairs > 2 ? "s" : ""}` : ""}.</p>}
           </Card>
           <Card className="p-4 space-y-3">
             <h3 className="text-sm font-semibold">Inspirations (facultatif)</h3>
@@ -283,17 +377,18 @@ export default function CampaignWizard({ products, models, library }: Props) {
                 </div>
               </div>
             )}
+            {isCar && inspirations.length > 1 && <p className="text-[11px] text-[#7A4B00] bg-[#FFF4D6] rounded-lg px-2 py-1.5">Pour un carrousel, c&apos;est la première inspiration qui donne le style de toutes les photos. Les autres servent seulement aux directions.</p>}
             <p className="text-[11px] text-[#6B6B72]">Votre <Link href="/settings/da" className="text-[#1F55BC] font-semibold">DA de marque</Link> est appliquée automatiquement.</p>
           </Card>
         </div>
       )}
 
-      {step === 3 && (
+      {step === "direction" && (
         <Card className="p-5 space-y-4">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold">Choisissez une direction</h2>
-              <p className="text-sm text-[#52525B]">Une direction = un univers pour toute la campagne. Les esquisses sont des brouillons rapides : seule l&apos;ambiance compte, pas les détails.</p>
+              <p className="text-sm text-[#52525B]">Une direction = un univers pour {isCar ? "tout le carrousel" : "toute la campagne"}. Les esquisses sont des brouillons rapides : seule l&apos;ambiance compte, pas les détails.</p>
             </div>
             <Btn size="sm" variant="ghost" onClick={() => proposeDirs()} disabled={busy !== ""}>{busy === "dirs" ? <Spinner /> : <Wand2 size={13} />} Autres directions</Btn>
           </div>
@@ -333,10 +428,45 @@ export default function CampaignWizard({ products, models, library }: Props) {
             </div>
           )}
           <div className="flex flex-wrap justify-between gap-2">
-            <Btn variant="ghost" onClick={() => setStep(2)}>Retour</Btn>
-            <Btn onClick={launch} disabled={busy !== "" || chosen === null}>{busy === "launch" ? <><Spinner className="border-white/40 border-t-white" /> Préparation de la campagne…</> : "Créer l'image pilote (1 image payante)"}</Btn>
+            <Btn variant="ghost" onClick={() => setStep("brief")}>Retour</Btn>
+            {isCar
+              ? <Btn onClick={goPlan} disabled={busy !== "" || chosen === null}>Continuer : le plan des slides</Btn>
+              : <Btn onClick={launch} disabled={busy !== "" || chosen === null}>{busy === "launch" ? <><Spinner className="border-white/40 border-t-white" /> Préparation de la campagne…</> : "Créer l'image pilote (1 image payante)"}</Btn>}
           </div>
-          <p className="text-[11px] text-[#6B6B72]">Une seule image est générée en haute qualité. Vous la validez, puis les {count - 1} autres sont créées à partir d&apos;elle.</p>
+          <p className="text-[11px] text-[#6B6B72]">{isCar ? "Le plan des slides (photos et textes) est écrit dans cette direction. Rien n'est payé en haute qualité à cette étape." : `Une seule image est générée en haute qualité. Vous la validez, puis les ${count - 1} autres sont créées à partir d'elle.`}</p>
+        </Card>
+      )}
+
+      {step === "plan" && (
+        <Card className="p-5 space-y-4">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div className="max-w-2xl">
+              <h2 className="text-lg font-semibold">Le plan du carrousel</h2>
+              <p className="text-sm text-[#52525B]">Pour chaque slide : la photo à créer, le titre et le petit texte. Tout est modifiable. Les photos sortent sans texte ; les textes sont posés ensuite, exactement comme écrits ici, avec « Habiller le carrousel ».</p>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Btn size="sm" variant="ghost" disabled={busy !== "" || slides.length <= 3} onClick={() => setSlides(slides.slice(0, -1))}>− 1 slide</Btn>
+              <Btn size="sm" variant="ghost" disabled={busy !== "" || !slides.length || slides.length >= 10} onClick={() => setSlides([...slides, emptySlide()])}>+ 1 slide</Btn>
+              <Btn size="sm" variant="ghost" onClick={() => proposePlan()} disabled={busy !== ""}>{busy === "plan" ? <Spinner /> : <Wand2 size={13} />} Refaire le plan</Btn>
+            </div>
+          </div>
+          {busy === "plan" && <p className="text-sm text-[#52525B] flex items-center gap-2"><Spinner /> L&apos;IA écrit le plan dans la direction choisie (environ 30 secondes)…</p>}
+          {slides.length > 0 && planFor !== chosenText && busy !== "plan" && (
+            <p className="text-[12px] text-[#7A4B00] bg-[#FFF4D6] rounded-xl px-3 py-2">La direction a changé depuis ce plan : les photos décrites ici correspondent à l&apos;ancienne. Cliquez sur « Refaire le plan » pour les réécrire (vos textes modifiés seront remplacés).</p>
+          )}
+          {slides.length > 0 && <SlideCards slides={slides} onChange={setSlides} />}
+          {slides.length > 0 && (
+            <div className="flex flex-wrap gap-2 items-center">
+              <input className={INPUT + " flex-1 min-w-[240px]"} value={planRework} onChange={(e) => setPlanRework(e.target.value)} aria-label="Retravailler le plan" placeholder="Retravailler : ex. textes plus courts, ton plus direct, la slide 3 sur la texture"
+                onKeyDown={(e) => { if (e.key === "Enter" && planRework.trim() && busy === "") proposePlan(planRework); }} />
+              <Btn size="sm" variant="ghost" onClick={() => proposePlan(planRework)} disabled={busy !== "" || !planRework.trim()}>Ajuster le plan</Btn>
+            </div>
+          )}
+          <div className="flex flex-wrap justify-between gap-2">
+            <Btn variant="ghost" onClick={() => setStep("direction")}>Retour</Btn>
+            <Btn onClick={launch} disabled={busy !== "" || photoSlides < 1}>{busy === "launch" ? <><Spinner className="border-white/40 border-t-white" /> Préparation du carrousel…</> : photoSlides > 1 ? "Créer la couverture (1 image payante)" : "Créer la photo (1 image payante)"}</Btn>
+          </div>
+          {slides.length > 0 && <p className="text-[11px] text-[#6B6B72]">{slides.length} slides, dont {photoSlides} photo{photoSlides > 1 ? "s" : ""} à créer (environ 0,20 € chacune){slides.length > photoSlides ? " ; les slides texte seules ne coûtent rien" : ""}. Une seule est générée d&apos;abord : la couverture. Vous la validez, puis les autres sont créées dans le même univers.</p>}
         </Card>
       )}
     </div>

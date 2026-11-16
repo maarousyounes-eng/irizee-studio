@@ -43,14 +43,18 @@ export async function POST(req: Request) {
     }
     const modelIds: string[] = Array.isArray(b.modelIds) ? b.modelIds.filter((x: unknown) => typeof x === "string").slice(0, 12) : [];
     const paths: string[] = Array.isArray(b.inspirationPaths) ? b.inspirationPaths : [];
+    // Direction artistique choisie (campagnes et carrousels ; un avant/après reste neutre)
+    if (vtype !== "ba" && typeof tpIn.direction === "string" && tpIn.direction.trim()) tp.direction = tpIn.direction.trim().slice(0, 1200);
+    const pMode = productIds.length > 1 ? (["together", "split", "mix"].includes(b.productMode) ? b.productMode : "mix") : null;
     // Carrousel sans plan : l'IA propose la photo, les textes et la mise en page de chaque slide
     if (vtype === "carousel") {
       const filled = (x: Slide) => !!(x.photo || x.title || x.body);
       if (!slides.some(filled)) {
-        try { slides = await withAiCtx({ sb, userId: user.id }, () => planSlides(sb, { idea: prompt, n, style: tp.carouselStyle!, productIds, noProduct: !!b.noProduct, people: !b.noPeople })); } catch { slides = []; }
+        try { slides = await withAiCtx({ sb, userId: user.id }, () => planSlides(sb, { idea: prompt, n, style: tp.carouselStyle!, productIds, noProduct: !!b.noProduct, people: !b.noPeople, productMode: pMode, direction: tp.direction })); } catch { slides = []; }
       }
       if (slides.length >= 3) n = Math.min(10, slides.length);
       slides = Array.from({ length: n }, (_, i) => slides[i] ?? emptySlide());
+      if (slides[0].layout === "text") slides[0] = { ...slides[0], layout: "overlay" }; // la couverture est toujours une photo
       tp.slides = slides;
       if (!slides.some((x) => x.layout !== "text")) throw new HttpError(400, "Il faut au moins une slide avec photo");
     }
@@ -68,7 +72,6 @@ export async function POST(req: Request) {
     }
 
     // Idées d'images : celles choisies par le client dans le formulaire ; sinon, avec des inspirations en mode « s'inspirer », le directeur artistique les propose
-    if (vtype !== "carousel" && vtype !== "ba" && typeof tpIn.direction === "string" && tpIn.direction.trim()) tp.direction = tpIn.direction.trim().slice(0, 1200);
     const ideasIn = (Array.isArray(tpIn.shots) ? tpIn.shots : []).map((x) => String(x ?? "").trim().slice(0, 700)).filter(Boolean).slice(0, 12);
     if (vtype !== "carousel" && vtype !== "ba") {
       if (ideasIn.length) tp.shots = Array.from({ length: n }, (_, i) => ideasIn[i % ideasIn.length]);
@@ -87,8 +90,10 @@ export async function POST(req: Request) {
       }
     }
     // Campagne avec image pilote : une seule image d'abord, les autres après validation
-    const pilot = !!b.pilot && vtype !== "carousel" && vtype !== "ba" && n > 1;
-    if (pilot) { tp.pilot = "pending"; tp.count = n; }
+    // Carrousel : la couverture d'abord ; avant/après : la photo « avant » de la première paire d'abord
+    const indexes = vtype === "carousel" ? slides.map((x, i) => (x.layout === "text" ? -1 : i)).filter((i) => i >= 0) : Array.from({ length: n }, (_, i) => i);
+    const pilot = !!b.pilot && indexes.length > 1;
+    if (pilot) { tp.pilot = "pending"; tp.count = indexes.length; }
     if (typeof b.sketchPath === "string" && /^sketches\/[\w\-./]+$/.test(b.sketchPath)) tp.sketch_path = b.sketchPath;
     const { data: shoot, error } = await sb.from("shoots").insert({
       project_id: b.projectId || null, product_id: productIds[0], product_ids: productIds.length > 1 ? productIds : null, product_mode: productIds.length > 1 ? (["together", "split", "mix"].includes(b.productMode) ? b.productMode : "mix") : null, model_id: modelIds[0] ?? null, model_ids: modelIds, concept_id: b.conceptId || null,
@@ -99,8 +104,7 @@ export async function POST(req: Request) {
     if (error || !shoot) throw new HttpError(400, error?.message ?? "Création impossible");
 
     // Carrousel : pas d'image à générer pour les slides texte seules (elles sont faites dans l'éditeur Ads)
-    const indexes = vtype === "carousel" ? slides.map((x, i) => (x.layout === "text" ? -1 : i)).filter((i) => i >= 0) : Array.from({ length: n }, (_, i) => i);
-    const rows = (pilot ? [0] : indexes).map((i) => ({
+    const rows = (pilot ? [indexes[0]] : indexes).map((i) => ({
       shoot_id: shoot.id, kind: "generated", variant_index: i, aspect: b.aspect, created_by: user.id,
       // Carrousel : le même mannequin sur toutes les slides ; avant/après : le même dans la paire ; ensemble : tous (lus sur le shooting)
       model_id: b.noPeople || !modelIds.length || (b.modelMode === "together" && modelIds.length > 1) ? null

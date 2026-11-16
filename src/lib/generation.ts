@@ -289,6 +289,13 @@ export function productPlan(shoot: { product_id: string; product_ids?: string[] 
   return slot < n ? { mainId: ids[slot], otherIds: [] as string[], slots: n + 1 } : { mainId: ids[0], otherIds: ids.slice(1, 4), slots: n + 1 };
 }
 
+/** Dernière version terminée d'une image du shooting (corrections comprises, hors formats et essais écartés) : c'est elle qui sert de référence. */
+async function latestVersionPath(sb: SupabaseClient, shootId: string, variantIndex: number): Promise<string | null> {
+  const { data } = await sb.from("images").select("path, params").eq("shoot_id", shootId).eq("variant_index", variantIndex).neq("kind", "format").eq("state", "done").is("deleted_at", null).not("path", "is", null).order("created_at", { ascending: false }).limit(8);
+  const rows = (data ?? []) as { path: string; params: Record<string, any> | null }[];
+  return (rows.find((r) => !r.params?.archived) ?? rows[0])?.path ?? null;
+}
+
 export const generateImage = (sb: SupabaseClient, image: ImageRow, userId: string, signal?: AbortSignal) =>
   withAiCtx({ sb, userId, shootId: image.shoot_id, imageId: image.id }, () => generateImageInner(sb, image, userId, signal));
 
@@ -332,9 +339,10 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
       : tp0;
     // Avant / après : l'« après » est la même photo que l'« avant », seule la peau change
     if (vtype === "ba" && image.variant_index % 2 === 1 && !redo) {
-      const { data: bef } = await sb.from("images").select("path").eq("shoot_id", shoot.id).eq("kind", "generated").eq("variant_index", image.variant_index - 1).is("deleted_at", null).not("path", "is", null).order("created_at", { ascending: false }).limit(1).maybeSingle();
-      if (!bef?.path) throw new Error("La photo « avant » de cette paire n'est pas encore prête : relance « après » une fois l'avant terminé");
-      const before = await download(sb, bef.path);
+      // la dernière version de l'« avant » (corrections comprises) : c'est celle que le client a validée
+      const befPath = await latestVersionPath(sb, shoot.id, image.variant_index - 1);
+      if (!befPath) throw new Error("La photo « avant » de cette paire n'est pas encore prête : relance « après » une fois l'avant terminé");
+      const before = await download(sb, befPath);
       parts = [{ text: baAfterPrompt({ tp, rules: [...rules, ...(noProduct ? [] : product.rules ?? [])], hasProduct: !noProduct, aspect }) }, imgPart(before.buf, before.mime), ...packshots.map((p) => imgPart(p.buf, p.mime))];
     } else {
       // Une inspiration par variante : l'image i suit SON inspiration (pose, cadrage, lumière, style) ; elles tournent s'il y a plus de variantes que d'inspirations.
@@ -355,20 +363,30 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
       }
       // Carrousel : les slides suivantes reprennent la première photo du carrousel (même personne, décor, lumière)
       let series: { buf: Buffer; mime: string } | null = null;
-      const campaign = !!tp.pilot && vtype !== "carousel";
+      // Avant / après : chaque paire a sa personne, jamais de reprise d'une autre image
+      const campaign = !!tp.pilot && vtype !== "carousel" && vtype !== "ba";
+      let seriesMode: "carousel" | "campaign" | "sketch" | "sketchLoose" | undefined;
       if (campaign && image.variant_index > 0) {
         // Campagne : les images suivantes reprennent l'image pilote validée (sa dernière version)
-        const { data: pil } = await sb.from("images").select("path").eq("shoot_id", shoot.id).eq("variant_index", 0).neq("kind", "format").eq("state", "done").is("deleted_at", null).not("path", "is", null).order("created_at", { ascending: false }).limit(1);
-        if (pil?.[0]?.path) series = await download(sb, pil[0].path).catch(() => null);
+        const pil = await latestVersionPath(sb, shoot.id, 0);
+        if (pil) { series = await download(sb, pil).catch(() => null); seriesMode = "campaign"; }
       } else if (campaign && tp.sketch_path && !redo) {
         // Image pilote : elle reprend l'esquisse choisie par le client
-        series = await download(sb, tp.sketch_path).catch(() => null);
+        series = await download(sb, tp.sketch_path).catch(() => null); seriesMode = "sketch";
       }
       if (vtype === "carousel") {
         const { data: firsts } = await sb.from("images").select("variant_index, path").eq("shoot_id", shoot.id).eq("kind", "generated").is("deleted_at", null).order("variant_index", { ascending: true }).order("created_at", { ascending: true }).limit(1);
         const a0 = firsts?.[0];
-        if (a0 && a0.variant_index < image.variant_index && a0.path) series = await download(sb, a0.path).catch(() => null);
+        if (a0 && a0.variant_index < image.variant_index) {
+          // Parcours guidé : la couverture validée par le client (sa dernière version) ; sinon la première photo du carrousel
+          const ref = tp.pilot ? (await latestVersionPath(sb, shoot.id, a0.variant_index)) ?? a0.path : a0.path;
+          if (ref) { series = await download(sb, ref).catch(() => null); seriesMode = "carousel"; }
+        } else if (tp.pilot && tp.sketch_path && !redo) {
+          // Couverture du carrousel : l'univers de l'esquisse choisie, la composition décrite pour la slide
+          series = await download(sb, tp.sketch_path).catch(() => null); seriesMode = "sketchLoose";
+        }
       }
+      if (!series) seriesMode = undefined;
       // Mannequin choisi : les visages des inspirations sont floutés pour ne jamais se mélanger avec le sien
       if (modelRefs.length && inspirations.length) inspirations = await Promise.all(inspirations.map(blurFaces));
       const nSlides = normalizeSlides(tp.slides).length || 1;
@@ -386,7 +404,7 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
         shot: ((s) => (s && tp.direction ? `CAMPAIGN ART DIRECTION (shared by every image): ${tp.direction}\nTHIS IMAGE: ${s}` : s))((idea && vtype !== "carousel" ? idea : (tp.shots ?? [])[image.variant_index]) || undefined) || (tp.direction ? `CAMPAIGN ART DIRECTION (shared by every image): ${tp.direction}` : undefined),
         inspMode: tp.inspMode === "copy" ? "copy" : tp.inspMode === "loose" ? "loose" : undefined,
         layoutLine: vtype === "ad" ? textZoneLine(tp.textZone) : undefined,
-        seriesRef: !!series, seriesMode: !series ? undefined : vtype === "carousel" ? "carousel" : image.variant_index > 0 ? "campaign" : "sketch",
+        seriesRef: !!series, seriesMode,
         others: others.map((o) => ({ product: o.product, n: 1 })), variation: variationHint(image.variant_index, shoot.no_people), nProductImages: imagePaths.length,
         hasModelRef: modelRefs.length > 0, nModelRefs: modelRefs.length, modelDescription: descs.join(" / "), noPeople: shoot.no_people, noProduct,
         ...(vtype === "photo" ? {} : { typeLine: typeLine(vtype, tp, image.variant_index, nSlides), hasStyleRef: inspirations.length > 0, realism: vtype === "ba" ? REALISM_NATURAL : undefined }),

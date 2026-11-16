@@ -45,7 +45,7 @@ const textsBlock = (p: Product) => (p.texts ?? []).map((t) => `- ${t}`).join("\n
 export function buildPrompt(a: {
   product: Product; rules: string[]; userPrompt: string; aspect: string; analysis: string;
   others?: { product: Product; n: number }[]; variation: string; nProductImages: number; hasModelRef: boolean; modelDescription?: string; noPeople: boolean; noProduct?: boolean;
-  nModelRefs?: number; seriesRef?: boolean; typeLine?: string; realism?: string; hasStyleRef?: boolean; hasTexture?: boolean; shot?: string; inspMode?: "copy" | "loose"; layoutLine?: string; seriesMode?: "carousel" | "campaign" | "sketch";
+  nModelRefs?: number; seriesRef?: boolean; typeLine?: string; realism?: string; hasStyleRef?: boolean; hasTexture?: boolean; shot?: string; inspMode?: "copy" | "loose"; layoutLine?: string; seriesMode?: "carousel" | "campaign" | "sketch" | "sketchLoose";
 }) {
   const nModels = a.hasModelRef ? Math.max(1, a.nModelRefs ?? 1) : 0;
   // Version courte et cohérente : chaque consigne n'apparaît qu'une fois, sans ordres contradictoires.
@@ -64,7 +64,8 @@ export function buildPrompt(a: {
     nModels === 1 ? "Next image: the MODEL REFERENCE (the person to show)." : nModels > 1 ? `Next ${nModels} images: the MODEL REFERENCES (the ${nModels} persons to show, one image per person).` : "",
     !a.seriesRef ? ""
       : a.seriesMode === "sketch" ? "Next image: the CHOSEN SKETCH = a rough draft the client picked: keep its set, materials, colour palette, light and overall composition, and turn it into a finished, real photograph. Ignore its flaws (wrong label text, rough product): the product comes from the packshot."
-      : a.seriesMode === "campaign" ? "Next image: the PILOT IMAGE of this campaign, approved by the client: same set, materials, colour palette, light, colour grade and photographic style (and the same person, if a person appears). Create a DIFFERENT shot of the same campaign, as described in the idea for this image: never a copy of the pilot."
+      : a.seriesMode === "sketchLoose" ? "Next image: the CHOSEN SKETCH = a rough draft of the art direction the client picked: keep its set, materials, colour palette and light, and make a finished, real photograph. The subject and the composition are the ones described for this slide, not necessarily those of the sketch. Ignore its flaws (wrong label text, rough product): the product comes from the packshot."
+      : a.seriesMode === "campaign" ? `Next image: the PILOT IMAGE of this campaign, approved by the client: same set, materials, colour palette, light, colour grade and photographic style (${a.hasModelRef ? "the person is always the one of the MODEL REFERENCE, even if the pilot shows someone else" : "and the same person, if a person appears"}). Create a DIFFERENT shot of the same campaign, as described in the idea for this image: never a copy of the pilot.`
       : "Next image: the SERIES REFERENCE = the first image of the same series: match its art direction, colour grade and photographic quality (and its person, if a person appears in both), but NEVER copy its subject, set or composition: this image shows what is described for it below.",
     a.hasStyleRef === false ? "" : "Last image(s): the STYLE REFERENCE.",
   ].filter(Boolean).join(" ");
@@ -351,7 +352,7 @@ export function baAfterPrompt(a: { tp: TypeParams; rules: string[]; hasProduct: 
 }
 
 /** Plan d'un carrousel : pour chaque slide, la photo à créer, ses textes et sa mise en page. */
-export function slidesPlanPrompt(a: { idea: string; n: number; style: string; products: string; rules: string[]; people: boolean }) {
+export function slidesPlanPrompt(a: { idea: string; n: number; style: string; products: string; rules: string[]; people: boolean; direction?: string; perSlide?: string[][]; taste?: string; feedback?: string; previous?: string }) {
   const st = CAROUSEL_STYLES.find((x) => x.id === a.style) ?? CAROUSEL_STYLES[0];
   return [
     "You are the creative director and copywriter of the French cosmetics brand Irizée, planning an Instagram carousel.",
@@ -360,6 +361,11 @@ export function slidesPlanPrompt(a: { idea: string; n: number; style: string; pr
     a.products ? `PRODUCTS (describe them exactly as they are, never invent another packaging, shape, colour or accessory):\n${a.products}` : "No product appears in this carousel.",
     a.rules.length ? `Brand rules:\n${numbered(a.rules)}` : "",
     a.people ? "A model (always the same person) can appear in some photos." : "No person appears in the photos.",
+    a.direction ? `ART DIRECTION chosen by the client for the whole carousel (every photo lives in this universe: same set and materials, colour palette, light and attitude; never describe another universe): ${a.direction}` : "",
+    a.perSlide?.length ? `PRODUCTS PER SLIDE (mandatory: a photo only shows the product(s) listed for its slide, never another one):\n${a.perSlide.map((x, i) => `Slide ${i + 1}: ${x.join(" + ") || "no product"}`).join("\n")}` : "",
+    a.taste ? `BRAND TASTE (written by the client and learned from their choices, follow it): ${a.taste}` : "",
+    a.feedback ? `The client reacted to your previous plan: "${a.feedback}". Rework the plan according to this feedback: keep what they did not criticise, change what they asked.${a.previous ? `\nYour previous plan:\n${a.previous}` : ""}` : "",
+    "Photos are always REAL photography of real physical objects and real sets: never graphic design, illustration, 3D render or collage.",
     "CLIENT'S OWN PLAN (absolute priority): if the brief already contains a slide-by-slide plan (numbered points, slide texts, image descriptions, art direction), follow it EXACTLY: one slide per point, same order, same number of slides (up to 10, even if it differs from the default count below), the client's hooks and sentences word for word, every fact, price, date and offer the client gave (never drop or invent one), the client's image description for each slide, and the client's art direction (backgrounds, light, style, what to avoid). Only fill what the client left open.",
     "WHEN THE CLIENT GIVES NO PLAN: think like a top beauty creative director: bold, specific, editorial ideas, one striking concept per photo (macro textures, graphic still lifes, strong colour, hard light, the product treated like a jewel), never clichés (spa mood, decorative plants, generic smiling faces, flat white backgrounds).",
     `Default number of slides if the client gives no plan: ${a.n}. Slide 1 is the cover (strong, short promise), the last slide closes with a soft call to action. Each photo slide is a clearly different shot (framing, gesture, detail, texture, model) in the same set and style; avoid extreme close-ups of the product label.`,
@@ -477,7 +483,7 @@ export function directionsPrompt(a: { brief: string; n: number; type: string; pr
     a.products ? `Products of the campaign, exactly as they are (never invent another packaging):\n${a.products}` : "No product appears.",
     a.rules.length ? `Brand rules:\n${numbered(a.rules)}` : "",
     a.people ? "A model can appear if it serves the direction." : "No person appears in this campaign.",
-    a.type === "ad" ? "Use: paid social ads, the product must be the hero and stop the scroll." : a.type === "social" ? "Use: organic Instagram posts." : "",
+    a.type === "ad" ? "Use: paid social ads, the product must be the hero and stop the scroll." : a.type === "social" ? "Use: organic Instagram posts." : a.type === "carousel" ? "Use: an Instagram carousel: several slides that follow each other in ONE universe, with room for a headline on most photos; the direction must allow clearly different shots (wide, detail, gesture, texture) in the same set." : "",
     a.nInsp ? `The ${a.nInsp} attached image(s) are MOOD references from the client: take their level and mood, never copy their concept.` : "",
     a.analysis ? `Description of the references:\n${a.analysis}` : "",
     TEXT_ZONES.find((x) => x.id === a.textZone)?.en ? `Every image of the campaign must leave ${TEXT_ZONES.find((x) => x.id === a.textZone)!.en} empty for a headline.` : "",

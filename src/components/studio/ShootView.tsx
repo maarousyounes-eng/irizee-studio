@@ -73,16 +73,26 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
   // Campagne avec image pilote : les autres images ne sont créées qu'après validation du pilote
   const [pilot, setPilot] = useState<string | undefined>(shoot.type_params?.pilot);
   const [continuing, setContinuing] = useState(false);
-  const pilotImg = images.filter((i) => i.variant_index === 0 && i.kind !== "format" && i.state === "done" && i.path).sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at))[0];
+  const isCar = shoot.visual_type === "carousel", isBa = shoot.visual_type === "ba";
+  const pilotVersions = images.filter((i) => i.variant_index === 0 && i.kind !== "format" && i.state === "done" && i.path && !i.params?.archived);
+  const pilotImg = pilotVersions.sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at))[0];
+  const rest = Math.max(0, (shoot.type_params?.count ?? 1) - 1);
   async function validatePilot() {
     setContinuing(true);
     try {
       const r = await api<{ imageIds: string[] }>(`/api/shoots/${shoot.id}/continue`, {});
-      setPilot("validated"); await load(); run(r.imageIds);
-      flash(`Pilote validé : ${r.imageIds.length} image(s) en cours de création, dans le même univers.`);
+      setPilot("validated");
+      // Avant / après : chaque « après » attend la fin de son « avant » ; sinon tout part en même temps
+      if (isBa) { waiting.current = r.imageIds; await load(); } else { await load(); run(r.imageIds); }
+      flash(isBa ? "Photo « avant » validée : l'« après » est en cours de création, à partir d'elle." : isCar ? `Couverture validée : ${r.imageIds.length} photo(s) en cours de création, dans le même univers.` : `Pilote validé : ${r.imageIds.length} image(s) en cours de création, dans le même univers.`);
     } catch (e) { flash(e instanceof Error ? e.message : "Erreur"); }
     setContinuing(false);
   }
+  // Carrousel du parcours guidé : toutes les photos du plan sont terminées
+  const carouselReady = useMemo(() => {
+    const want = normalizeSlides(shoot.type_params?.slides).map((x, i) => (x.layout === "text" ? -1 : i)).filter((i) => i >= 0);
+    return want.length > 0 && want.every((vi) => images.some((i) => i.variant_index === vi && i.kind !== "format" && i.state === "done" && i.path));
+  }, [images, shoot.type_params]);
   // « Autre idée » : l'IA propose une nouvelle idée pour une image, on la lit (et la modifie) avant de payer
   const [ideaFor, setIdeaFor] = useState<ImageRow | null>(null);
   const [ideaHint, setIdeaHint] = useState("");
@@ -364,12 +374,23 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
         {pilot === "pending" && (
           <div className="mt-3 bg-[#EBF2FF] border border-[#C9D9F8] rounded-2xl px-4 py-3 flex flex-wrap items-center justify-between gap-3">
             <div className="text-sm text-[#1F3F7A] max-w-2xl">
-              <b>Étape 4 : l&apos;image pilote.</b> {pilotImg ? `Si elle vous plaît, validez-la : les ${Math.max(0, (shoot.type_params?.count ?? 1) - 1)} autres images seront créées à partir d'elle (même décor, même lumière, même style). Sinon, utilisez « Corriger » ou « Autre idée » sous l'image, ou changez de direction.` : "Elle est en cours de création (1 à 2 minutes). Vous n'avez payé qu'une image."}
+              <b>{isBa ? "Étape 3 : la photo « avant »." : isCar ? "Étape 5 : la slide de couverture." : "Étape 4 : l'image pilote."}</b>{" "}
+              {!pilotImg ? "Elle est en cours de création (1 à 2 minutes). Vous n'avez payé qu'une image."
+                : isBa ? `Si elle vous plaît, validez-la : la photo « après » sera créée à partir d'elle (même personne, même cadrage, même lumière, seule la peau change)${rest > 1 ? `, puis les ${(rest - 1) / 2} autre(s) paire(s)` : ""}. Sinon, utilisez « Corriger » sous l'image.`
+                : isCar ? `Si elle vous plaît, validez-la : les ${rest} autres photos du carrousel seront créées dans le même univers (même style, même lumière, même mannequin). Sinon, utilisez « Corriger » ou « Autre idée » sous l'image, ou changez de direction.`
+                : `Si elle vous plaît, validez-la : les ${rest} autres images seront créées à partir d'elle (même décor, même lumière, même style). Sinon, utilisez « Corriger » ou « Autre idée » sous l'image, ou changez de direction.`}
+              {pilotVersions.length > 1 && <span className="block mt-1 text-[12px]">Il y a {pilotVersions.length} versions : c&apos;est la plus récente qui sert de modèle. Mettez à la corbeille celles que vous ne voulez pas.</span>}
             </div>
             <div className="flex flex-wrap gap-2">
-              <Btn onClick={validatePilot} disabled={!pilotImg || continuing}>{continuing ? <Spinner className="border-white/40 border-t-white" /> : <Check size={14} />} Valider et créer les {Math.max(0, (shoot.type_params?.count ?? 1) - 1)} autres</Btn>
-              <Link href="/studio"><Btn variant="ghost">Changer de direction</Btn></Link>
+              <Btn onClick={validatePilot} disabled={!pilotImg || continuing}>{continuing ? <Spinner className="border-white/40 border-t-white" /> : <Check size={14} />} {isBa ? (rest > 1 ? "Valider et créer l'« après » et les autres paires" : "Valider et créer l'« après »") : isCar ? `Valider et créer les ${rest} autres photos` : `Valider et créer les ${rest} autres`}</Btn>
+              <Link href="/studio"><Btn variant="ghost">{isBa ? "Recommencer autrement" : "Changer de direction"}</Btn></Link>
             </div>
+          </div>
+        )}
+        {isCar && pilot === "validated" && carouselReady && (
+          <div className="mt-3 bg-[#E7F6EC] border border-[#BFE5CB] rounded-2xl px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-[#14532D] max-w-2xl"><b>Étape 6 : les textes.</b> Toutes les photos du carrousel sont prêtes. « Habiller le carrousel » pose les titres et les textes du plan sur chaque slide, dans l&apos;éditeur Ads : vous pourrez tout déplacer et modifier.</p>
+            <Btn onClick={dressCarousel} disabled={dressing}>{dressing ? <Spinner className="border-white/40 border-t-white" /> : <Type size={14} />} Habiller le carrousel</Btn>
           </div>
         )}
         {shoot.type_params?.direction && <p className="mt-3 text-[12px] text-[#3F3F46] bg-white border border-[#E4E4E7] rounded-2xl px-4 py-3 max-w-4xl"><b>Direction artistique :</b> {shoot.type_params.direction}</p>}
