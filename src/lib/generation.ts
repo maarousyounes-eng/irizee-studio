@@ -5,6 +5,7 @@ import { textZoneLine, maskEditPrompt, wantsPhoneUi, baAfterPrompt, typeLine, RE
 import { normalizeSlides, type TypeParams } from "./visualTypes";
 import { cropTo, cropWindow, type Box } from "./framing";
 import { ensurePilotLook } from "./pilot";
+import { factCheck } from "./facts";
 import { OPENAI_RATIOS, cropBoxFor, cropImage, pasteBack, sameSceneOutsideZone, unionZones, zoneFromBox, zonesFromBoxes, type CropBox, type Zone } from "./localedit";
 import type { ImageRow, Product, QC } from "@/types";
 
@@ -250,13 +251,13 @@ function splitTasks(text: string): string[] {
   return text.split(/\n+/).map((l) => l.replace(/^\s*(?:[-–•*]|\d+[.)])\s*/, "").trim()).filter((l) => l.length > 2).slice(0, 5);
 }
 
-export interface Interpretation { instruction: string; understood: string; region: Zone | null; intent: "edit" | "label"; useOriginal: boolean; redo: boolean; clarify: string; target?: "product" | "other" }
+export interface Interpretation { instruction: string; understood: string; region: Zone | null; intent: "edit" | "label"; useOriginal: boolean; redo: boolean; clarify: string; target?: "product" | "other"; risky?: boolean; risk?: string }
 
 /** Comprend la demande : instruction précise, phrase « Compris », zone à retoucher (zone entourée + éléments concernés). */
 export async function interpretCorrection(prev: { buf: Buffer; mime: string }, feedback: string, userZone: Zone | null, avoid?: string, refs: { buf: Buffer; mime: string }[] = [], original: { buf: Buffer; mime: string } | null = null, realSize?: string): Promise<Interpretation> {
   const meta = await sharp(prev.buf).metadata();
   const W = meta.width ?? 0, H = meta.height ?? 0;
-  let instruction = feedback, understood = "", region: Zone | null = userZone, intent: "edit" | "label" = "edit", useOriginal = false, redo = false, clarify = "", target: "product" | "other" = "other";
+  let instruction = feedback, understood = "", region: Zone | null = userZone, intent: "edit" | "label" = "edit", useOriginal = false, redo = false, clarify = "", target: "product" | "other" = "other", risky = false, risk = "";
   try {
     const zoneCrop = userZone && W && H ? await sharp(prev.buf).extract({
       left: Math.round(Math.max(0, userZone.x * W)), top: Math.round(Math.max(0, userZone.y * H)),
@@ -266,6 +267,7 @@ export async function interpretCorrection(prev: { buf: Buffer; mime: string }, f
     const it = parseJson<{ instruction?: string; understood?: string; scope?: string; intent?: string; boxes?: unknown; box?: unknown }>(firstText(r));
     if (it.intent === "label") intent = "label";
     if ((it as { target?: unknown }).target === "product") target = "product";
+    risky = (it as { risky?: unknown }).risky === true; risk = String((it as { risk?: unknown }).risk ?? "").trim().slice(0, 240);
     useOriginal = (it as { use_original?: unknown }).use_original === true;
     redo = (it as { redo?: unknown }).redo === true && !userZone;
     clarify = String((it as { clarify?: unknown }).clarify ?? "").trim().slice(0, 300);
@@ -278,7 +280,7 @@ export async function interpretCorrection(prev: { buf: Buffer; mime: string }, f
       region = u && u.w * u.h <= 0.45 ? u : null;
     } else region = null;
   } catch { /* on garde la demande telle quelle */ }
-  return { instruction, understood, region, intent, useOriginal, redo, clarify, target };
+  return { instruction, understood, region, intent, useOriginal, redo, clarify, target, risky: risky && !redo, risk: risky && !redo ? risk : "" };
 }
 
 /**
@@ -644,6 +646,31 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
   }
   if (!buf) throw lastErr instanceof Error ? lastErr : new Error(`Google n'a renvoyé aucune image (${noImage || "raison inconnue"})`);
 
+  // Image pilote : vérifiée par les faits avant d'être montrée. Un défaut MESURÉ (produit trop grand ou trop petit,
+  // visage en très gros plan sur un avant/après) → elle est refaite une seule fois, avec la raison donnée à l'IA.
+  let autoRetry: string | null = null;
+  const tpP = (shoot.type_params ?? {}) as TypeParams;
+  if (buf && image.kind === "generated" && tpP.pilot === "pending" && left() > 110_000) {
+    const first: Buffer = buf;
+    try {
+      const f = await factCheck({ buf: first, mime: "image/png" }, { hasProduct: !noProduct, realSize: product.real_size, people: !shoot.no_people });
+      const fm = await sharp(first).metadata();
+      const [aw, ah] = String(aspect).split(":").map(Number);
+      const keptH = fm.width && fm.height && aw && ah ? Math.min(1, (fm.width * ah) / aw / fm.height) : 1; // part de la hauteur gardée après recadrage
+      const closeUp = String(shoot.visual_type) === "ba" && (f.face_frac ?? 0) / keptH > 0.5;
+      const why = f.scale === "big" ? "the product was TOO LARGE compared with the hand or the face. Make it clearly smaller, at its real size"
+        : f.scale === "small" ? "the product was TOO SMALL compared with the hand or the face. Make it larger, at its real size"
+        : closeUp ? "the face filled the frame in an extreme close-up, which distorts it. Step back: a head-and-shoulders portrait where the head takes about half of the image height" : null;
+      if (why) {
+        buf = null;
+        await run([{ text: `${(parts[0] as { text: string }).text}\n\nA PREVIOUS ATTEMPT WAS REJECTED because ${why}. Everything else stays as described.` }, ...parts.slice(1)], " (2e essai automatique)");
+        if (buf) autoRetry = f.scale === "big" ? "produit trop grand" : f.scale === "small" ? "produit trop petit" : "visage en trop gros plan";
+        else buf = first;
+      }
+    } catch { buf = first; /* vérification facultative : on garde la première image */ }
+  }
+  if (!buf) throw new Error("Aucune image produite");
+
   // Annulée entre-temps : on ne l'enregistre pas et on ne la compte pas
   const { data: cur } = await sb.from("images").select("state, params").eq("id", image.id).single();
   if (!cur || cur.state !== "generating" || (cur.params as any)?.cancelled) return;
@@ -687,6 +714,7 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
     }
   }
 
+  if (autoRetry) extraParams = { ...extraParams, auto_retry: autoRetry };
   // Image finale en JPEG haute qualité (≈ 1 Mo au lieu de 3-7 Mo en PNG) + miniature WebP pour les grilles
   const full = await sharp(buf).jpeg({ quality: 94, chromaSubsampling: "4:4:4", mozjpeg: true }).toBuffer();
   const thumb = await sharp(buf).resize({ width: 640, withoutEnlargement: true }).webp({ quality: 78 }).toBuffer();
@@ -715,7 +743,7 @@ function verdict(qc: QC, correction = false) {
     ? qc.instruction_followed === false || qc.ghost_or_duplicate === true || qc.foreign_logo || qc.matches_reference === false || (qc.edit_quality_0_10 ?? 10) < 5
     : deviant || wrong > 0 || qc.added_text === true || (!!qc.expected_count && !!qc.product_count && qc.product_count !== qc.expected_count) || qc.instruction_followed === false || qc.ghost_or_duplicate === true || qc.all_copies_exact === false || qc.label_orientation_ok === false || !qc.color_ok || !qc.shape_ok || qc.foreign_logo || anatomyBad;
   const soft = qc.text_zone_clear === false || unwanted || (correction && (qc.sharpness_ratio ?? 1) < 0.8) || (correction && (deviant || (qc.edit_quality_0_10 ?? 10) < 8 || wrong > 0 || qc.all_copies_exact === false || anatomyBad || !qc.color_ok || !qc.shape_ok || qc.label_orientation_ok === false))
-    || qc.skin_natural === false || unread > 1 || !qc.proportion_ok || !qc.angle_ok || (qc.product_height_pct ?? 100) < 8 || qc.realism_0_10 < 6;
+    || qc.framing_ok === false || qc.skin_natural === false || unread > 1 || !qc.proportion_ok || !qc.angle_ok || (qc.product_height_pct ?? 100) < 8 || qc.realism_0_10 < 6;
   const w = correction ? 0.25 : 1; // poids des défauts hérités dans le score d'une correction
   const score = Math.max(0, Math.min(100, Math.round(
     qc.realism_0_10 * 6 - wrong * 12 * w - unread * 3 * w - (qc.color_ok ? 0 : 20 * w) - (qc.shape_ok ? 0 : 15 * w) - (qc.foreign_logo ? 20 : 0)
@@ -769,6 +797,8 @@ async function qualityCheckInner(sb: SupabaseClient, image: ImageRow) {
   const qcParts = noProduct
     ? [{ text: qcPromptNoProduct(before ? { instruction: instr!, refCount: qcRefs.length } : undefined, { modelRef: !!modelRef, overlay }) }, imgPart(gen.buf, gen.mime), ...(before ? [imgPart(before.buf, before.mime)] : []), ...qcRefs.map((r) => imgPart(r.buf, r.mime)), ...(modelRef ? [imgPart(modelRef.buf, modelRef.mime)] : [])]
     : [{ text: qcPrompt(product, before ? { instruction: instr!, refCount: qcRefs.length } : undefined, { modelRef: !!modelRef, others: qcOthers, overlay, textZone }) }, imgPart(pack.buf, pack.mime), imgPart(gen.buf, gen.mime), ...(before ? [imgPart(before.buf, before.mime)] : []), ...qcRefs.map((r) => imgPart(r.buf, r.mime)), ...extraPacks.map((r) => imgPart(r.buf, r.mime)), ...(modelRef ? [imgPart(modelRef.buf, modelRef.mime)] : [])];
+  // Les faits mesurés (taille du produit, part du visage) : lancés en parallèle, ils priment sur le jugement à l'œil
+  const factsJob = factCheck(gen, { hasProduct: !noProduct, realSize: product.real_size, people: !shoot!.no_people }).catch(() => null);
   let r: any;
   try { r = await gemini(MODELS.vision, qcParts, { purpose: "contrôle qualité", json: true, timeoutMs: 70_000 }); }
   catch { r = await gemini(MODELS.text, qcParts, { purpose: "contrôle qualité (secours)", json: true, timeoutMs: 35_000 }); } // modèle plus rapide si le premier est trop lent
@@ -780,6 +810,19 @@ async function qualityCheckInner(sb: SupabaseClient, image: ImageRow) {
   if (noProduct) Object.assign(qc, { texts: [], color_ok: true, shape_ok: true, all_copies_exact: true, label_orientation_ok: true, product_height_pct: 100, hero_foreground: true, proportion_ok: true, angle_ok: true });
   if (before) {
     try { const [a, b] = await Promise.all([sharpness(before.buf), sharpness(gen.buf)]); if (a > 0) qc.sharpness_ratio = Math.round((b / a) * 100) / 100; } catch { /* mesure facultative */ }
+  }
+  const facts = await factsJob;
+  if (facts) {
+    qc.facts = facts;
+    qc.issues = (qc.issues ?? []) as string[];
+    if (facts.scale) {
+      // la mesure remplace l'avis à l'œil sur la taille
+      qc.proportion_ok = facts.scale === "ok";
+      qc.issues = qc.issues.filter((t) => !/trop (grand|gros|petit)|surdimensionn|taille|échelle|echelle/i.test(t));
+    }
+    // Avant / après : un visage en très gros plan paraît déformé
+    if (sa?.visual_type === "ba" && (facts.face_frac ?? 0) > 0.5) { qc.framing_ok = false; facts.issues.push(`Visage en très gros plan (${Math.round((facts.face_frac ?? 0) * 100)} % de la hauteur) : cadrage trop serré, le visage paraît déformé.`); }
+    qc.issues = [...facts.issues, ...qc.issues].slice(0, 6);
   }
   const v = verdict(qc, !!before);
   await sb.from("images").update({ qc, verdict: v.verdict, score: v.score }).eq("id", image.id);

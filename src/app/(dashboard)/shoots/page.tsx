@@ -7,10 +7,15 @@ export const dynamic = "force-dynamic";
 
 export default async function ShootsPage() {
   const sb = createClient();
-  const { data: shoots } = await sb
+  const { data: { user } } = await sb.auth.getUser();
+  const { data: me } = await sb.from("profiles").select("is_test").eq("id", user!.id).single();
+  // Les shootings du compte de test n'apparaissent que pour lui
+  let q = sb
     .from("shoots")
     .select("id, prompt, aspect, created_at, products(name), images(path, thumb_path, state, verdict, review_status, score, deleted_at, params)")
-    .is("deleted_at", null)
+    .is("deleted_at", null);
+  if (!me?.is_test) q = q.eq("is_test", false);
+  const { data: shoots } = await q
     .order("created_at", { ascending: false })
     .limit(60);
 
@@ -32,7 +37,7 @@ export default async function ShootsPage() {
           {shoots.map((s: any) => {
             const imgs = (s.images ?? []).filter((i: any) => !i.deleted_at && !i.params?.archived);
             const gen = imgs.filter((i: any) => i.state === "generating").length;
-            const valid = imgs.filter((i: any) => i.verdict === "valid").length;
+            const valid = imgs.filter((i: any) => i.verdict === "valid").length; // « rien signalé » par le contrôle
             const pending = imgs.filter((i: any) => i.review_status === "pending").length;
             const approved = imgs.filter((i: any) => i.review_status === "approved").length;
             return (

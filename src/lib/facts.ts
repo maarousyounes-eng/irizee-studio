@@ -6,11 +6,12 @@ type Img = { buf: Buffer; mime: string };
 /**
  * Contrôle par les faits : on MESURE au lieu de juger.
  * - Taille du produit : sa longueur comparée à la largeur de la main qui le tient (ou à la hauteur du visage à côté).
- * - Visage : un examen séparé, sur un gros plan du visage, des proportions (déformation, traits exagérés).
+ * - Visage : sa part dans l'image (un très gros plan donne un visage d'aspect déformé).
  */
 export interface Facts {
   scale: "ok" | "big" | "small" | null; scale_rel?: number; scale_ruler?: "main" | "visage" | "main (estimation)";
-  face: "ok" | "deformed" | null; face_reason?: string; face_ratios?: Record<string, number>;
+  /** Hauteur du visage (menton → racine des cheveux) rapportée à la hauteur de l'image mesurée */
+  face_frac?: number;
   issues: string[];
 }
 
@@ -35,25 +36,11 @@ const MEASURE_PROMPT = [
   'Return JSON only: {"product_ends": [[y,x],[y,x]] | null, "knuckles": [[y,x],[y,x]] | null, "hand_facing": "flat" | "angled" | null, "face": [ymin,xmin,ymax,xmax] | null, "product_near_face": bool | null, "apparent_length_cm": number | null}',
 ].join("\n");
 
-const LANDMARK_PROMPT = [
-  "This is a crop of a face. Return the position of these landmarks as integers from 0 to 1000 relative to this crop, written [y, x]:",
-  '"hairline": middle of the hairline at the top of the forehead; "chin": lowest point of the chin; "cheek_left" and "cheek_right": the left and right edges of the face at the level of the cheekbones; "pupil_left" and "pupil_right": the centres of the two pupils; "mouth_left" and "mouth_right": the two corners of the mouth; "lip_top": top of the upper lip at its centre; "lip_bottom": bottom of the lower lip at its centre; "nose_left" and "nose_right": the outer edges of the nostrils.',
-  "Use null for a landmark that is hidden or outside the crop.",
-  'Return JSON only: {"hairline":[y,x],"chin":[y,x],"cheek_left":[y,x],"cheek_right":[y,x],"pupil_left":[y,x],"pupil_right":[y,x],"mouth_left":[y,x],"mouth_right":[y,x],"lip_top":[y,x],"lip_bottom":[y,x],"nose_left":[y,x],"nose_right":[y,x]}',
-].join("\n");
-
-const FACE_PROMPT = [
-  "This is a crop of a face taken from an AI-generated advertising photo. Judge ONLY whether it looks like a real, normally proportioned human face photographed with a portrait lens.",
-  "It is DEFORMED if you see: a wide-angle close-up distortion (forehead or nose bulging, the face stretched too long or too wide), lips inflated or far too large for the face, eyes clearly too far apart, too large or misaligned, a jaw or chin out of proportion, asymmetric or melted features, or an uncanny, caricatural look.",
-  "These are NOT defects: striking beauty, strong features, makeup, freckles, moles, blemishes, uneven skin tone, visible pores.",
-  'Return JSON only: {"deformed": bool, "confidence": int from 0 to 10, "reason": str (one short French sentence saying what is deformed; empty string if not deformed)}',
-].join("\n");
-
 const pt = (p: unknown, W: number, H: number): [number, number] | null => Array.isArray(p) && p.length === 2 && p.every((n) => typeof n === "number") ? [(p[0] as number) / 1000 * H, (p[1] as number) / 1000 * W] : null;
 const dist = (a: [number, number], b: [number, number]) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 
 export async function factCheck(img: Img, a: { hasProduct: boolean; realSize?: string | null; people: boolean }): Promise<Facts> {
-  const out: Facts = { scale: null, face: null, issues: [] };
+  const out: Facts = { scale: null, issues: [] };
   try {
     const meta = await sharp(img.buf).metadata();
     const W = meta.width ?? 0, H = meta.height ?? 0;
@@ -82,33 +69,11 @@ export async function factCheck(img: Img, a: { hasProduct: boolean; realSize?: s
       }
     }
 
-    // 2. Visage : examen séparé, sur un gros plan
+    // 2. Visage : sa part dans l'image. À l'étalonnage, un visage jugé « déformé » avait les mêmes proportions que les autres ;
+    //    ce qui changeait, c'était le très gros plan (visage > 50 % de la hauteur), qui donne cet aspect.
     if (a.people && Array.isArray(m.face) && m.face.length === 4) {
-      const [y0, x0, y1, x1] = m.face.map((n) => Math.max(0, Math.min(1000, Number(n))) / 1000);
-      const pad = 0.3;
-      const fw = (x1 - x0) * W, fh = (y1 - y0) * H;
-      if (fw > 0.08 * W && fh > 0.08 * H) {
-        const left = Math.max(0, Math.round(x0 * W - pad * fw)), top = Math.max(0, Math.round(y0 * H - pad * fh));
-        const width = Math.min(W - left, Math.round(fw * (1 + 2 * pad))), height = Math.min(H - top, Math.round(fh * (1 + 2 * pad)));
-        const crop = await sharp(img.buf).extract({ left, top, width, height }).resize({ width: 768, height: 768, fit: "inside", withoutEnlargement: true }).jpeg({ quality: 90 }).toBuffer();
-        const fr = await gemini(MODELS.vision, [{ text: FACE_PROMPT }, imgPart(crop, "image/jpeg")], { purpose: "visage (contrôle)", json: true, timeoutMs: 45_000 });
-        const f = parseJson<{ deformed?: boolean; confidence?: number; reason?: string }>(firstText(fr));
-        // Repères du visage : proportions mesurées (pour étalonner le contrôle)
-        try {
-          const cm = await sharp(crop).metadata();
-          const cw = cm.width ?? 1, ch = cm.height ?? 1;
-          const lr = await gemini(MODELS.vision, [{ text: LANDMARK_PROMPT }, imgPart(crop, "image/jpeg")], { purpose: "repères du visage (contrôle)", json: true, timeoutMs: 45_000 });
-          const L = parseJson<Record<string, unknown>>(firstText(lr));
-          const P = (k: string) => pt(L[k], cw, ch);
-          const d = (a2: string, b2: string) => { const A = P(a2), B = P(b2); return A && B ? dist(A, B) : 0; };
-          const faceH2 = d("hairline", "chin"), faceW = d("cheek_left", "cheek_right");
-          const round = (x: number) => Math.round(x * 100) / 100;
-          if (faceH2 && faceW) out.face_ratios = { long_sur_large: round(faceH2 / faceW), levres_sur_hauteur: round(d("lip_top", "lip_bottom") / faceH2), bouche_sur_largeur: round(d("mouth_left", "mouth_right") / faceW), yeux_sur_largeur: round(d("pupil_left", "pupil_right") / faceW), nez_sur_largeur: round(d("nose_left", "nose_right") / faceW), visage_sur_image: round(fh / H) };
-        } catch { /* repères facultatifs */ }
-        const bad = f.deformed === true && (f.confidence ?? 0) >= 6;
-        out.face = bad ? "deformed" : "ok";
-        if (bad) { out.face_reason = String(f.reason ?? "").trim().slice(0, 200); out.issues.push(`Visage déformé${out.face_reason ? ` : ${out.face_reason}` : "."}`); }
-      }
+      const fh = (Math.max(0, Math.min(1000, m.face[2])) - Math.max(0, Math.min(1000, m.face[0]))) / 1000;
+      if (fh > 0.05) out.face_frac = Math.round(fh * 100) / 100;
     }
   } catch { /* mesures facultatives : sans elles, le contrôle habituel décide seul */ }
   return out;

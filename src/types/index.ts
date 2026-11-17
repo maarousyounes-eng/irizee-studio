@@ -10,7 +10,7 @@ export interface Profile {
 export interface Product {
   id: string; name: string; texts: string[]; look: string; real_size: string; rules: string[]; applied_look?: string; texture_path?: string | null;
   /** Photo de référence réaliste (vraie photo ou proposition IA choisie) : l'aspect réel du produit */
-  real_photo_path?: string | null; ref_candidates?: { path: string; label: string }[];
+  real_photo_path?: string | null; ref_candidates?: { path: string; label: string; shape_off?: boolean }[];
   product_images?: { id: string; path: string; position: number }[];
 }
 export interface Model {
@@ -31,6 +31,8 @@ export interface QC {
   color_ok: boolean; shape_ok: boolean; foreign_logo: boolean; anatomy_ok: boolean; skin_natural?: boolean; instruction_followed?: boolean; edit_quality_0_10?: number; unchanged?: boolean; human?: { present?: boolean; hands_ok?: boolean; fingers_count_ok?: boolean; grip_ok?: boolean; face_ok?: boolean; limbs_ok?: boolean; body_ok?: boolean; accessories_ok?: boolean }; face_matches_model?: boolean; artifacts_ok?: boolean; issues?: string[]; added_text?: boolean; text_zone_clear?: boolean; expected_count?: number; sharpness_ratio?: number; edit_defects?: string; matches_reference?: boolean; unwanted_changes?: string; ghost_or_duplicate?: boolean; product_count?: number; all_copies_exact?: boolean; label_orientation_ok?: boolean;
   product_height_pct: number; hero_foreground: boolean; proportion_ok: boolean; angle_ok: boolean;
   realism_0_10: number; comment: string;
+  /** Mesures faites sur l'image (taille du produit, part du visage) et cadrage */
+  facts?: { scale: "ok" | "big" | "small" | null; scale_rel?: number; scale_ruler?: string; face_frac?: number; issues: string[] }; framing_ok?: boolean;
 }
 export interface ImageRow {
   id: string; shoot_id: string; parent_id: string | null;

@@ -105,7 +105,7 @@ export async function POST(req: Request) {
       project_id: b.projectId || null, product_id: productIds[0], product_ids: productIds.length > 1 ? productIds : null, product_mode: productIds.length > 1 ? (["together", "split", "mix"].includes(b.productMode) ? b.productMode : "mix") : null, model_id: modelIds[0] ?? null, model_ids: modelIds, concept_id: b.conceptId || null,
       prompt, visual_type: vtype, type_params: tp, model_mode: b.modelMode === "together" && modelIds.length > 1 ? "together" : "split", aspect: b.aspect, size: ["1K", "2K", "4K"].includes(b.size) ? b.size : "2K",
       engine: "openai", no_people: !!b.noPeople, no_product: !!b.noProduct,
-      inspiration_paths: paths, analysis, created_by: user.id,
+      inspiration_paths: paths, analysis, created_by: user.id, is_test: !!(profile as { is_test?: boolean }).is_test,
     }).select("id").single();
     if (error || !shoot) throw new HttpError(400, error?.message ?? "Création impossible");
 

@@ -21,10 +21,10 @@ interface Props {
   initialImages: ImageRow[];
 }
 
-const VERDICT: Record<string, { label: string; tone: "green" | "amber" | "red" }> = {
-  valid: { label: "Aucun défaut repéré", tone: "green" },
+const VERDICT: Record<string, { label: string; tone: "gray" | "amber" | "red" }> = {
+  valid: { label: "Rien signalé", tone: "gray" },
   review: { label: "Défaut possible", tone: "amber" },
-  rejected: { label: "Défauts repérés", tone: "red" },
+  rejected: { label: "Défauts signalés", tone: "red" },
 };
 const REVIEW: Record<string, { label: string; tone: "gray" | "blue" | "green" | "red" }> = {
   draft: { label: "Brouillon", tone: "gray" },
@@ -416,9 +416,9 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
 
       <div className="flex flex-wrap items-center gap-2 mb-5">
         {chip("all", "Toutes", images.length)}
-        {chip("valid", "Aucun défaut repéré", counts.valid)}
+        {chip("valid", "Rien signalé", counts.valid)}
         {chip("review", "Défaut possible", counts.review)}
-        {chip("rejected", "Défauts repérés", counts.rejected)}
+        {chip("rejected", "Défauts signalés", counts.rejected)}
         <span className="w-px h-5 bg-[#E4E4E7] mx-1" />
         {chip("pending", "En validation", counts.pending)}
         {chip("approved", "Approuvées", counts.approved)}
@@ -447,6 +447,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
         <label className="flex items-center gap-1.5 text-xs text-[#6B6B72]"><input type="checkbox" checked={hideRejected} onChange={(e) => setHideRejected(e.target.checked)} /> Masquer celles avec défauts</label>
         {archivedCount > 0 && <label className="flex items-center gap-1.5 text-xs text-[#6B6B72]"><input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} /> Afficher les essais écartés ({archivedCount})</label>}
       </div>
+      <p className="text-[11px] text-[#6B6B72] -mt-3 mb-4">Le contrôle automatique signale des faits (texte de l&apos;étiquette, taille du produit, mains, visage). « Rien signalé » ne veut pas dire que la photo est bonne : c&apos;est vous qui jugez.</p>
       {counts.generating > 0 && <div className="text-xs text-[#6B6B72] mb-3 flex flex-wrap items-center gap-3"><span className="flex items-center gap-2"><Spinner /> {counts.generating} image(s) en cours de génération — tu peux rester sur cette page.</span><Btn size="sm" variant="danger" onClick={() => { if (confirm(`Annuler les ${counts.generating} générations en cours ?`)) cancelImages(images.filter((i) => i.state === "generating")); }}><X size={12} /> Tout annuler</Btn></div>}
 
       {(() => {
@@ -501,6 +502,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
                     {img.feedback && <span className="text-[11px] text-[#A0A0A8] truncate" title={img.feedback}>{img.feedback}</span>}
                   </div>
                   {img.kind === "generated" && (img.params?.idea || shoot.type_params?.shots?.[img.variant_index]) && <p className="text-[#3F3F46] bg-[#F4F4F5] rounded-lg px-2.5 py-1.5 leading-snug"><span className="font-semibold">Idée :</span> {String(img.params?.idea ?? shoot.type_params?.shots?.[img.variant_index])}</p>}
+                  {img.params?.auto_retry && <p className="text-[#52525B] bg-[#F4F4F5] rounded-lg px-2.5 py-1.5 leading-snug">Image refaite une fois automatiquement avant de vous être montrée : le premier essai avait un défaut mesuré ({String(img.params.auto_retry)}).</p>}
                   {img.params?.subject_cut && <p className="text-[#7A4B00] bg-[#FFF4D6] rounded-lg px-2.5 py-1.5 leading-snug">Le sujet ne tient pas en entier dans ce format. Ouvrez « Formats » pour choisir le cadrage ou un autre format.</p>}
                   {img.params?.understood && <p className="text-[#2B6EE8] bg-[#EBF2FF] rounded-lg px-2.5 py-1.5 leading-snug"><span className="font-semibold">Compris :</span> {String(img.params.understood)}</p>}
                   {img.kind === "correction" && qc && qc.instruction_followed !== undefined && (

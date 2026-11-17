@@ -37,7 +37,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     const pre = pr ? {
       instruction: String(pr.instruction).slice(0, 3000), understood: String(pr.understood ?? "").slice(0, 400),
       region: valid(pr.region) ? { x: pr.region.x, y: pr.region.y, w: pr.region.w, h: pr.region.h } : null,
-      intent: pr.intent === "label" ? "label" : "edit", useOriginal: pr.useOriginal === true, redo: pr.redo === true, clarify: "",
+      intent: pr.intent === "label" ? "label" : "edit", useOriginal: pr.useOriginal === true, redo: pr.redo === true, clarify: "", target: pr.target === "product" ? "product" : "other",
     } : null;
     const group = crypto.randomUUID();
     const rows = Array.from({ length: n }, (_, i) => ({

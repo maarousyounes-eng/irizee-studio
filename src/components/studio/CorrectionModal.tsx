@@ -52,7 +52,7 @@ export default function CorrectionModal({ bases, currentId, aspect, isStaff, onC
   const [uploading, setUploading] = useState(0);
   const [refError, setRefError] = useState<string | null>(null);
   // Étape « Vérifier » : ce que l'outil a compris, AVANT de payer une image
-  const [check, setCheck] = useState<{ understood: string; clarify: string; redo: boolean; pre: unknown } | null>(null);
+  const [check, setCheck] = useState<{ understood: string; clarify: string; redo: boolean; risky?: boolean; risk?: string; pre: unknown } | null>(null);
   const [checking, setChecking] = useState(false);
   const [checkErr, setCheckErr] = useState<string | null>(null);
   useEffect(() => { setCheck(null); }, [text, zones, refs, baseId]);
@@ -102,9 +102,13 @@ export default function CorrectionModal({ bases, currentId, aspect, isStaff, onC
     catch (e) { setCheckErr(e instanceof Error ? e.message : "Erreur"); }
     setChecking(false);
   }
-  async function apply() {
+  /** asRedo : refaire la photo avec cette remarque (nouvelle prise de vue) au lieu d'une retouche */
+  async function apply(asRedo = false) {
     setBusy(true);
-    try { await onSubmit({ feedback: text.trim(), zones, remember, refs: refs.map((r) => r.path), baseId, pre: check?.pre ?? undefined }); } finally { setBusy(false); }
+    const pre = asRedo
+      ? { ...((check?.pre as Record<string, unknown> | null) ?? { instruction: text.trim(), understood: check?.understood ?? "", intent: "edit" }), redo: true, region: null }
+      : check?.pre ?? undefined;
+    try { await onSubmit({ feedback: text.trim(), zones, remember, refs: refs.map((r) => r.path), baseId, pre }); } finally { setBusy(false); }
   }
 
   return (
@@ -209,6 +213,7 @@ export default function CorrectionModal({ bases, currentId, aspect, isStaff, onC
             <div className="p-3 rounded-xl bg-[#EBF2FF] border border-[#C9D9F8] text-[13px] text-[#1F3F7A] space-y-1">
               <p><b>Compris :</b> {check.understood}</p>
               {check.redo && <p className="text-[12px]"><b>La photo sera refaite</b> (nouvelle prise de vue avec le même mannequin, le même produit et le même style) : une retouche ne peut pas changer la pose, l&apos;angle ou le décor.</p>}
+              {!check.redo && check.risky && <p className="text-[12px] text-[#7A4B00] bg-[#FFF4D6] rounded-lg px-2.5 py-1.5"><b>Retouche difficile.</b> {check.risk || "Ce type de changement réussit rarement en retouche."} Refaire la photo avec votre remarque donne de meilleures chances, pour le même prix.</p>}
               <p className="text-[11px] text-[#52525B]">Si ce n&apos;est pas ça, reformule avant de lancer : rien n&apos;a encore été payé.</p>
             </div>
           ))}
@@ -216,7 +221,12 @@ export default function CorrectionModal({ bases, currentId, aspect, isStaff, onC
           <div className="flex flex-wrap gap-2 pt-1">
             {!check || check.clarify
               ? <Btn onClick={verify} disabled={checking || uploading > 0 || !canSubmit}>{checking ? <><Spinner className="border-white/40 border-t-white" /> Lecture de ta demande…</> : "Vérifier ma demande (gratuit)"}</Btn>
-              : <Btn onClick={apply} disabled={busy || uploading > 0}>{busy ? "Envoi…" : check.redo ? "Refaire la photo (1 image payante)" : "Lancer la correction (1 image payante)"}</Btn>}
+              : check.risky && !check.redo
+                ? <>
+                  <Btn onClick={() => apply(true)} disabled={busy || uploading > 0}>{busy ? "Envoi…" : "Refaire la photo (1 image payante)"}</Btn>
+                  <Btn variant="ghost" onClick={() => apply(false)} disabled={busy || uploading > 0}>Tenter la retouche quand même (1 image payante)</Btn>
+                </>
+                : <Btn onClick={() => apply(false)} disabled={busy || uploading > 0}>{busy ? "Envoi…" : check.redo ? "Refaire la photo (1 image payante)" : "Lancer la correction (1 image payante)"}</Btn>}
             <Btn variant="ghost" onClick={onClose}>Annuler</Btn>
           </div>
         </div>

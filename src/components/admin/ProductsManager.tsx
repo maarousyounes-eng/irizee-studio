@@ -87,7 +87,7 @@ function ProductCard({ p, urls, onChange }: { p: Product; urls: Record<string, s
   const texUrls = useSignedUrls([texture]);
   // Photo de référence réaliste : l'aspect réel du produit (vraie photo importée, ou proposition IA choisie)
   const [real, setReal] = useState<string | null>(p.real_photo_path ?? null);
-  const [cands, setCands] = useState<{ path: string; label: string }[]>(p.ref_candidates ?? []);
+  const [cands, setCands] = useState<{ path: string; label: string; shape_off?: boolean }[]>(p.ref_candidates ?? []);
   const [refBusy, setRefBusy] = useState(false);
   const [refErr, setRefErr] = useState<string | null>(null);
   const realRef = useRef<HTMLInputElement>(null);
@@ -103,6 +103,16 @@ function ProductCard({ p, urls, onChange }: { p: Product; urls: Record<string, s
     setRefErr(null); setRefBusy(true);
     try { const r = await apiJob<{ candidates: { path: string; label: string }[] }>(sb, `/api/products/${p.id}/reference`, {}, 420_000); setCands(r.candidates); }
     catch (e) { setRefErr(e instanceof Error ? e.message : "Erreur"); }
+    setRefBusy(false);
+  }
+  /** Garde l'aspect de la référence actuelle, mais avec la forme exacte du packshot (1 image payante) */
+  async function reshape() {
+    if (!real || !confirm("Refaire cette photo avec la forme exacte du packshot ? 1 image payante, environ 0,20 €.")) return;
+    setRefErr(null); setRefBusy(true);
+    try {
+      const r = await apiJob<{ candidates: { path: string; label: string }[]; added: { path: string } }>(sb, `/api/products/${p.id}/reference`, { like: real }, 420_000);
+      setCands(r.candidates); await chooseReal(r.added.path);
+    } catch (e) { setRefErr(e instanceof Error ? e.message : "Erreur"); }
     setRefBusy(false);
   }
   const [rules, setRules] = useState<string[]>(p.rules ?? []);
@@ -174,6 +184,7 @@ function ProductCard({ p, urls, onChange }: { p: Product; urls: Record<string, s
             <div className="flex items-center gap-3 bg-[#E7F6EC] rounded-xl p-2">
               {refUrls[real] && /* eslint-disable-next-line @next/next/no-img-element */ <img src={refUrls[real]} alt="Photo de référence actuelle" onClick={() => setZoom(refUrls[real])} className="w-16 h-24 object-cover rounded-lg cursor-zoom-in" />}
               <p className="text-[12px] text-[#14532D] flex-1"><b>Référence actuelle.</b> Elle est utilisée dans toutes les nouvelles générations de ce produit.</p>
+              <Btn size="sm" variant="ghost" onClick={reshape} disabled={refBusy} title="Même matière, mais la silhouette exacte du packshot">Refaire avec la forme du packshot (≈ 0,20 €)</Btn>
               <Btn size="sm" variant="ghost" onClick={() => chooseReal(null)}>Retirer</Btn>
             </div>
           )}
@@ -189,6 +200,7 @@ function ProductCard({ p, urls, onChange }: { p: Product; urls: Record<string, s
                         {refUrls[c.path] && /* eslint-disable-next-line @next/next/no-img-element */ <img src={refUrls[c.path]} alt={`Proposition : ${c.label}`} onClick={() => setZoom(refUrls[c.path])} className="w-full h-full object-cover cursor-zoom-in" />}
                       </div>
                       <p className="text-[11px] font-semibold text-center">{c.label}</p>
+                      {c.shape_off && <p className="text-[10px] text-[#7A4B00] bg-[#FFF4D6] rounded px-1 text-center">Forme différente du packshot</p>}
                       <Btn size="sm" variant={on ? "primary" : "ghost"} className="w-full" onClick={() => chooseReal(c.path)}>{on ? "Choisie" : "Choisir"}</Btn>
                     </div>
                   );

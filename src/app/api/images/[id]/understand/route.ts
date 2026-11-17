@@ -39,6 +39,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       understood: it.understood || "Je vais appliquer votre demande telle quelle.",
       clarify: it.clarify,
       redo: it.redo,
+      risky: !!it.risky, risk: it.risk ?? "",
       pre: single || it.redo ? it : null,
     };
   });
