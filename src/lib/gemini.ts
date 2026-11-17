@@ -124,7 +124,7 @@ async function fitAspect(buf: Buffer, aspect?: string) {
 }
 
 /** Appel OpenAI (édition d'image avec références) ; renvoie une réponse au format Gemini pour que le reste du code ne change pas. */
-async function callOpenAI(model: string, parts: Part[], o: { purpose?: string; aspect?: string; timeoutMs?: number; signal?: AbortSignal; mask?: Buffer; noFit?: boolean; quality?: "low" | "high" }) {
+async function callOpenAI(model: string, parts: Part[], o: { purpose?: string; aspect?: string; timeoutMs?: number; signal?: AbortSignal; mask?: Buffer; noFit?: boolean; quality?: "low" | "medium" | "high" }) {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error("OPENAI_API_KEY manquante côté serveur");
   const name = model === "openai:auto" ? await resolveOpenAIModel(key) : model.slice(7);
@@ -155,7 +155,7 @@ async function callOpenAI(model: string, parts: Part[], o: { purpose?: string; a
       const b64: string | undefined = j.data?.[0]?.b64_json;
       if (!b64) { await logCall({ purpose: o.purpose ?? "autre", model: name, status: "ok", ms: Date.now() - t0, imagesOut: 0, note: "réponse sans image" }); return { candidates: [{ content: { parts: [] } }] }; }
       const out = o.noFit ? Buffer.from(b64, "base64") : await fitAspect(Buffer.from(b64, "base64"), o.aspect);
-      await logCall({ purpose: o.purpose ?? "autre", model: name, status: "ok", ms: Date.now() - t0, imagesOut: 1, size, cost: o.quality === "low" ? 0.02 : OPENAI_EUR_PER_IMAGE });
+      await logCall({ purpose: o.purpose ?? "autre", model: name, status: "ok", ms: Date.now() - t0, imagesOut: 1, size, cost: o.quality === "low" ? 0.02 : o.quality === "medium" ? 0.06 : OPENAI_EUR_PER_IMAGE });
       return { candidates: [{ content: { parts: [{ inlineData: { mime_type: "image/png", data: out.toString("base64") } }] } }] };
     }
     await logCall({ purpose: o.purpose ?? "autre", model: name, status: "error", http: res.status, ms: Date.now() - t0, note: JSON.stringify(j).slice(0, 150) });
@@ -168,7 +168,7 @@ async function callOpenAI(model: string, parts: Part[], o: { purpose?: string; a
 
 let geminiDownUntil = 0;
 
-interface Opts { purpose?: string; image?: boolean; json?: boolean; aspect?: string; size?: string; timeoutMs?: number; signal?: AbortSignal; mask?: Buffer; noFit?: boolean; quality?: "low" | "high" }
+interface Opts { purpose?: string; image?: boolean; json?: boolean; aspect?: string; size?: string; timeoutMs?: number; signal?: AbortSignal; mask?: Buffer; noFit?: boolean; quality?: "low" | "medium" | "high" }
 
 export async function gemini(model: string, parts: Part[], { purpose, image, json, aspect, size, timeoutMs, signal, mask, noFit, quality }: Opts = {}) {
   if (model.startsWith("openai:")) return callOpenAI(model, parts, { purpose, aspect, timeoutMs, signal, mask, noFit, quality });

@@ -393,6 +393,10 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
         }
       }
       if (!series) seriesMode = undefined;
+      // Mannequin créé par l'IA : une seule et même personne sur toute la série (celle de l'esquisse, puis du pilote ou de la couverture)
+      const sameAi = !modelRefs.length && !shoot.no_people && seriesMode
+        ? `The human model: exactly the same fictional person as in the ${seriesMode === "campaign" ? "PILOT IMAGE" : seriesMode === "carousel" ? "SERIES REFERENCE" : "CHOSEN SKETCH"} (same face, skin tone, hair colour and hairstyle), shown as a real person with real skin.`
+        : null;
       // Mannequin choisi : les visages des inspirations sont floutés pour ne jamais se mélanger avec le sien
       if (modelRefs.length && inspirations.length) inspirations = await Promise.all(inspirations.map(blurFaces));
       const nSlides = normalizeSlides(tp.slides).length || 1;
@@ -411,7 +415,7 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
         inspMode: tp.inspMode === "copy" ? "copy" : tp.inspMode === "loose" ? "loose" : undefined,
         layoutLine: vtype === "ad" ? textZoneLine(tp.textZone) : undefined,
         seriesRef: !!series, seriesMode,
-        others: others.map((o) => ({ product: o.product, n: 1 })), variation: variationHint(image.variant_index, shoot.no_people), nProductImages: imagePaths.length,
+        others: others.map((o) => ({ product: o.product, n: 1 })), variation: sameAi ?? variationHint(image.variant_index, shoot.no_people), nProductImages: imagePaths.length,
         hasModelRef: modelRefs.length > 0, nModelRefs: modelRefs.length, modelDescription: descs.join(" / "), noPeople: shoot.no_people, noProduct,
         ...(vtype === "photo" ? {} : { typeLine: typeLine(vtype, tp, image.variant_index, nSlides), hasStyleRef: inspirations.length > 0, realism: vtype === "ba" ? REALISM_NATURAL : undefined }),
       });

@@ -56,7 +56,7 @@ export default async function StudioPage({ searchParams }: { searchParams: { con
       prefill = {
         source: `Réglages repris de votre campagne du ${new Date(sh.created_at).toLocaleDateString("fr-FR")}.`,
         brief: sh.prompt, vtype: sh.visual_type ?? "photo", productIds: (sh.product_ids as string[] | null) ?? [sh.product_id], productMode: sh.product_mode ?? undefined, noProduct: !!sh.no_product,
-        modelIds: sh.no_people ? [] : sh.model_ids ?? [], aspect: sh.aspect, count: n, pairs: Math.ceil(n / 2), textZone: tp.textZone, inspMode: tp.inspMode, inspirations: sh.inspiration_paths ?? [],
+        modelIds: sh.no_people ? [] : sh.model_ids ?? [], aiFace: !sh.no_people && !(sh.model_ids ?? []).length, aspect: sh.aspect, count: n, pairs: Math.ceil(n / 2), textZone: tp.textZone, inspMode: tp.inspMode, inspirations: sh.inspiration_paths ?? [],
         directionText: typeof tp.direction === "string" ? tp.direction : undefined, sketchPath: typeof tp.sketch_path === "string" ? tp.sketch_path : undefined,
         carouselStyle: tp.carouselStyle, slides: sh.visual_type === "carousel" ? normalizeSlides(tp.slides) : undefined, baChange: tp.baChange, baBefore: tp.baBefore, baAfter: tp.baAfter,
       };

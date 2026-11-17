@@ -359,7 +359,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
             <div className="flex flex-wrap gap-1.5 mt-2">
               {shoot.visual_type && shoot.visual_type !== "photo" && <Badge tone="blue">{typeName(shoot.visual_type)}</Badge>}
               <Badge tone="blue">{FORMATS[shoot.aspect]?.short ?? shoot.aspect}</Badge>
-              <Badge>{shoot.no_people ? "Sans personne" : modelNames.length ? `${modelNames.length > 1 ? "Mannequins" : "Mannequin"} : ${modelNames.join(", ")}` : "Mannequins variés (IA)"}</Badge>
+              <Badge>{shoot.no_people ? "Sans personne" : modelNames.length ? `${modelNames.length > 1 ? "Mannequins" : "Mannequin"} : ${modelNames.join(", ")}` : (shoot.type_params?.pilot ? "Mannequin créé par l'IA" : "Mannequins variés (IA)")}</Badge>
               <Badge>{new Date(shoot.created_at).toLocaleDateString("fr-FR")}</Badge>
             </div>
           </div>

@@ -2,6 +2,7 @@ import sharp from "sharp";
 import { requireUser, handle, HttpError, withJob } from "@/lib/api";
 import { gemini, imgPart, firstImage, withAiCtx, type Part } from "@/lib/gemini";
 import { download, loadProduct, IMAGE_MODEL } from "@/lib/generation";
+import { REAL_LOOK } from "@/lib/prompts";
 
 export const maxDuration = 120;
 
@@ -16,16 +17,28 @@ export async function POST(req: Request) {
     const productIds: string[] = b.noProduct ? [] : (Array.isArray(b.productIds) ? b.productIds : []).filter((x: unknown) => typeof x === "string").slice(0, 2);
     const prods = (await Promise.all(productIds.map((id) => loadProduct(sb, id).catch(() => null)))).filter(Boolean);
     const packs = (await Promise.all(prods.map((p) => (p!.imagePaths[0] ? download(sb, p!.imagePaths[0]).catch(() => null) : null)))).filter(Boolean) as { buf: Buffer; mime: string }[];
+    // Mannequin choisi : l'esquisse montre déjà cette personne (le premier mannequin, celui de l'image pilote)
+    const modelId = !b.noPeople && Array.isArray(b.modelIds) && typeof b.modelIds[0] === "string" ? (b.modelIds[0] as string) : null;
+    let modelRef: { buf: Buffer; mime: string } | null = null, modelDesc = "";
+    if (modelId) {
+      const { data: m } = await sb.from("models").select("path, description").eq("id", modelId).single();
+      if (m?.path) { modelRef = await download(sb, m.path).catch(() => null); modelDesc = String(m.description ?? ""); }
+    }
     const prompt = [
-      "Quick concept photo for an art direction board of the cosmetics brand Irizée: one real-looking photograph showing this direction.",
+      "Concept photo for an art direction board of the cosmetics brand Irizée: ONE real photograph, as shot on a real set with a real camera, showing this direction.",
       `ART DIRECTION: ${direction}`,
-      prods.length ? `The attached image(s) are the real product packshot(s) (${prods.map((p) => `"${p!.product.name}"`).join(", ")}): show ${prods.length > 1 ? "exactly one of each" : "exactly one"}, copied from its packshot: same shape, same material and colours, same logo and label layout, entirely visible, at a realistic size. Never invent another packaging or recolour it, whatever the art direction says.` : "No product in the image: no bottle, tube, jar or packaging at all, even if the art direction mentions one.",
-      b.noPeople ? "No person in the image." : "",
-      "A real photograph of real objects, never a graphic, illustration or 3D render.",
+      prods.length
+        ? `The first ${packs.length > 1 ? `${packs.length} images are` : "image is"} the packshot${packs.length > 1 ? "s" : ""} of the real product${prods.length > 1 ? "s" : ""} (${prods.map((p) => `"${p!.product.name}"`).join(", ")}): show ${prods.length > 1 ? "exactly one of each" : "exactly one"}, at its real size, entirely visible. Its DESIGN comes from the packshot (shape, material, colours, logo, label layout; never another packaging, never recoloured), but it is PHOTOGRAPHED in the scene as a real physical object: lit by the light of the scene, with real reflections of the set on its surface, natural perspective and tilt, contact shadows; when a hand holds it, the fingers really wrap around it and hide part of it. Never a flat cut-out pasted on the photo.`
+        : "No product in the image: no bottle, tube, jar or packaging at all, even if the art direction mentions one.",
+      b.noPeople ? "No person in the image."
+        : modelRef ? `The last image is the MODEL REFERENCE: the person in the photo is exactly this person (same face, skin tone, hair colour and hairstyle)${modelDesc ? `: ${modelDesc}` : ""}. Real skin with visible texture.`
+        : "The person is a fictional model invented for this campaign, with real skin (visible pores and texture), never a plastic or artificial face.",
+      REAL_LOOK,
       "No added text, logo, frame or collage. No flowers, towels or spa props unless the direction asks for them.",
     ].filter(Boolean).join("\n");
-    const parts: Part[] = [{ text: prompt }, ...packs.map((p) => imgPart(p.buf, p.mime))];
-    const buf = firstImage(await withAiCtx({ sb, userId: user.id }, () => gemini(IMAGE_MODEL, parts, { purpose: "esquisse direction", image: true, aspect: "2:3", quality: "low", noFit: true, timeoutMs: 100_000 })));
+    const parts: Part[] = [{ text: prompt }, ...packs.map((p) => imgPart(p.buf, p.mime)), ...(modelRef ? [imgPart(modelRef.buf, modelRef.mime)] : [])];
+    const quality = b.quality === "medium" ? "medium" : "low";
+    const buf = firstImage(await withAiCtx({ sb, userId: user.id }, () => gemini(IMAGE_MODEL, parts, { purpose: "esquisse direction", image: true, aspect: "2:3", quality, noFit: true, timeoutMs: 100_000 })));
     if (!buf) throw new HttpError(502, "Esquisse impossible, réessayez");
     const path = `sketches/${user.id}/${crypto.randomUUID()}.jpg`;
     const jpg = await sharp(buf).resize({ width: 768, withoutEnlargement: true }).jpeg({ quality: 86 }).toBuffer();

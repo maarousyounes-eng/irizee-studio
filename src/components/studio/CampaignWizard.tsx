@@ -19,7 +19,7 @@ interface Props {
 }
 export interface Prefill {
   source?: string; conceptId?: string;
-  brief?: string; vtype?: string; productIds?: string[]; productMode?: string; noProduct?: boolean; modelIds?: string[];
+  brief?: string; vtype?: string; productIds?: string[]; productMode?: string; noProduct?: boolean; modelIds?: string[]; aiFace?: boolean;
   aspect?: string; count?: number; textZone?: string; inspMode?: string; inspirations?: string[];
   direction?: Dir; directionText?: string; sketchPath?: string;
   carouselStyle?: string; slides?: Slide[]; baChange?: string; baBefore?: string; baAfter?: string; pairs?: number;
@@ -72,7 +72,9 @@ export default function CampaignWizard({ products, models, library, prefill }: P
   const isCar = vtype === "carousel";
   const isBa = vtype === "ba";
   const flow: Step[] = isBa ? ["setup", "brief"] : isCar ? ["setup", "brief", "direction", "plan"] : ["setup", "brief", "direction"];
-  const noPeople = isBa ? false : modelIds.length === 0;
+  // Personne : un de vos mannequins, un mannequin créé par l'IA (le même sur toute la campagne), ou personne
+  const [aiFace, setAiFace] = useState(false);
+  const noPeople = isBa ? false : modelIds.length === 0 && !aiFace;
 
   function pickType(k: string) {
     if (k === "ba") setNoProduct(true); else if (vtype === "ba") setNoProduct(false);
@@ -105,6 +107,7 @@ export default function CampaignWizard({ products, models, library, prefill }: P
     if (p.productMode === "mix" || p.productMode === "split" || p.productMode === "together") setProductMode(p.productMode);
     const mids = (p.modelIds ?? []).filter((id) => models.some((x) => x.id === id));
     if (p.modelIds) setModelIds(t === "carousel" ? mids.slice(0, 1) : mids);
+    if (p.aiFace && !mids.length) setAiFace(true);
     if (p.aspect && FORMATS[p.aspect]) setAspect(p.aspect);
     if (p.count) setCount([2, 4, 6, 8].reduce((best, n) => (Math.abs(n - p!.count!) < Math.abs(best - p!.count!) ? n : best), 4));
     if (p.textZone && TEXT_ZONES.some((z) => z.id === p!.textZone)) setTextZone(p.textZone);
@@ -170,7 +173,7 @@ export default function CampaignWizard({ products, models, library, prefill }: P
   const common = () => ({ brief, visualType: vtype, productIds: ids, noProduct, noPeople, textZone, inspirationPaths: inspirations.map((x) => x.path), inspirationAnalyses: inspirations.filter((x) => x.state === "done").map((x) => ({ analysis: x.analysis, note: x.note })) });
 
   // Une esquisse rapide par direction, pour choisir avec les yeux : toujours avec les vrais packshots des produits choisis
-  const sketchSig = `${ids.join(",")}|${noProduct}|${noPeople}`;
+  const sketchSig = `${ids.join(",")}|${noProduct}|${noPeople}|${modelIds[0] ?? ""}`;
   const sketchRun = useRef(0);
   const [sketchedFor, setSketchedFor] = useState("");
   function makeSketches(list: Dir[]) {
@@ -180,7 +183,7 @@ export default function CampaignWizard({ products, models, library, prefill }: P
     list.forEach((d) => { next[d.title] = { state: "loading" }; });
     setSketches(next);
     list.forEach((d) => {
-      apiJob<{ path: string }>(sb, "/api/shoots/sketch", { direction: dirText(d), productIds: ids, noProduct, noPeople })
+      apiJob<{ path: string }>(sb, "/api/shoots/sketch", { direction: dirText(d), productIds: ids, noProduct, noPeople, modelIds: modelIds.slice(0, 1) })
         .then((sk) => { if (run === sketchRun.current) setSketches((m) => ({ ...m, [d.title]: { state: "done", path: sk.path } })); })
         .catch(() => { if (run === sketchRun.current) setSketches((m) => ({ ...m, [d.title]: { state: "error" } })); });
     });
@@ -329,9 +332,12 @@ export default function CampaignWizard({ products, models, library, prefill }: P
           <div>
             <Label>Personne sur les photos</Label>
             <div className="flex flex-wrap gap-2">
-              <button type="button" className={chip(modelIds.length === 0)} onClick={() => setModelIds([])}>{isBa ? "Visage inventé par l'IA" : "Sans personne"}</button>
-              {models.map((m) => { const on = modelIds.includes(m.id); return <button key={m.id} type="button" className={chip(on)} onClick={() => setModelIds(on ? modelIds.filter((x) => x !== m.id) : isCar ? [m.id] : [...modelIds, m.id])}>{m.name}</button>; })}
+              {!isBa && <button type="button" className={chip(modelIds.length === 0 && !aiFace)} onClick={() => { setModelIds([]); setAiFace(false); }}>Sans personne</button>}
+              <button type="button" className={chip(modelIds.length === 0 && (aiFace || isBa))} onClick={() => { setModelIds([]); setAiFace(true); }}>Mannequin créé par l&apos;IA</button>
+              {models.map((m) => { const on = modelIds.includes(m.id); return <button key={m.id} type="button" className={chip(on)} onClick={() => { setAiFace(false); setModelIds(on ? modelIds.filter((x) => x !== m.id) : isCar ? [m.id] : [...modelIds, m.id]); }}>{m.name}</button>; })}
             </div>
+            {modelIds.length === 0 && (aiFace || isBa) && <p className="text-[11px] text-[#6B6B72] mt-1.5">L&apos;IA invente un mannequin qui va avec la direction. Vous le voyez sur {isBa ? "la photo « avant »" : "l'esquisse puis sur l'image pilote"} : une fois validé, c&apos;est la même personne sur {isBa ? "la paire" : "toutes les images"}.</p>}
+            {!isCar && !isBa && modelIds.length > 1 && <p className="text-[11px] text-[#6B6B72] mt-1.5">Les images alternent entre vos {modelIds.length} mannequins. L&apos;esquisse et l&apos;image pilote montrent le premier choisi ({models.find((m) => m.id === modelIds[0])?.name}).</p>}
             {isCar && <p className="text-[11px] text-[#6B6B72] mt-1.5">Un carrousel garde le même mannequin sur toutes les slides.</p>}
             {isBa && <p className="text-[11px] text-[#6B6B72] mt-1.5">Chaque paire avant/après garde la même personne. Avec plusieurs mannequins, chaque paire a le sien.</p>}
           </div>
