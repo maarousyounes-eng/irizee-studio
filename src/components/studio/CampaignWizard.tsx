@@ -120,13 +120,10 @@ export default function CampaignWizard({ products, models, library, prefill }: P
     const insp = (p.inspirations ?? []).filter((x) => /^inspirations\//.test(x)).slice(0, 4);
     if (insp.length) { setInspirations(insp.map((path) => ({ path, analysis: "", note: "", state: "loading" as const }))); insp.forEach((path) => analyze(path)); }
     if (p.direction?.title) {
-      // Direction complète (concept) : elle est déjà proposée, avec son esquisse
+      // Direction complète (concept) : elle est déjà proposée. Son esquisse est faite à l'étape 3, avec les produits
+      // et la personne confirmés à l'étape 1 (jamais avant : sans le vrai packshot, l'IA inventerait un produit).
       const d = p.direction;
       setDirs([d]); setChosen(0); setChosenText(dirText(d));
-      setSketches({ [d.title]: { state: "loading" } });
-      apiJob<{ path: string }>(sb, "/api/shoots/sketch", { direction: dirText(d), productIds: pids, noProduct: !pids.length, noPeople: !mids.length })
-        .then((sk) => setSketches((m) => ({ ...m, [d.title]: { state: "done", path: sk.path } })))
-        .catch(() => setSketches((m) => ({ ...m, [d.title]: { state: "error" } })));
     } else if (p.directionText) {
       // Direction d'une campagne précédente : reprise telle quelle, avec son esquisse
       setChosenText(p.directionText);
@@ -172,20 +169,35 @@ export default function CampaignWizard({ products, models, library, prefill }: P
 
   const common = () => ({ brief, visualType: vtype, productIds: ids, noProduct, noPeople, textZone, inspirationPaths: inspirations.map((x) => x.path), inspirationAnalyses: inspirations.filter((x) => x.state === "done").map((x) => ({ analysis: x.analysis, note: x.note })) });
 
+  // Une esquisse rapide par direction, pour choisir avec les yeux : toujours avec les vrais packshots des produits choisis
+  const sketchSig = `${ids.join(",")}|${noProduct}|${noPeople}`;
+  const sketchRun = useRef(0);
+  const [sketchedFor, setSketchedFor] = useState("");
+  function makeSketches(list: Dir[]) {
+    const run = ++sketchRun.current;
+    setSketchedFor(sketchSig);
+    const next: Record<string, Sketch> = {};
+    list.forEach((d) => { next[d.title] = { state: "loading" }; });
+    setSketches(next);
+    list.forEach((d) => {
+      apiJob<{ path: string }>(sb, "/api/shoots/sketch", { direction: dirText(d), productIds: ids, noProduct, noPeople })
+        .then((sk) => { if (run === sketchRun.current) setSketches((m) => ({ ...m, [d.title]: { state: "done", path: sk.path } })); })
+        .catch(() => { if (run === sketchRun.current) setSketches((m) => ({ ...m, [d.title]: { state: "error" } })); });
+    });
+  }
+  function goDirections() {
+    setStep("direction");
+    if (!dirs.length && !chosenText.trim()) proposeDirs();
+    // produits ou personne changés depuis les esquisses (ou direction reprise d'un concept) : on les refait avec les bons
+    else if (dirs.length && sketchedFor !== sketchSig) makeSketches(dirs);
+  }
+
   async function proposeDirs(feedback = "") {
     setError(null); setBusy("dirs");
     try {
       const r = await apiJob<{ directions: Dir[] }>(sb, "/api/shoots/directions", { ...common(), n: 3, avoid: dirs.map((d) => d.title), feedback, previous: feedback ? dirs.map((d) => `${d.title}: ${d.concept}`) : [] });
       setDirs(r.directions); setChosen(null); setChosenText(""); setRework(""); setKeptSketch(null);
-      // Une esquisse rapide par direction, pour choisir avec les yeux
-      const next: Record<string, Sketch> = {};
-      r.directions.forEach((d) => { next[d.title] = { state: "loading" }; });
-      setSketches(next);
-      r.directions.forEach((d) => {
-        apiJob<{ path: string }>(sb, "/api/shoots/sketch", { direction: dirText(d), productIds: ids, noProduct, noPeople })
-          .then((s) => setSketches((m) => ({ ...m, [d.title]: { state: "done", path: s.path } })))
-          .catch(() => setSketches((m) => ({ ...m, [d.title]: { state: "error" } })));
-      });
+      makeSketches(r.directions);
     } catch (e) { setError(e instanceof Error ? e.message : "Erreur"); }
     setBusy("");
   }
@@ -371,7 +383,7 @@ export default function CampaignWizard({ products, models, library, prefill }: P
               <Btn variant="ghost" onClick={() => setStep("setup")}>Retour</Btn>
               {isBa
                 ? <Btn onClick={launch} disabled={busy !== "" || pendingInsp}>{busy === "launch" ? <><Spinner className="border-white/40 border-t-white" /> Préparation…</> : pendingInsp ? "Analyse des inspirations…" : "Créer la photo « avant » (1 image payante)"}</Btn>
-                : <Btn onClick={() => { setStep("direction"); if (!dirs.length && !chosenText.trim()) proposeDirs(); }} disabled={!brief.trim() || pendingInsp}>{pendingInsp ? "Analyse des inspirations…" : "Voir des directions"}</Btn>}
+                : <Btn onClick={goDirections} disabled={!brief.trim() || pendingInsp}>{pendingInsp ? "Analyse des inspirations…" : "Voir des directions"}</Btn>}
             </div>
             {isBa && <p className="text-[11px] text-[#6B6B72]">Une seule image est générée d&apos;abord : la photo « avant ». Vous la validez, puis l&apos;« après » est créé à partir d&apos;elle{pairs > 1 ? `, ainsi que les ${pairs - 1} autre${pairs > 2 ? "s" : ""} paire${pairs > 2 ? "s" : ""}` : ""}.</p>}
           </Card>

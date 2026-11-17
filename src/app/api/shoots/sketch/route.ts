@@ -19,7 +19,7 @@ export async function POST(req: Request) {
     const prompt = [
       "Quick concept photo for an art direction board of the cosmetics brand Irizée: one real-looking photograph showing this direction.",
       `ART DIRECTION: ${direction}`,
-      prods.length ? `The attached image(s) are the real product packshot(s) (${prods.map((p) => `"${p!.product.name}"`).join(", ")}): show ${prods.length > 1 ? "exactly one of each" : "exactly one"}, same shape and colours, entirely visible, at a realistic size.` : "No product in the image.",
+      prods.length ? `The attached image(s) are the real product packshot(s) (${prods.map((p) => `"${p!.product.name}"`).join(", ")}): show ${prods.length > 1 ? "exactly one of each" : "exactly one"}, copied from its packshot: same shape, same material and colours, same logo and label layout, entirely visible, at a realistic size. Never invent another packaging or recolour it, whatever the art direction says.` : "No product in the image: no bottle, tube, jar or packaging at all, even if the art direction mentions one.",
       b.noPeople ? "No person in the image." : "",
       "A real photograph of real objects, never a graphic, illustration or 3D render.",
       "No added text, logo, frame or collage. No flowers, towels or spa props unless the direction asks for them.",
