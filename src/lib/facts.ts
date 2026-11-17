@@ -9,8 +9,8 @@ type Img = { buf: Buffer; mime: string };
  * - Visage : un examen séparé, sur un gros plan du visage, des proportions (déformation, traits exagérés).
  */
 export interface Facts {
-  scale: "ok" | "big" | "small" | null; scale_rel?: number; scale_ruler?: "main" | "visage";
-  face: "ok" | "deformed" | null; face_reason?: string;
+  scale: "ok" | "big" | "small" | null; scale_rel?: number; scale_ruler?: "main" | "visage" | "main (estimation)";
+  face: "ok" | "deformed" | null; face_reason?: string; face_ratios?: Record<string, number>;
   issues: string[];
 }
 
@@ -31,7 +31,15 @@ const MEASURE_PROMPT = [
   '- "hand_facing": "flat" if that line across the knuckles is seen roughly square-on, "angled" if the hand is strongly turned so that this line is foreshortened; null without knuckles.',
   '- "face": box [ymin, xmin, ymax, xmax] of the main face from the chin to the hairline (not the top of the hair). null if no face is entirely visible.',
   '- "product_near_face": true if the product is at about the same distance from the camera as that face (held against the cheek or right next to the face), false if it is clearly closer to or farther from the camera; null without a face or a product.',
-  'Return JSON only: {"product_ends": [[y,x],[y,x]] | null, "knuckles": [[y,x],[y,x]] | null, "hand_facing": "flat" | "angled" | null, "face": [ymin,xmin,ymax,xmax] | null, "product_near_face": bool | null}',
+  '- "apparent_length_cm": if a hand holds or touches the product, the length in centimetres that the product has in this photo when you use that hand as the ruler (an adult woman\'s hand is 18 cm long from the wrist to the tip of the middle finger and 8 cm wide across the knuckles). Compare carefully: a product as long as the whole hand is 18 cm, one and a half hands is 27 cm, half a hand is 9 cm. null if no hand touches the product.',
+  'Return JSON only: {"product_ends": [[y,x],[y,x]] | null, "knuckles": [[y,x],[y,x]] | null, "hand_facing": "flat" | "angled" | null, "face": [ymin,xmin,ymax,xmax] | null, "product_near_face": bool | null, "apparent_length_cm": number | null}',
+].join("\n");
+
+const LANDMARK_PROMPT = [
+  "This is a crop of a face. Return the position of these landmarks as integers from 0 to 1000 relative to this crop, written [y, x]:",
+  '"hairline": middle of the hairline at the top of the forehead; "chin": lowest point of the chin; "cheek_left" and "cheek_right": the left and right edges of the face at the level of the cheekbones; "pupil_left" and "pupil_right": the centres of the two pupils; "mouth_left" and "mouth_right": the two corners of the mouth; "lip_top": top of the upper lip at its centre; "lip_bottom": bottom of the lower lip at its centre; "nose_left" and "nose_right": the outer edges of the nostrils.',
+  "Use null for a landmark that is hidden or outside the crop.",
+  'Return JSON only: {"hairline":[y,x],"chin":[y,x],"cheek_left":[y,x],"cheek_right":[y,x],"pupil_left":[y,x],"pupil_right":[y,x],"mouth_left":[y,x],"mouth_right":[y,x],"lip_top":[y,x],"lip_bottom":[y,x],"nose_left":[y,x],"nose_right":[y,x]}',
 ].join("\n");
 
 const FACE_PROMPT = [
@@ -52,21 +60,23 @@ export async function factCheck(img: Img, a: { hasProduct: boolean; realSize?: s
     if (!W || !H) return out;
     const small = await sharp(img.buf).resize({ width: 1024, withoutEnlargement: true }).jpeg({ quality: 85 }).toBuffer();
     const r = await gemini(MODELS.vision, [{ text: MEASURE_PROMPT }, imgPart(small, "image/jpeg")], { purpose: "mesures (contrôle)", json: true, timeoutMs: 45_000 });
-    const m = parseJson<{ product_ends?: unknown[] | null; knuckles?: unknown[] | null; hand_facing?: string | null; face?: number[] | null; product_near_face?: boolean | null }>(firstText(r));
+    const m = parseJson<{ product_ends?: unknown[] | null; knuckles?: unknown[] | null; hand_facing?: string | null; face?: number[] | null; product_near_face?: boolean | null; apparent_length_cm?: number | null }>(firstText(r));
 
     // 1. Taille du produit
     const e0 = pt(m.product_ends?.[0], W, H), e1 = pt(m.product_ends?.[1], W, H);
-    if (a.hasProduct && e0 && e1) {
-      const len = dist(e0, e1), real = realLengthCm(a.realSize);
+    const est = typeof m.apparent_length_cm === "number" && m.apparent_length_cm > 1 ? m.apparent_length_cm : 0;
+    if (a.hasProduct && ((e0 && e1) || est)) {
+      const len = e0 && e1 ? dist(e0, e1) : 0, real = realLengthCm(a.realSize);
       const k0 = pt(m.knuckles?.[0], W, H), k1 = pt(m.knuckles?.[1], W, H);
       const faceH = Array.isArray(m.face) && m.face.length === 4 ? ((m.face[2] - m.face[0]) / 1000) * H : 0;
       let rel = 0;
-      if (k0 && k1 && m.hand_facing !== "angled" && dist(k0, k1) > 0.02 * Math.min(W, H)) { rel = len / dist(k0, k1) / (real / PALM_CM); out.scale_ruler = "main"; }
-      else if (faceH > 0.05 * H && m.product_near_face === true) { rel = len / faceH / (real / FACE_CM); out.scale_ruler = "visage"; }
+      if (len && k0 && k1 && m.hand_facing !== "angled" && dist(k0, k1) > 0.02 * Math.min(W, H)) { rel = len / dist(k0, k1) / (real / PALM_CM); out.scale_ruler = "main"; }
+      else if (est) { rel = est / real; out.scale_ruler = "main (estimation)"; }
+      else if (len && faceH > 0.05 * H && m.product_near_face === true) { rel = len / faceH / (real / FACE_CM); out.scale_ruler = "visage"; }
       if (rel > 0) {
         out.scale_rel = Math.round(rel * 100) / 100;
         out.scale = rel > 1.35 ? "big" : rel < 0.6 ? "small" : "ok";
-        const ref = out.scale_ruler === "main" ? "à la main" : "au visage";
+        const ref = out.scale_ruler === "visage" ? "au visage" : "à la main";
         if (out.scale === "big") out.issues.push(`Produit trop grand par rapport ${ref} (environ ${Math.round((rel - 1) * 100)} % de trop).`);
         if (out.scale === "small") out.issues.push(`Produit trop petit par rapport ${ref} (environ ${Math.round((1 - rel) * 100)} % de moins).`);
       }
@@ -83,6 +93,18 @@ export async function factCheck(img: Img, a: { hasProduct: boolean; realSize?: s
         const crop = await sharp(img.buf).extract({ left, top, width, height }).resize({ width: 768, height: 768, fit: "inside", withoutEnlargement: true }).jpeg({ quality: 90 }).toBuffer();
         const fr = await gemini(MODELS.vision, [{ text: FACE_PROMPT }, imgPart(crop, "image/jpeg")], { purpose: "visage (contrôle)", json: true, timeoutMs: 45_000 });
         const f = parseJson<{ deformed?: boolean; confidence?: number; reason?: string }>(firstText(fr));
+        // Repères du visage : proportions mesurées (pour étalonner le contrôle)
+        try {
+          const cm = await sharp(crop).metadata();
+          const cw = cm.width ?? 1, ch = cm.height ?? 1;
+          const lr = await gemini(MODELS.vision, [{ text: LANDMARK_PROMPT }, imgPart(crop, "image/jpeg")], { purpose: "repères du visage (contrôle)", json: true, timeoutMs: 45_000 });
+          const L = parseJson<Record<string, unknown>>(firstText(lr));
+          const P = (k: string) => pt(L[k], cw, ch);
+          const d = (a2: string, b2: string) => { const A = P(a2), B = P(b2); return A && B ? dist(A, B) : 0; };
+          const faceH2 = d("hairline", "chin"), faceW = d("cheek_left", "cheek_right");
+          const round = (x: number) => Math.round(x * 100) / 100;
+          if (faceH2 && faceW) out.face_ratios = { long_sur_large: round(faceH2 / faceW), levres_sur_hauteur: round(d("lip_top", "lip_bottom") / faceH2), bouche_sur_largeur: round(d("mouth_left", "mouth_right") / faceW), yeux_sur_largeur: round(d("pupil_left", "pupil_right") / faceW), nez_sur_largeur: round(d("nose_left", "nose_right") / faceW), visage_sur_image: round(fh / H) };
+        } catch { /* repères facultatifs */ }
         const bad = f.deformed === true && (f.confidence ?? 0) >= 6;
         out.face = bad ? "deformed" : "ok";
         if (bad) { out.face_reason = String(f.reason ?? "").trim().slice(0, 200); out.issues.push(`Visage déformé${out.face_reason ? ` : ${out.face_reason}` : "."}`); }
