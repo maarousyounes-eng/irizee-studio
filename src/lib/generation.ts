@@ -4,6 +4,7 @@ import sharp from "sharp";
 import { textZoneLine, maskEditPrompt, wantsPhoneUi, baAfterPrompt, typeLine, REALISM_NATURAL, buildPrompt, correctionPrompt, qcPromptNoProduct, sizeLine, formatPrompt, interpretPrompt, localEditPrompt, LOCATE_PRODUCT_PROMPT, READ_LABEL_PROMPT, qcPrompt, variationHint } from "./prompts";
 import { normalizeSlides, type TypeParams } from "./visualTypes";
 import { cropTo, cropWindow, type Box } from "./framing";
+import { ensurePilotLook } from "./pilot";
 import { OPENAI_RATIOS, cropBoxFor, cropImage, pasteBack, unionZones, zoneFromBox, zonesFromBoxes, type CropBox, type Zone } from "./localedit";
 import type { ImageRow, Product, QC } from "@/types";
 
@@ -372,10 +373,23 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
       // Avant / après : chaque paire a sa personne, jamais de reprise d'une autre image
       const campaign = !!tp.pilot && vtype !== "carousel" && vtype !== "ba";
       let seriesMode: "carousel" | "campaign" | "sketch" | "sketchLoose" | undefined;
+      // Ce que la série garde de l'image pilote : son décor, sa lumière et son stylisme (en texte) et, pour un mannequin
+      // créé par l'IA, son visage. La photo pilote entière n'est plus donnée en modèle : l'IA la recopiait.
+      let look = "";
+      const usePilot = async (vi: number) => {
+        const pil = await latestVersionPath(sb, shoot.id, vi);
+        if (!pil) return;
+        const t = await ensurePilotLook(sb, shoot, pil);
+        // mannequin créé par l'IA : il faut son visage ; sans lui (ou sans description), on revient à la photo pilote entière
+        const aiPerson = !modelRefs.length && !shoot.no_people;
+        const face = aiPerson && t.pilot_face_path ? await download(sb, t.pilot_face_path).catch(() => null) : null;
+        if (t.pilot_look && (!aiPerson || face)) {
+          look = t.pilot_look;
+          if (face) { modelRefs.push(face); descs.push("a fictional model created for this campaign; the MODEL REFERENCE is a crop of the approved pilot image showing her"); }
+        } else { series = await download(sb, pil).catch(() => null); seriesMode = vtype === "carousel" ? "carousel" : "campaign"; }
+      };
       if (campaign && image.variant_index > 0) {
-        // Campagne : les images suivantes reprennent l'image pilote validée (sa dernière version)
-        const pil = await latestVersionPath(sb, shoot.id, 0);
-        if (pil) { series = await download(sb, pil).catch(() => null); seriesMode = "campaign"; }
+        await usePilot(0);
       } else if (campaign && tp.sketch_path && !redo) {
         // Image pilote : elle reprend l'esquisse choisie par le client
         series = await download(sb, tp.sketch_path).catch(() => null); seriesMode = "sketch";
@@ -385,8 +399,8 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
         const a0 = firsts?.[0];
         if (a0 && a0.variant_index < image.variant_index) {
           // Parcours guidé : la couverture validée par le client (sa dernière version) ; sinon la première photo du carrousel
-          const ref = tp.pilot ? (await latestVersionPath(sb, shoot.id, a0.variant_index)) ?? a0.path : a0.path;
-          if (ref) { series = await download(sb, ref).catch(() => null); seriesMode = "carousel"; }
+          if (tp.pilot) await usePilot(a0.variant_index);
+          else if (a0.path) { series = await download(sb, a0.path).catch(() => null); seriesMode = "carousel"; }
         } else if (tp.pilot && tp.sketch_path && !redo) {
           // Couverture du carrousel : l'univers de l'esquisse choisie, la composition décrite pour la slide
           series = await download(sb, tp.sketch_path).catch(() => null); seriesMode = "sketchLoose";
@@ -411,7 +425,11 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
       const redoBrief = redo ? `\n\nTHIS IS A NEW TAKE replacing a previous attempt the client rejected. Client's remarks to apply: ${String(prm0.instruction || image.feedback || "")}${prev ? " The LAST image is that rejected previous attempt: do NOT copy its composition, pose or framing where the client asked for a change; keep only what the client did not criticise (same person, same product, same style)." : ""}` : "";
       const prompt = buildPrompt({
         product, rules, userPrompt: shoot.prompt + redoBrief, aspect, analysis: analysisFor, hasTexture: !!texture,
-        shot: ((s) => (s && tp.direction ? `CAMPAIGN ART DIRECTION (shared by every image): ${tp.direction}\nTHIS IMAGE: ${s}` : s))((idea && vtype !== "carousel" ? idea : (tp.shots ?? [])[image.variant_index]) || undefined) || (tp.direction ? `CAMPAIGN ART DIRECTION (shared by every image): ${tp.direction}` : undefined),
+        shot: ((s) => {
+          const lookLine = look ? `CAMPAIGN LOOK, set by the pilot image the client approved (identical in every image: same set and materials, same light and colour grade, same styling): ${look}\nThis image is ANOTHER photograph of the same campaign, not the pilot again: it has its own framing, camera distance, angle, pose and product placement${s || vtype === "carousel" ? ", exactly as described for it" : ""}.` : "";
+          const head = [tp.direction ? `CAMPAIGN ART DIRECTION (shared by every image): ${tp.direction}` : "", lookLine].filter(Boolean).join("\n");
+          return head && s ? `${head}\nTHIS IMAGE: ${s}` : head || s;
+        })((idea && vtype !== "carousel" ? idea : (tp.shots ?? [])[image.variant_index]) || undefined) || undefined,
         inspMode: tp.inspMode === "copy" ? "copy" : tp.inspMode === "loose" ? "loose" : undefined,
         layoutLine: vtype === "ad" ? textZoneLine(tp.textZone) : undefined,
         seriesRef: !!series, seriesMode,

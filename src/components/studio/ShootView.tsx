@@ -8,7 +8,7 @@ import { Badge, Btn, Card, INPUT, Label, Lightbox, Modal, Spinner } from "@/comp
 import Comments from "./Comments";
 import CorrectionModal, { type NoteZone } from "./CorrectionModal";
 import CropModal from "./CropModal";
-import { api, signUrls, useSignedUrls, usePipeline, useSupabase } from "@/lib/client";
+import { api, apiJob, signUrls, useSignedUrls, usePipeline, useSupabase } from "@/lib/client";
 import { FORMATS, FORMAT_PACKS, type ImageRow, type Role } from "@/types";
 import { imageLabel, normalizeSlides, typeName } from "@/lib/visualTypes";
 import { carouselToItems } from "@/components/ads3/fromCarousel";
@@ -80,7 +80,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
   async function validatePilot() {
     setContinuing(true);
     try {
-      const r = await api<{ imageIds: string[] }>(`/api/shoots/${shoot.id}/continue`, {});
+      const r = await apiJob<{ imageIds: string[] }>(sb, `/api/shoots/${shoot.id}/continue`, {});
       setPilot("validated");
       // Avant / après : chaque « après » attend la fin de son « avant » ; sinon tout part en même temps
       if (isBa) { waiting.current = r.imageIds; await load(); } else { await load(); run(r.imageIds); }

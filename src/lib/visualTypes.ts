@@ -80,6 +80,10 @@ export interface TypeParams {
   pilot?: "pending" | "validated";
   count?: number;
   sketch_path?: string;
+  /** Décor, lumière et stylisme de l'image pilote validée (texte), repris par toutes les images suivantes */
+  pilot_look?: string;
+  /** Visage du mannequin créé par l'IA, découpé dans l'image pilote */
+  pilot_face_path?: string;
   inspMode?: "copy" | "loose";
   baChange?: string;
   baBefore?: string;

@@ -1,13 +1,17 @@
-import { requireUser, handle, HttpError } from "@/lib/api";
+import { requireUser, handle, HttpError, withJob } from "@/lib/api";
+import { withAiCtx } from "@/lib/gemini";
+import { ensurePilotLook } from "@/lib/pilot";
 import { checkQuota } from "@/lib/generation";
 import { normalizeSlides, type TypeParams } from "@/lib/visualTypes";
 
-export const maxDuration = 30;
+export const maxDuration = 90;
 
 /** L'image pilote est validée : on crée les autres images de la campagne (elles reprendront le pilote). */
-export async function POST(_req: Request, { params }: { params: { id: string } }) {
+export async function POST(req: Request, { params }: { params: { id: string } }) {
   return handle(async () => {
     const { sb, user } = await requireUser();
+    const b = await req.json().catch(() => ({}));
+    return withJob(sb, b?.jobId, async () => {
     const { data: shoot } = await sb.from("shoots").select("*").eq("id", params.id).single();
     if (!shoot) throw new HttpError(404, "Shooting introuvable");
     const tp = (shoot.type_params ?? {}) as TypeParams;
@@ -18,8 +22,13 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       ? normalizeSlides(tp.slides).map((x, i) => (x.layout === "text" ? -1 : i)).filter((i) => i >= 0)
       : Array.from({ length: Math.min(12, Math.max(1, Number(tp.count) || 1)) }, (_, i) => i);
     const first = wanted[0] ?? 0;
-    const { data: have } = await sb.from("images").select("variant_index, state, path").eq("shoot_id", shoot.id).neq("kind", "format").is("deleted_at", null);
-    if (!(have ?? []).some((x: any) => x.variant_index === first && x.state === "done" && x.path)) throw new HttpError(400, "L'image pilote n'est pas encore prête");
+    const { data: have } = await sb.from("images").select("variant_index, state, path, params, created_at").eq("shoot_id", shoot.id).neq("kind", "format").is("deleted_at", null).order("created_at", { ascending: false });
+    const pilots = (have ?? []).filter((x: any) => x.variant_index === first && x.state === "done" && x.path);
+    const pilotRow = pilots.find((x: any) => !x.params?.archived) ?? pilots[0];
+    if (!pilotRow) throw new HttpError(400, "L'image pilote n'est pas encore prête");
+    // Le décor, la lumière, le stylisme (et le visage du mannequin créé par l'IA) de l'image validée : repris par toutes les suivantes.
+    // Un avant/après n'en a pas besoin : chaque « après » repart de son « avant ».
+    const look = vtype === "ba" ? tp : await withAiCtx({ sb, userId: user.id, shootId: shoot.id }, () => ensurePilotLook(sb, shoot, pilotRow.path));
     const existing = new Set((have ?? []).map((x: any) => x.variant_index as number));
     const todo = wanted.filter((i) => !existing.has(i));
     await checkQuota(sb, user.id, todo.length);
@@ -36,7 +45,8 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       if (error) throw new HttpError(400, error.message);
       ids = (imgs ?? []).map((i: any) => i.id);
     }
-    await sb.from("shoots").update({ type_params: { ...tp, pilot: "validated" } }).eq("id", shoot.id);
+    await sb.from("shoots").update({ type_params: { ...tp, ...(look.pilot_look ? { pilot_look: look.pilot_look } : {}), ...(look.pilot_face_path ? { pilot_face_path: look.pilot_face_path } : {}), pilot: "validated" } }).eq("id", shoot.id);
     return { imageIds: ids };
+    });
   });
 }
