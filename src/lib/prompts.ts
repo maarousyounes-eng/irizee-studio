@@ -33,7 +33,7 @@ export const wantsPhoneUi = (analysis: string, brief: string) =>
   /PHONE UI:\s*yes/i.test(analysis) || /interface (du |de |d'un )?t[ée]l[ée]phone|mode photo|appareil photo de l'iphone|écran de l'appareil photo|grille (de l'appareil|photo)/i.test(brief);
 const OVERLAY_OK = "INTENDED STYLE: the client deliberately asked for a phone camera interface overlay (viewfinder grid, camera icons, phone frame). It is NOT a defect: never count it as added text, graphic element, artifact or issue, and do not lower any score for it.";
 /** Toujours un rendu réel (demande permanente du client) : jamais un graphisme. */
-export const REAL_LOOK = "Everything looks REAL, never like a graphic: a true photograph of real physical objects. The product is a real 3D object with its real material (brushed metal with soft real reflections, frosted glass, ribbed plastic cap), and its label is really printed on the surface and follows its curve. The packshot may be a clean studio render: take the design from it, but photograph the product as a real object. Its surface is never perfectly smooth and uniform like a render: slightly uneven reflections, a fine grain of the material, the tiny natural irregularities of a real manufactured object; but it is new: never dented, crumpled, scratched or damaged. Never a flat graphic, illustration, 3D render, mockup or cut-out.";
+export const REAL_LOOK = "This is a real photograph of real physical things. The product is a real manufactured object you can hold: its packshot is only a clean studio render that shows its DESIGN (shape, colours, logo, label layout), not what it looks like in real life. In the photo it is photographed like everything else in the scene: its material catches the light the way the real material does (imperfect, uneven highlights, fine grain, the small irregularities of a real object), the print sits on its surface and follows its curve, and it has weight and contact with what holds or supports it.";
 /** Le texte imprimé ne doit jamais sortir à l'envers (effet miroir des selfies). */
 export const NO_MIRROR = "Every text printed on the product reads normally, left to right, NEVER mirrored or reversed, even in a selfie, a front-camera shot or a mirror reflection.";
 /** Pendant une retouche, le produit ne change jamais. */
@@ -95,7 +95,7 @@ export function buildPrompt(a: {
       : [
         `3. PRODUCT: ${one}. Any product mentioned elsewhere but not listed here must NOT appear.`,
         products.map(productBlock).join("\n\n"),
-        "Each product is an exact copy of its packshot: same silhouette, proportions, cap, material, colours, label layout and text direction, at its real size (held in a hand it is never longer than that hand, even in a close-up or in the foreground), physically in the scene (same light, reflections, contact shadow). It is entirely visible, never cut by an edge of the image. Products seen in the style reference belong to other brands: never copy their design.",
+        "The packshot gives the DESIGN of each product: its silhouette, proportions, cap, colours, logo, label layout and text direction. The photo shows the real object with this design, whole in the frame and at its real size (held in a hand it is never longer than that hand, even in a close-up or in the foreground). Products seen in the style reference belong to other brands: never copy their design.",
         NO_MIRROR,
       ]),
     "",
@@ -240,13 +240,14 @@ export function interpretPrompt(a: { realSize?: string; feedback: string; hasZon
     a.realSize ? `REAL SIZE of the product: ${a.realSize.replace(/\n/g, ", ")}. If the request concerns the size or scale of the product, write the instruction with concrete proportions based on this real size (for example: the tube must be about as long as the model's hand, from wrist to fingertips, and clearly smaller than her face and shoulders).` : "",
     `Client request: "${a.feedback}"`,
     "READING COMPLAINTS: a complaint states the goal. \"On dirait pas un selfie\" means \"make it look MORE like a real selfie\"; \"ça fait faux\" means \"make it look more real\"; \"le tube est trop gros\" means \"make it smaller\". Never do the opposite of what the complaint implies.",
-    "PRODUCT THAT LOOKS LIKE A GRAPHIC (\"on dirait un graphisme\", \"pas réel\", \"fait faux\", \"rends le produit plus réel\"): the product must look like a real, brand-new object photographed in this scene. The instruction asks for: the light of the scene on its surface (a soft gradient around its rounded body, a clear highlight from the main light, faint reflections of the surroundings), the label printed on the surface and following its curve, a real contact shadow. It must ask for the look of a real manufactured object, NOT a perfectly smooth and uniform render: reflections that are slightly uneven, a fine grain of the material, the tiny natural irregularities of a real tube (a faint softness of the body, the flattened crimped end). And it must forbid the opposite excess: the product is new, so no dents, no crumpled or crushed areas, no scratches or stains. It keeps the exact design, size, position, cap, logo and texts.",
+    "PRODUCT THAT LOOKS FAKE (\"on dirait un graphisme\", \"pas réel\", \"trop lisse\", \"fait faux\", \"rends-le plus réel\"): the client wants the product to look like the real object photographed in this scene instead of a computer render. Say exactly that, and let the retoucher judge how to get there: do not prescribe or forbid surface details yourself.",
     a.avoid ? `A previous attempt FAILED because: ${a.avoid}. Write the instruction so that this mistake does not happen again, with more explicit and concrete details.` : "",
-    'Return JSON only: {"instruction": str, "understood": str, "scope": "local"|"global", "intent": "edit"|"label", "use_original": bool, "redo": bool, "clarify": str, "boxes": [[ymin, xmin, ymax, xmax], ...]}.',
+    'Return JSON only: {"instruction": str, "understood": str, "scope": "local"|"global", "target": "product"|"other", "intent": "edit"|"label", "use_original": bool, "redo": bool, "clarify": str, "boxes": [[ymin, xmin, ymax, xmax], ...]}.',
     "clarify = a short French question (max 30 words) ONLY when the request is too vague to know WHAT to change (e.g. \"tout est faux\", \"c'est nul\", \"refais\", \"pas bien\" with nothing specific); offer 3 or 4 concrete options seen in the photo (e.g. \"Qu'est-ce qui est faux : le tube (taille, forme), la main, la peau trop lisse, la lumière, le décor ?\"). Otherwise an empty string. Never guess a vague request.",
     "redo = true when the request changes the pose, the camera angle or viewpoint, the framing or composition, the setting or decor, or many big elements at once: a retouch cannot do that and the photo must be shot again with these changes. Otherwise false. When redo is true, the instruction describes the NEW photo to create (what to change and what to keep: same person, same product, same style).",
     "use_original = true ONLY when the client explicitly asks to bring back, undo or restore something that existed in the original version (for example \"remets la bague\", \"reviens à comme avant\", \"le mannequin d'origine\"). For any other request (change the background, the light, a pose, an object, a color...) use_original MUST be false: the retoucher must then work on Image 1 only and never copy back the original version.",
-    "instruction = a precise, concrete English instruction for the retoucher: what exactly to change, in which element (hand, product, outfit, background, light, skin...), the exact target result, and what must stay unchanged. Never ask to change the product's shape, label text or logo unless the client explicitly asks to fix them to match the packshot.",
+    "instruction = a clear English brief for the retoucher that carries the client's intention at FULL strength: what to change, in which element (hand, product, outfit, background, light, skin...), and the result the client wants to see, so that the change is obvious at first glance. Give the goal, not a cautious method: do NOT weaken it with precautions or with a list of things to preserve (the retoucher already knows that the rest of the photo stays as it is). Mention the product's shape, label text or logo only when the client asks about them.",
+    "target = \"product\" when the request is about the product itself (how real it looks, its material, light, size, position, label); otherwise \"other\".",
     RECIPES,
     "intent = \"label\" ONLY when the request is solely about fixing the printed text, spelling or logo on the product so that it matches the packshot (e.g. \"corrige les erreurs d'écriture\", \"le texte du produit est faux\"); otherwise \"edit\".",
     "understood = one short French sentence (max 20 words) restating what will be changed, in simple words, so the client can check it was understood.",
@@ -256,20 +257,25 @@ export function interpretPrompt(a: { realSize?: string; feedback: string; hasZon
 }
 
 /** Retouche locale : le modèle ne voit qu'un recadrage et ne doit rien changer d'autre. */
-export function localEditPrompt(a: { product: Product; rules: string[]; instruction: string; mode: "edit" | "label"; refCount?: number; hasOriginal?: boolean }) {
-  const texts = a.product.texts?.length ? `Texts that must appear exactly on the product:\n${textsBlock(a.product)}` : "";
+export function localEditPrompt(a: { product: Product; rules: string[]; instruction: string; mode: "edit" | "label"; refCount?: number; hasOriginal?: boolean; productTarget?: boolean; clientWords?: string }) {
+  const texts = a.product.texts?.length ? `Texts printed on the product:\n${textsBlock(a.product)}` : "";
   return [
     "You are retouching a CROPPED region of an advertising photo for the cosmetics brand Irizée.",
-    "Image 1 = the crop to edit." + (a.hasOriginal ? " The next image is the same crop taken from the ORIGINAL version of the photo before earlier corrections: use it to restore any element that disappeared or changed by mistake." : "") + (a.refCount ? ` ${refNote(a.refCount)}` : "") + " The following image(s) = the REAL product packshot(s).",
-    "NON-NEGOTIABLE RULES:", numbered([...a.rules, ...(a.product.rules ?? [])]), "",
+    "Image 1 = the crop to edit." + (a.hasOriginal ? " The next image is the same crop taken from the ORIGINAL version of the photo before earlier corrections: use it to restore any element that disappeared or changed by mistake." : "") + (a.refCount ? ` ${refNote(a.refCount)}` : "") + " The following image(s) = the product packshot(s): a clean studio render that shows the product's DESIGN (shape, colours, logo, label layout), not what it looks like in real life.",
+    a.rules.length || a.product.rules?.length ? `Brand rules:\n${numbered([...a.rules, ...(a.product.rules ?? [])])}` : "", "",
     a.mode === "label"
-      ? "TASK: fix ONLY the printed label of the product visible in the crop so that every word, logo and number matches the real packshot exactly, sharp and legible, with the same layout, text direction and colors." + (a.instruction ? ` ${a.instruction}` : "")
+      ? "TASK: fix ONLY the printed label of the product visible in the crop so that every word, logo and number matches the packshot exactly, sharp and legible, with the same layout, text direction and colors." + (a.instruction ? ` ${a.instruction}` : "")
       : `TASK: ${a.instruction}`,
-    "If the task moves, resizes or re-positions an object, you must COMPLETELY erase it from its previous position and rebuild the background and body parts that were behind it, so that no ghost, duplicate or leftover of the old object remains.",
-    "HARD CONSTRAINTS: keep the exact same framing, camera angle, scale and position of every element, the same lighting, colors and background. Change ONLY what the task asks for. Everything that is not mentioned must stay pixel-identical to Image 1 (same person, same face, same outfit, same product, same text). Do not zoom, shift, crop or re-compose. Output the same crop with the same framing.",
+    a.mode === "edit" && a.clientWords ? `The client's own words (French): "${a.clientWords}". Give them what they are asking for: the change must be obvious at first glance, never a timid touch-up.` : "",
+    "If the task moves, resizes or re-positions an object, erase it completely from its previous position and rebuild what was behind it: no ghost, duplicate or leftover.",
+    a.mode === "label" ? "Everything else in the crop stays exactly as in Image 1 (same framing, same product position, same person, same background)."
+      : a.productTarget
+        ? "The product is what you work on: re-photograph it as freely as the task needs. Only its design stays the brand's (shape, colours, logo, label layout and printed texts). What surrounds it (framing, person, background, light of the scene) stays as in Image 1, so that the crop fits back into the photo."
+        : "Work on what the task concerns. The rest of the crop (framing, scale, people, product, background, light) stays as in Image 1, so that the crop fits back into the photo: do not zoom, shift or re-compose.",
     a.mode === "edit" ? sizeLine(a.product) : "",
-    PRODUCT_LOCK, NO_MIRROR,
-    "Keep the visible fine skin texture and individual eyebrow hair strokes: never smooth the skin.",
+    a.mode === "edit" && a.productTarget ? REAL_LOOK : PRODUCT_LOCK,
+    NO_MIRROR,
+    "Skin keeps its visible fine texture.",
     texts,
   ].filter(Boolean).join("\n");
 }
@@ -419,9 +425,10 @@ export function maskEditPrompt(a: { product: Product; rules: string[]; instructi
   const texts = a.product.texts?.length ? `Texts that must appear exactly on the product:\n${textsBlock(a.product)}` : "";
   return [
     "You are a high-end photo retoucher working on an advertising photograph for the cosmetics brand Irizée.",
-    "Image 1 = the FULL photo to retouch (its outer edges may be a mirrored padding: ignore them)." + (a.refCount ? ` ${refNote(a.refCount)}` : "") + " The following image(s) = the REAL product packshot(s).",
-    a.rules.length || a.product.rules?.length ? `NON-NEGOTIABLE RULES:\n${numbered([...a.rules, ...(a.product.rules ?? [])])}` : "",
+    "Image 1 = the FULL photo to retouch (its outer edges may be a mirrored padding: ignore them)." + (a.refCount ? ` ${refNote(a.refCount)}` : "") + " The following image(s) = the product packshot(s): a clean studio render that shows the product's DESIGN (shape, colours, logo, label layout), not what it looks like in real life.",
+    a.rules.length || a.product.rules?.length ? `Brand rules:\n${numbered([...a.rules, ...(a.product.rules ?? [])])}` : "",
     `RETOUCH: ${a.instruction}`,
+    "The change must be obvious at first glance, never a timid touch-up.",
     a.hasRegion ? "Change ONLY the area left editable by the mask; everything else must stay exactly as it is." : "Keep the same framing, person, face, outfit, background and light: change only what is asked.",
     "The result must look like the same real photograph, retouched by an expert: same light direction, same colour grade, same grain and sharpness, real skin texture with pores, realistic materials (a cosmetic product applied on skin keeps a real cream or clay texture and lets the skin show through where it is thin; never flat paint or a graphic shape).",
     PRODUCT_LOCK, NO_MIRROR,
