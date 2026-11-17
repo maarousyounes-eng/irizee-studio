@@ -342,7 +342,7 @@ export function typeLine(type: string, tp: TypeParams, vi: number, nSlides: numb
   if (type === "ba") {
     const c = BA_CHANGES.find((x) => x.id === tp.baChange) ?? BA_CHANGES[0];
     const before = (c.id === "autre" ? tp.baBefore : c.before) || "skin before the skincare routine";
-    return `BEFORE PHOTO of a before/after pair: a natural, front-facing beauty portrait, neutral even lighting, simple background. The skin shows ${before}. Realistic and natural, no makeup, no retouching.`;
+    return `BEFORE PHOTO of a before/after pair: a front-facing beauty portrait with a confident, direct gaze, even soft light that shows the skin honestly, simple background. The skin shows ${before}. No foundation and no retouching, so the condition of the skin is real and visible; the model herself is as striking and well cast as in any campaign of the brand.`;
   }
   return "";
 }

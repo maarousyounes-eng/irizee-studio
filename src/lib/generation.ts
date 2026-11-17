@@ -430,6 +430,15 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
       const sameAi = !modelRefs.length && !shoot.no_people && seriesMode
         ? `The human model: exactly the same fictional person as in the ${seriesMode === "campaign" ? "PILOT IMAGE" : seriesMode === "carousel" ? "SERIES REFERENCE" : "CHOSEN SKETCH"} (same face, skin tone, hair colour and hairstyle), shown as a real person with real skin.`
         : null;
+      // Avant / après avec un mannequin créé par l'IA : un casting dans le style des mannequins de la marque
+      // (sinon la consigne décrivait toujours la même personne générique, sans rapport avec la marque)
+      let casting: string | null = null;
+      if (vtype === "ba" && !modelRefs.length && !shoot.no_people) {
+        const { data: ms } = await sb.from("models").select("description").eq("state", "ready").order("is_brand_model", { ascending: false }).order("name").limit(6);
+        const styles = (ms ?? []).map((m: any) => String(m.description ?? "").trim()).filter(Boolean);
+        const style = styles.length ? styles[Math.floor(image.variant_index / 2) % styles.length].slice(0, 500) : "";
+        casting = `The model: a fictional professional model cast for a premium beauty campaign of this brand: strikingly photogenic, confident, with real presence${style ? `. She has the casting style of the brand's own models, described here (take the type, the attitude and the level of beauty; she is a different person): "${style}"` : ""}. Her hair is styled and kept away from her face, her brows are groomed, no sunglasses: her whole face is visible. Her skin is bare (no foundation) so that its real condition shows.`;
+      }
       // Mannequin choisi : les visages des inspirations sont floutés pour ne jamais se mélanger avec le sien
       if (modelRefs.length && inspirations.length) inspirations = await Promise.all(inspirations.map(blurFaces));
       const nSlides = normalizeSlides(tp.slides).length || 1;
@@ -452,7 +461,7 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
         inspMode: tp.inspMode === "copy" ? "copy" : tp.inspMode === "loose" ? "loose" : undefined,
         layoutLine: vtype === "ad" ? textZoneLine(tp.textZone) : undefined,
         seriesRef: !!series, seriesMode,
-        others: others.map((o, k) => ({ product: o.product, n: 1, real: !!otherReals[k] })), hasRealPhoto: !!mainReal, variation: sameAi ?? variationHint(image.variant_index, shoot.no_people), nProductImages: imagePaths.length,
+        others: others.map((o, k) => ({ product: o.product, n: 1, real: !!otherReals[k] })), hasRealPhoto: !!mainReal, variation: sameAi ?? casting ?? variationHint(image.variant_index, shoot.no_people), nProductImages: imagePaths.length,
         hasModelRef: modelRefs.length > 0, nModelRefs: modelRefs.length, modelDescription: descs.join(" / "), noPeople: shoot.no_people, noProduct,
         ...(vtype === "photo" ? {} : { typeLine: typeLine(vtype, tp, image.variant_index, nSlides), hasStyleRef: inspirations.length > 0, realism: vtype === "ba" ? REALISM_NATURAL : undefined }),
       });
