@@ -557,7 +557,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
                       {img.path && <Btn size="sm" variant="ghost" onClick={() => setCropFor(img)} title="Recadrer ou créer un autre format, à la souris (gratuit)"><LayoutTemplate size={12} /> Formats</Btn>}
                       <details className="relative">
                         <summary className="list-none cursor-pointer inline-flex items-center px-3 py-1.5 text-xs font-semibold rounded-xl border border-[#E4E4E7] bg-white hover:bg-[#F4F4F5]">Plus</summary>
-                        <div className="absolute z-10 mt-1 left-0 w-60 bg-white border border-[#E4E4E7] rounded-xl shadow-lg p-1.5 flex flex-col gap-0.5">
+                        <div className="absolute z-20 bottom-full mb-1 left-0 w-64 bg-white border border-[#E4E4E7] rounded-xl shadow-lg p-1.5 flex flex-col gap-0.5">
                           {img.parent_id && img.kind !== "format" && <button type="button" className="text-left text-xs px-2.5 py-2 rounded-lg hover:bg-[#F4F4F5]" onClick={() => setCompare(img.id)}>Comparer avant / après</button>}
                           <button type="button" className="text-left text-xs px-2.5 py-2 rounded-lg hover:bg-[#F4F4F5]" onClick={() => submitFix(img, "label")}>Réparer le texte de l&apos;étiquette (1 image payante)</button>
                           <button type="button" className="text-left text-xs px-2.5 py-2 rounded-lg hover:bg-[#F4F4F5]" onClick={() => { setFormatFor(img.id); setFormats([]); }}>Faire redessiner dans un autre format par l&apos;IA (payant)</button>
