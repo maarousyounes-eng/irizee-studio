@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import NewShootForm from "@/components/studio/NewShootForm";
-import CampaignWizard from "@/components/studio/CampaignWizard";
+import CampaignWizard, { type Prefill } from "@/components/studio/CampaignWizard";
+import { normalizeSlides } from "@/lib/visualTypes";
 import { PageHeader } from "@/components/ui";
 import type { Role } from "@/types";
 
@@ -42,8 +43,42 @@ export default async function StudioPage({ searchParams }: { searchParams: { con
     }
   }
 
-  // Nouveau parcours guidé (par défaut) ; l'ancien formulaire reste pour les carrousels, les avant/après et « Recommencer »
-  const classic = !!(searchParams.classic || searchParams.again || searchParams.concept || searchParams.from) || profile?.role === "creator";
+  // Nouveau parcours guidé pour toute l'équipe, y compris depuis un concept de la bibliothèque ou « Recommencer ».
+  // L'ancien formulaire ne sert plus qu'aux créateurs externes (projets, quota) et à « Décliner » une image.
+  const classic = !!(searchParams.classic || searchParams.from) || profile?.role === "creator";
+  let prefill: Prefill | undefined;
+  if (!classic && searchParams.again) {
+    const { data: sh } = await sb.from("shoots").select("id, created_at, product_id, product_ids, product_mode, model_ids, no_people, no_product, visual_type, type_params, prompt, aspect, inspiration_paths").eq("id", searchParams.again).single();
+    if (sh) {
+      const tp = (sh.type_params as Record<string, any>) ?? {};
+      const { count } = await sb.from("images").select("id", { count: "exact", head: true }).eq("shoot_id", sh.id).eq("kind", "generated");
+      const n = Number(tp.count) || count || 4;
+      prefill = {
+        source: `Réglages repris de votre campagne du ${new Date(sh.created_at).toLocaleDateString("fr-FR")}.`,
+        brief: sh.prompt, vtype: sh.visual_type ?? "photo", productIds: (sh.product_ids as string[] | null) ?? [sh.product_id], productMode: sh.product_mode ?? undefined, noProduct: !!sh.no_product,
+        modelIds: sh.no_people ? [] : sh.model_ids ?? [], aspect: sh.aspect, count: n, pairs: Math.ceil(n / 2), textZone: tp.textZone, inspMode: tp.inspMode, inspirations: sh.inspiration_paths ?? [],
+        directionText: typeof tp.direction === "string" ? tp.direction : undefined, sketchPath: typeof tp.sketch_path === "string" ? tp.sketch_path : undefined,
+        carouselStyle: tp.carouselStyle, slides: sh.visual_type === "carousel" ? normalizeSlides(tp.slides) : undefined, baChange: tp.baChange, baBefore: tp.baBefore, baAfter: tp.baAfter,
+      };
+    }
+  } else if (!classic && searchParams.concept) {
+    const { data: c } = await sb.from("concepts").select("id, name, prompt, aspect, inspiration_paths").eq("id", searchParams.concept).single();
+    if (c) {
+      // Concept gardé depuis « Idées de campagne » : le brief + la direction complète (décor, couleurs, lumière, attitude)
+      const text = String(c.prompt ?? "");
+      const line = (k: string) => new RegExp(`^${k} : (.+)$`, "m").exec(text)?.[1]?.trim() ?? "";
+      const [set, palette, light, attitude, serie] = ["Décor", "Couleurs", "Lumière", "Attitude", "Série"].map(line);
+      const head = text.split(/\n(?=Décor : )/)[0].trim();
+      const idea = /^Campagne « [^»]+ » : (.+)$/m.exec(head)?.[1]?.trim() ?? "";
+      prefill = {
+        source: `Concept « ${c.name} » repris de votre bibliothèque.`, conceptId: c.id, aspect: c.aspect, inspirations: c.inspiration_paths ?? [],
+        ...(set && palette && light && idea
+          ? { brief: head, vtype: /Canal : Carrousel/.test(head) ? "carousel" : /Canal : Pub/.test(head) ? "ad" : "social", direction: { title: c.name, concept: idea, set, palette, light, attitude: `${attitude}${serie ? ` Série prévue : ${serie}` : ""}` } }
+          : { brief: text }),
+      };
+    }
+  }
+  if (searchParams.product) prefill = { ...(prefill ?? {}), productIds: prefill?.productIds ?? [searchParams.product] };
   if (!classic) {
     const [{ data: full }, { data: lib }] = await Promise.all([
       sb.from("products").select("id, name, real_size, applied_look, product_images(id)").order("name"),
@@ -56,7 +91,7 @@ export default async function StudioPage({ searchParams }: { searchParams: { con
     return (
       <div>
         <PageHeader title="Nouvelle campagne" subtitle="Produits, brief, direction, image pilote : vous validez chaque étape avant de payer la suivante." />
-        <CampaignWizard products={wProducts} models={(models.data ?? []).map((m: any) => ({ id: m.id, name: m.name, path: m.path }))} library={lib ?? []} />
+        <CampaignWizard products={wProducts} models={(models.data ?? []).map((m: any) => ({ id: m.id, name: m.name, path: m.path }))} library={lib ?? []} prefill={prefill} />
       </div>
     );
   }

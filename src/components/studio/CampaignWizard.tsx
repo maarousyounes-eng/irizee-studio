@@ -14,6 +14,15 @@ interface Props {
   products: { id: string; name: string; missing: string[] }[];
   models: { id: string; name: string; path: string | null }[];
   library: { id: string; path: string; analysis: string; summary: string }[];
+  /** Réglages repris d'un concept de la bibliothèque ou d'une campagne existante (« Recommencer ») */
+  prefill?: Prefill;
+}
+export interface Prefill {
+  source?: string; conceptId?: string;
+  brief?: string; vtype?: string; productIds?: string[]; productMode?: string; noProduct?: boolean; modelIds?: string[];
+  aspect?: string; count?: number; textZone?: string; inspMode?: string; inspirations?: string[];
+  direction?: Dir; directionText?: string; sketchPath?: string;
+  carouselStyle?: string; slides?: Slide[]; baChange?: string; baBefore?: string; baAfter?: string; pairs?: number;
 }
 type Dir = { title: string; concept: string; set: string; palette: string; light: string; attitude: string };
 type Sketch = { state: "loading" | "done" | "error"; path?: string };
@@ -26,7 +35,7 @@ const dirText = (d: Dir) => `${d.title}. ${d.concept} Décor et matières : ${d.
  * Carrousel : une étape de plus, le plan des slides (photo + textes), puis la couverture comme image pilote.
  * Avant / après : pas de direction (le portrait reste neutre) ; la photo « avant » est l'image pilote.
  */
-export default function CampaignWizard({ products, models, library }: Props) {
+export default function CampaignWizard({ products, models, library, prefill }: Props) {
   const sb = useSupabase();
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -72,30 +81,57 @@ export default function CampaignWizard({ products, models, library }: Props) {
     setVtype(k);
   }
   const [error, setError] = useState<string | null>(null);
+  const [source, setSource] = useState<string | null>(null);
+  const [keptSketch, setKeptSketch] = useState<string | null>(null);
+  const [conceptId, setConceptId] = useState<string | null>(null);
 
   // Arrivée depuis « Idées de campagne » : brief rempli et direction déjà proposée (avec son esquisse)
   const seeded = useRef(false);
   useEffect(() => {
     if (seeded.current) return;
     seeded.current = true;
+    let p: Prefill | undefined = prefill;
     try {
       const raw = sessionStorage.getItem("wizard:prefill");
-      if (!raw) return;
-      sessionStorage.removeItem("wizard:prefill");
-      const p = JSON.parse(raw) as { brief?: string; vtype?: string; productIds?: string[]; direction?: Dir };
-      if (p.brief) setBrief(p.brief);
-      if (p.vtype && p.vtype !== "ba") setVtype(p.vtype);
-      const pids = (p.productIds ?? []).filter((id) => products.some((x) => x.id === id));
-      if (pids.length) setProductIds(pids);
-      if (p.direction?.title) {
-        const d = p.direction;
-        setDirs([d]); setChosen(0); setChosenText(dirText(d));
-        setSketches({ [d.title]: { state: "loading" } });
-        apiJob<{ path: string }>(sb, "/api/shoots/sketch", { direction: dirText(d), productIds: pids, noProduct: !pids.length, noPeople: true })
-          .then((s) => setSketches((m) => ({ ...m, [d.title]: { state: "done", path: s.path } })))
-          .catch(() => setSketches((m) => ({ ...m, [d.title]: { state: "error" } })));
-      }
+      if (raw) { sessionStorage.removeItem("wizard:prefill"); p = JSON.parse(raw) as Prefill; }
     } catch { /* rien à préremplir */ }
+    if (!p) return;
+    const t = p.vtype && TYPES.some(([k]) => k === p!.vtype) ? p.vtype : null;
+    if (t) setVtype(t);
+    if (p.brief) setBrief(p.brief);
+    const pids = (p.productIds ?? []).filter((id) => products.some((x) => x.id === id));
+    if (pids.length) setProductIds(pids);
+    if (p.noProduct !== undefined) setNoProduct(!!p.noProduct);
+    if (p.productMode === "mix" || p.productMode === "split" || p.productMode === "together") setProductMode(p.productMode);
+    const mids = (p.modelIds ?? []).filter((id) => models.some((x) => x.id === id));
+    if (p.modelIds) setModelIds(t === "carousel" ? mids.slice(0, 1) : mids);
+    if (p.aspect && FORMATS[p.aspect]) setAspect(p.aspect);
+    if (p.count) setCount([2, 4, 6, 8].reduce((best, n) => (Math.abs(n - p!.count!) < Math.abs(best - p!.count!) ? n : best), 4));
+    if (p.textZone && TEXT_ZONES.some((z) => z.id === p!.textZone)) setTextZone(p.textZone);
+    if (p.inspMode === "copy" || p.inspMode === "loose") setInspMode(p.inspMode);
+    if (p.carouselStyle && CAROUSEL_STYLES.some((x) => x.id === p!.carouselStyle)) setCarouselStyle(p.carouselStyle);
+    if (p.slides?.length) { setSlides(p.slides); setSlideCount(Math.min(10, Math.max(3, p.slides.length))); setPlanFor(p.directionText ?? ""); }
+    if (p.baChange && BA_CHANGES.some((x) => x.id === p!.baChange)) setBaChange(p.baChange);
+    if (p.baBefore) setBaBefore(p.baBefore);
+    if (p.baAfter) setBaAfter(p.baAfter);
+    if (p.pairs) setPairs(Math.min(3, Math.max(1, p.pairs)));
+    if (p.source) setSource(p.source);
+    if (p.conceptId) setConceptId(p.conceptId);
+    const insp = (p.inspirations ?? []).filter((x) => /^inspirations\//.test(x)).slice(0, 4);
+    if (insp.length) { setInspirations(insp.map((path) => ({ path, analysis: "", note: "", state: "loading" as const }))); insp.forEach((path) => analyze(path)); }
+    if (p.direction?.title) {
+      // Direction complète (concept) : elle est déjà proposée, avec son esquisse
+      const d = p.direction;
+      setDirs([d]); setChosen(0); setChosenText(dirText(d));
+      setSketches({ [d.title]: { state: "loading" } });
+      apiJob<{ path: string }>(sb, "/api/shoots/sketch", { direction: dirText(d), productIds: pids, noProduct: !pids.length, noPeople: !mids.length })
+        .then((sk) => setSketches((m) => ({ ...m, [d.title]: { state: "done", path: sk.path } })))
+        .catch(() => setSketches((m) => ({ ...m, [d.title]: { state: "error" } })));
+    } else if (p.directionText) {
+      // Direction d'une campagne précédente : reprise telle quelle, avec son esquisse
+      setChosenText(p.directionText);
+      if (p.sketchPath) setKeptSketch(p.sketchPath);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -140,7 +176,7 @@ export default function CampaignWizard({ products, models, library }: Props) {
     setError(null); setBusy("dirs");
     try {
       const r = await apiJob<{ directions: Dir[] }>(sb, "/api/shoots/directions", { ...common(), n: 3, avoid: dirs.map((d) => d.title), feedback, previous: feedback ? dirs.map((d) => `${d.title}: ${d.concept}`) : [] });
-      setDirs(r.directions); setChosen(null); setChosenText(""); setRework("");
+      setDirs(r.directions); setChosen(null); setChosenText(""); setRework(""); setKeptSketch(null);
       // Une esquisse rapide par direction, pour choisir avec les yeux
       const next: Record<string, Sketch> = {};
       r.directions.forEach((d) => { next[d.title] = { state: "loading" }; });
@@ -167,21 +203,21 @@ export default function CampaignWizard({ products, models, library }: Props) {
     setBusy("");
   }
   function goPlan() {
-    if (chosen === null || !chosenText.trim()) return setError("Choisissez d'abord une direction");
+    if (!chosenText.trim()) return setError("Choisissez d'abord une direction");
     setError(null); setStep("plan");
     if (!slides.length) proposePlan();
   }
   const photoSlides = slides.filter((x) => x.layout !== "text").length;
 
   async function launch() {
-    if (!isBa && (chosen === null || !chosenText.trim())) return setError("Choisissez d'abord une direction");
+    if (!isBa && !chosenText.trim()) return setError("Choisissez d'abord une direction");
     if (isCar && photoSlides < 1) return setError("Il faut au moins une slide avec photo");
     setError(null); setBusy("launch");
     try {
       const d = chosen !== null ? dirs[chosen] : null;
       const r = await apiJob<{ shootId: string; imageIds: string[] }>(sb, "/api/shoots", {
         productId: productIds[0] ?? products[0]?.id, productIds, productMode, noProduct, modelIds, noPeople, modelMode: "split",
-        prompt: brief, aspect, size: "2K", variants: count, slideCount: slides.length, pairs, visualType: vtype, pilot: true, sketchPath: d ? sketches[d.title]?.path ?? null : null,
+        prompt: brief, aspect, size: "2K", variants: count, slideCount: slides.length, pairs, visualType: vtype, pilot: true, sketchPath: d ? sketches[d.title]?.path ?? null : keptSketch, conceptId,
         inspirationPaths: inspirations.map((x) => x.path), inspirationAnalyses: inspirations.filter((x) => x.state === "done").map((x) => ({ path: x.path, analysis: x.analysis, note: "" })),
         typeParams: isBa ? { inspMode, baChange, baBefore, baAfter }
           : isCar ? { inspMode, direction: chosenText, carouselStyle, slides }
@@ -209,6 +245,7 @@ export default function CampaignWizard({ products, models, library }: Props) {
         <span className="text-xs text-[#52525B]">{step === "setup" || step === "brief" ? "Rien de payé jusqu'ici" : step === "plan" ? "Le plan est du texte : quelques centimes. Aucune photo payée avant la couverture." : "Esquisses : quelques centimes. Aucune image en haute qualité payée avant le pilote."}</span>
       </div>
       {error && <div className="p-3 rounded-xl bg-red-50 border border-red-100 text-sm text-red-700">{error}</div>}
+      {source && step === "setup" && <div className="p-3 rounded-xl bg-[#EBF2FF] border border-[#C9D9F8] text-sm text-[#1F3F7A]">{source} Vérifiez les réglages, puis continuez : rien n&apos;est payé avant l&apos;image pilote.</div>}
 
       {step === "setup" && (
         <Card className="p-5 space-y-5">
@@ -334,7 +371,7 @@ export default function CampaignWizard({ products, models, library }: Props) {
               <Btn variant="ghost" onClick={() => setStep("setup")}>Retour</Btn>
               {isBa
                 ? <Btn onClick={launch} disabled={busy !== "" || pendingInsp}>{busy === "launch" ? <><Spinner className="border-white/40 border-t-white" /> Préparation…</> : pendingInsp ? "Analyse des inspirations…" : "Créer la photo « avant » (1 image payante)"}</Btn>
-                : <Btn onClick={() => { setStep("direction"); if (!dirs.length) proposeDirs(); }} disabled={!brief.trim() || pendingInsp}>{pendingInsp ? "Analyse des inspirations…" : "Voir des directions"}</Btn>}
+                : <Btn onClick={() => { setStep("direction"); if (!dirs.length && !chosenText.trim()) proposeDirs(); }} disabled={!brief.trim() || pendingInsp}>{pendingInsp ? "Analyse des inspirations…" : "Voir des directions"}</Btn>}
             </div>
             {isBa && <p className="text-[11px] text-[#6B6B72]">Une seule image est générée d&apos;abord : la photo « avant ». Vous la validez, puis l&apos;« après » est créé à partir d&apos;elle{pairs > 1 ? `, ainsi que les ${pairs - 1} autre${pairs > 2 ? "s" : ""} paire${pairs > 2 ? "s" : ""}` : ""}.</p>}
           </Card>
@@ -421,7 +458,13 @@ export default function CampaignWizard({ products, models, library }: Props) {
               <Btn size="sm" variant="ghost" onClick={() => proposeDirs(rework)} disabled={busy !== "" || !rework.trim()}>Ajuster les directions</Btn>
             </div>
           )}
-          {chosen !== null && (
+          {chosen === null && chosenText.trim() !== "" && !dirs.length && busy !== "dirs" && (
+            <div className="flex flex-wrap gap-3 items-start bg-[#EBF2FF] border border-[#C9D9F8] rounded-2xl p-3">
+              {keptSketch && /* eslint-disable-next-line @next/next/no-img-element */ <img src={imgUrl(keptSketch)} alt="Esquisse de la direction reprise" className="w-24 aspect-[4/5] object-cover rounded-xl" />}
+              <p className="text-sm text-[#1F3F7A] flex-1 min-w-[220px]"><b>Direction reprise de la campagne précédente.</b> Vous pouvez la garder, la modifier ci-dessous, ou demander d&apos;autres directions avec le bouton « Autres directions ».</p>
+            </div>
+          )}
+          {(chosen !== null || chosenText.trim() !== "") && (
             <div>
               <Label>Direction choisie (modifiable)</Label>
               <textarea className={INPUT + " min-h-[80px] !text-[13px]"} value={chosenText} onChange={(e) => setChosenText(e.target.value)} aria-label="Direction choisie" />
@@ -430,8 +473,8 @@ export default function CampaignWizard({ products, models, library }: Props) {
           <div className="flex flex-wrap justify-between gap-2">
             <Btn variant="ghost" onClick={() => setStep("brief")}>Retour</Btn>
             {isCar
-              ? <Btn onClick={goPlan} disabled={busy !== "" || chosen === null}>Continuer : le plan des slides</Btn>
-              : <Btn onClick={launch} disabled={busy !== "" || chosen === null}>{busy === "launch" ? <><Spinner className="border-white/40 border-t-white" /> Préparation de la campagne…</> : "Créer l'image pilote (1 image payante)"}</Btn>}
+              ? <Btn onClick={goPlan} disabled={busy !== "" || !chosenText.trim()}>Continuer : le plan des slides</Btn>
+              : <Btn onClick={launch} disabled={busy !== "" || !chosenText.trim()}>{busy === "launch" ? <><Spinner className="border-white/40 border-t-white" /> Préparation de la campagne…</> : "Créer l'image pilote (1 image payante)"}</Btn>}
           </div>
           <p className="text-[11px] text-[#6B6B72]">{isCar ? "Le plan des slides (photos et textes) est écrit dans cette direction. Rien n'est payé en haute qualité à cette étape." : `Une seule image est générée en haute qualité. Vous la validez, puis les ${count - 1} autres sont créées à partir d'elle.`}</p>
         </Card>

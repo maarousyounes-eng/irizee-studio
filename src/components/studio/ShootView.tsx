@@ -383,7 +383,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
             </div>
             <div className="flex flex-wrap gap-2">
               <Btn onClick={validatePilot} disabled={!pilotImg || continuing}>{continuing ? <Spinner className="border-white/40 border-t-white" /> : <Check size={14} />} {isBa ? (rest > 1 ? "Valider et créer l'« après » et les autres paires" : "Valider et créer l'« après »") : isCar ? `Valider et créer les ${rest} autres photos` : `Valider et créer les ${rest} autres`}</Btn>
-              <Link href="/studio"><Btn variant="ghost">{isBa ? "Recommencer autrement" : "Changer de direction"}</Btn></Link>
+              <Link href={`/studio?again=${shoot.id}`}><Btn variant="ghost">{isBa ? "Recommencer autrement" : "Changer de direction"}</Btn></Link>
             </div>
           </div>
         )}

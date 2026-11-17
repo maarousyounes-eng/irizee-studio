@@ -39,7 +39,7 @@ export default function ConceptGenerator({ products, userId }: { products: { id:
   function launch(c: Concept) {
     // Le parcours « Nouvelle campagne » s'ouvre avec le brief rempli et cette direction déjà proposée
     sessionStorage.setItem("wizard:prefill", JSON.stringify({
-      brief: full(c), vtype: /Pub/.test(channel) ? "ad" : "social", productIds,
+      brief: full(c), vtype: /Carrousel/.test(channel) ? "carousel" : /Pub/.test(channel) ? "ad" : "social", productIds,
       direction: { title: c.name, concept: c.idea, set: c.set, palette: c.palette, light: c.light, attitude: `${c.attitude} Série prévue : ${c.shots.join(" ; ")}` },
     }));
     router.push("/studio");
