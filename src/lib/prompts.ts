@@ -33,7 +33,7 @@ export const wantsPhoneUi = (analysis: string, brief: string) =>
   /PHONE UI:\s*yes/i.test(analysis) || /interface (du |de |d'un )?t[ée]l[ée]phone|mode photo|appareil photo de l'iphone|écran de l'appareil photo|grille (de l'appareil|photo)/i.test(brief);
 const OVERLAY_OK = "INTENDED STYLE: the client deliberately asked for a phone camera interface overlay (viewfinder grid, camera icons, phone frame). It is NOT a defect: never count it as added text, graphic element, artifact or issue, and do not lower any score for it.";
 /** Toujours un rendu réel (demande permanente du client) : jamais un graphisme. */
-export const REAL_LOOK = "This is a real photograph of real physical things. The product is a real manufactured object you can hold: its packshot is only a clean studio render that shows its DESIGN (shape, colours, logo, label layout), not what it looks like in real life. In the photo it is photographed like everything else in the scene: its material catches the light the way the real material does (imperfect, uneven highlights, fine grain, the small irregularities of a real object), the print sits on its surface and follows its curve, and it has weight and contact with what holds or supports it.";
+export const REAL_LOOK = "This is a real photograph of real physical things. The product is a real manufactured object you can hold: its packshot is only a clean studio render that shows its DESIGN (shape, colours, logo, label layout), not what it looks like in real life. In the photo it is photographed like everything else in the scene: its material catches the light the way the real material does (imperfect, slightly uneven highlights, fine grain, soft reflections of what surrounds it), the print sits on its surface and follows its curve, and it has weight and contact with what holds or supports it. It is a new, full, intact product: it looks real through the light and the material, not through creases, dents or wear.";
 /** Le texte imprimé ne doit jamais sortir à l'envers (effet miroir des selfies). */
 export const NO_MIRROR = "Every text printed on the product reads normally, left to right, NEVER mirrored or reversed, even in a selfie, a front-camera shot or a mirror reflection.";
 /** Pendant une retouche, le produit ne change jamais. */
@@ -274,6 +274,7 @@ export function localEditPrompt(a: { product: Product; rules: string[]; instruct
         : "Work on what the task concerns. The rest of the crop (framing, scale, people, product, background, light) stays as in Image 1, so that the crop fits back into the photo: do not zoom, shift or re-compose.",
     a.mode === "edit" ? sizeLine(a.product) : "",
     a.mode === "edit" && a.productTarget ? REAL_LOOK : PRODUCT_LOCK,
+    a.mode === "edit" && a.productTarget && a.product.look ? `The product "${a.product.name}": ${a.product.look}` : "",
     NO_MIRROR,
     "Skin keeps its visible fine texture.",
     texts,
