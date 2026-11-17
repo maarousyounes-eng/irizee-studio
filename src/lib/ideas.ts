@@ -12,12 +12,14 @@ const tasteText = (t: { love: string; hate: string }) => [t.love ? `loves: ${t.l
 export async function proposeIdeas(sb: SupabaseClient, a: {
   brief: string; n: number; type: string; productIds: string[]; productMode: string | null; noProduct: boolean; people: boolean;
   inspMode: "copy" | "loose"; inspirationPaths: string[]; analysis: string; avoid?: string[]; theme?: string; textZone?: string; oneCampaign?: boolean;
+  /** Première image déjà décidée (l'esquisse choisie) : les idées écrites sont celles des images suivantes */
+  heroPath?: string | null; offset?: number;
 }): Promise<{ title: string; idea: string }[]> {
   const n = Math.min(12, Math.max(1, a.n));
   const prods = a.noProduct ? [] : (await Promise.all(a.productIds.slice(0, 4).map((id) => loadProduct(sb, id).catch(() => null)))).filter(Boolean);
   const names = new Map(prods.map((x) => [x!.product.id, x!.product.name]));
   const perImage = a.noProduct || !a.productIds.length ? [] : Array.from({ length: n }, (_, i) => {
-    const pl = productPlan({ product_id: a.productIds[0], product_ids: a.productIds.length > 1 ? a.productIds : null, product_mode: a.productMode }, { variant_index: i });
+    const pl = productPlan({ product_id: a.productIds[0], product_ids: a.productIds.length > 1 ? a.productIds : null, product_mode: a.productMode }, { variant_index: i + (a.offset ?? 0) });
     return [pl.mainId, ...pl.otherIds].map((id) => names.get(id)).filter(Boolean) as string[];
   });
   const products = prods.map((x) => {
@@ -26,7 +28,8 @@ export async function proposeIdeas(sb: SupabaseClient, a: {
   }).join("\n");
   const rules = [...(await brandRules(sb)), ...prods.flatMap((x) => x!.product.rules ?? [])];
   const insp = (await Promise.all(a.inspirationPaths.slice(0, 4).map((p) => download(sb, p).catch(() => null)))).filter(Boolean) as { buf: Buffer; mime: string }[];
-  const parts: Part[] = [{ text: ideasPrompt({ brief: a.brief, n, type: a.type, perImage, products, rules, people: a.people, inspMode: a.inspMode, nInsp: insp.length, analysis: a.analysis, avoid: a.avoid ?? [], theme: a.theme, textZone: a.textZone, oneCampaign: a.oneCampaign, taste: tasteText(await brandTaste(sb)) }) }, ...insp.map((i) => imgPart(i.buf, i.mime))];
+  const hero = a.heroPath ? await download(sb, a.heroPath).catch(() => null) : null;
+  const parts: Part[] = [{ text: ideasPrompt({ brief: a.brief, n, type: a.type, perImage, products, rules, people: a.people, inspMode: a.inspMode, nInsp: insp.length, analysis: a.analysis, avoid: a.avoid ?? [], theme: a.theme, textZone: a.textZone, oneCampaign: a.oneCampaign, taste: tasteText(await brandTaste(sb)), hero: !!hero }) }, ...insp.map((i) => imgPart(i.buf, i.mime)), ...(hero ? [imgPart(hero.buf, hero.mime)] : [])];
   const r = await gemini(MODELS.vision, parts, { purpose: "idées de shooting", json: true, timeoutMs: 75_000 });
   const raw = parseJson<{ ideas?: { title?: unknown; idea?: unknown }[] }>(firstText(r));
   return (raw.ideas ?? []).map((x) => ({ title: String(x.title ?? "").trim().slice(0, 60), idea: String(x.idea ?? "").trim().slice(0, 600) })).filter((x) => x.idea).slice(0, n);

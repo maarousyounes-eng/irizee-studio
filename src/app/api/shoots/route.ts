@@ -72,15 +72,21 @@ export async function POST(req: Request) {
     }
 
     // Idées d'images : celles choisies par le client dans le formulaire ; sinon, avec des inspirations en mode « s'inspirer », le directeur artistique les propose
+    const sketchOk = typeof b.sketchPath === "string" && /^sketches\/[\w\-./]+$/.test(b.sketchPath);
     const ideasIn = (Array.isArray(tpIn.shots) ? tpIn.shots : []).map((x) => String(x ?? "").trim().slice(0, 700)).filter(Boolean).slice(0, 12);
     if (vtype !== "carousel" && vtype !== "ba") {
       if (ideasIn.length) tp.shots = Array.from({ length: n }, (_, i) => ideasIn[i % ideasIn.length]);
       else if (tp.direction) {
-        // Direction choisie : les prises de vue de la campagne en découlent toutes
+        // Direction choisie : les prises de vue de la campagne en découlent toutes.
+        // Avec une esquisse choisie, la première image EST cette esquisse en version finale : seules les suivantes sont à imaginer.
+        const hero = !!b.pilot && n > 1 && sketchOk ? (b.sketchPath as string) : null;
+        const HERO_SHOT = "Image principale : l'esquisse que vous avez choisie, en version finale (même sujet, même pose, même cadrage).";
         try {
-          const ideas = await withAiCtx({ sb, userId: user.id }, () => proposeIdeas(sb, { brief: prompt, n, type: vtype, productIds, productMode: productIds.length > 1 ? (["together", "split", "mix"].includes(b.productMode) ? b.productMode : "mix") : null, noProduct: !!b.noProduct, people: !b.noPeople, inspMode: "loose", inspirationPaths: [], analysis: "", textZone: vtype === "ad" ? tp.textZone : undefined, theme: tp.direction }));
-          if (ideas.length) tp.shots = Array.from({ length: n }, (_, i) => { const x = ideas[i % ideas.length]; return `${x.title} : ${x.idea}`; });
-        } catch { /* la direction seule */ }
+          const ideas = await withAiCtx({ sb, userId: user.id }, () => proposeIdeas(sb, { heroPath: hero, offset: hero ? 1 : 0, brief: prompt, n: hero ? n - 1 : n, type: vtype, productIds, productMode: productIds.length > 1 ? (["together", "split", "mix"].includes(b.productMode) ? b.productMode : "mix") : null, noProduct: !!b.noProduct, people: !b.noPeople, inspMode: "loose", inspirationPaths: [], analysis: "", textZone: vtype === "ad" ? tp.textZone : undefined, theme: tp.direction }));
+          const rest = (k: number) => { const x = ideas[k % ideas.length]; return `${x.title} : ${x.idea}`; };
+          if (ideas.length) tp.shots = hero ? [HERO_SHOT, ...Array.from({ length: n - 1 }, (_, i) => rest(i))] : Array.from({ length: n }, (_, i) => rest(i));
+          else if (hero) tp.shots = [HERO_SHOT];
+        } catch { if (hero) tp.shots = [HERO_SHOT]; }
       }
       else if (!paths.length || tp.inspMode === "loose") {
         try {
@@ -94,7 +100,7 @@ export async function POST(req: Request) {
     const indexes = vtype === "carousel" ? slides.map((x, i) => (x.layout === "text" ? -1 : i)).filter((i) => i >= 0) : Array.from({ length: n }, (_, i) => i);
     const pilot = !!b.pilot && indexes.length > 1;
     if (pilot) { tp.pilot = "pending"; tp.count = indexes.length; }
-    if (typeof b.sketchPath === "string" && /^sketches\/[\w\-./]+$/.test(b.sketchPath)) tp.sketch_path = b.sketchPath;
+    if (sketchOk) tp.sketch_path = b.sketchPath;
     const { data: shoot, error } = await sb.from("shoots").insert({
       project_id: b.projectId || null, product_id: productIds[0], product_ids: productIds.length > 1 ? productIds : null, product_mode: productIds.length > 1 ? (["together", "split", "mix"].includes(b.productMode) ? b.productMode : "mix") : null, model_id: modelIds[0] ?? null, model_ids: modelIds, concept_id: b.conceptId || null,
       prompt, visual_type: vtype, type_params: tp, model_mode: b.modelMode === "together" && modelIds.length > 1 ? "together" : "split", aspect: b.aspect, size: ["1K", "2K", "4K"].includes(b.size) ? b.size : "2K",

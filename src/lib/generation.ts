@@ -407,6 +407,10 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
         }
       }
       if (!series) seriesMode = undefined;
+      // « Autre idée » sur l'image pilote : l'esquisse ne donne plus que l'univers, la composition suit la nouvelle idée
+      if (seriesMode === "sketch" && idea) seriesMode = "sketchLoose";
+      // Image pilote : c'est l'esquisse choisie par le client, en version finale (jamais une autre prise de vue)
+      const heroShot = seriesMode === "sketch" ? "The finished photograph of the CHOSEN SKETCH: the same subject, the same pose and gesture, the same framing and composition, the same set and light, now real and precise (the product exactly as its packshot, at its real size)." : null;
       // Mannequin créé par l'IA : une seule et même personne sur toute la série (celle de l'esquisse, puis du pilote ou de la couverture)
       const sameAi = !modelRefs.length && !shoot.no_people && seriesMode
         ? `The human model: exactly the same fictional person as in the ${seriesMode === "campaign" ? "PILOT IMAGE" : seriesMode === "carousel" ? "SERIES REFERENCE" : "CHOSEN SKETCH"} (same face, skin tone, hair colour and hairstyle), shown as a real person with real skin.`
@@ -429,7 +433,7 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
           const lookLine = look ? `CAMPAIGN LOOK, set by the pilot image the client approved (identical in every image: same set and materials, same light and colour grade, same styling): ${look}\nThis image is ANOTHER photograph of the same campaign, not the pilot again: it has its own framing, camera distance, angle, pose and product placement${s || vtype === "carousel" ? ", exactly as described for it" : ""}.` : "";
           const head = [tp.direction ? `CAMPAIGN ART DIRECTION (shared by every image): ${tp.direction}` : "", lookLine].filter(Boolean).join("\n");
           return head && s ? `${head}\nTHIS IMAGE: ${s}` : head || s;
-        })((idea && vtype !== "carousel" ? idea : (tp.shots ?? [])[image.variant_index]) || undefined) || undefined,
+        })(heroShot ?? ((idea && vtype !== "carousel" ? idea : (tp.shots ?? [])[image.variant_index]) || undefined)) || undefined,
         inspMode: tp.inspMode === "copy" ? "copy" : tp.inspMode === "loose" ? "loose" : undefined,
         layoutLine: vtype === "ad" ? textZoneLine(tp.textZone) : undefined,
         seriesRef: !!series, seriesMode,

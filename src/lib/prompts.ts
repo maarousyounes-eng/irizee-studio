@@ -53,7 +53,7 @@ export function buildPrompt(a: {
   const products = [a.product, ...oth.map((o) => o.product)];
   const productBlock = (p: Product) => [
     `"${p.name}"${p.look ? `: ${p.look}` : ""}`,
-    p.real_size ? `Real size: ${p.real_size.replace(/\n/g, ", ")}.` : "Real size: a standard hand-held cosmetic of this kind (a tube of about 15 cm): in a hand it is no longer than the hand itself, clearly smaller than the face.",
+    p.real_size ? `Real size: ${p.real_size.replace(/\n/g, ", ")}.` : "Real size: a standard hand-held cosmetic of this kind (a tube about 15 cm long and 4 to 5 cm wide): held in a hand, it is about three quarters of the length of that hand and about half as wide as the palm; it is clearly smaller than the face.",
     p.applied_look ? `The formula itself (out of the tube or applied on skin): ${p.applied_look}. Always show this exact colour and texture.` : "",
     p.texts?.length ? `Printed texts, spelled exactly:\n${textsBlock(p)}` : "",
   ].filter(Boolean).join("\n");
@@ -64,7 +64,7 @@ export function buildPrompt(a: {
     nModels === 1 ? "Next image: the MODEL REFERENCE (the person to show)." : nModels > 1 ? `Next ${nModels} images: the MODEL REFERENCES (the ${nModels} persons to show, one image per person).` : "",
     !a.seriesRef ? ""
       : a.seriesMode === "sketch" ? "Next image: the CHOSEN SKETCH = a rough draft the client picked: keep its set, materials, colour palette, light and overall composition, and turn it into a finished, real photograph. Ignore its flaws (wrong label text, rough product): the product comes from the packshot."
-      : a.seriesMode === "sketchLoose" ? "Next image: the CHOSEN SKETCH = a rough draft of the art direction the client picked: keep its set, materials, colour palette and light, and make a finished, real photograph. The subject and the composition are the ones described for this slide, not necessarily those of the sketch. Ignore its flaws (wrong label text, rough product): the product comes from the packshot."
+      : a.seriesMode === "sketchLoose" ? "Next image: the CHOSEN SKETCH = a rough draft of the art direction the client picked: keep its set, materials, colour palette and light, and make a finished, real photograph. The subject and the composition are the ones described for this image, not necessarily those of the sketch. Ignore its flaws (wrong label text, rough product): the product comes from the packshot."
       : a.seriesMode === "campaign" ? `Next image: the PILOT IMAGE of this campaign, approved by the client: same set, materials, colour palette, light, colour grade and photographic style (${a.hasModelRef ? "the person is always the one of the MODEL REFERENCE, even if the pilot shows someone else" : "and the same person, if a person appears"}). Create a DIFFERENT shot of the same campaign, as described in the idea for this image: never a copy of the pilot.`
       : "Next image: the SERIES REFERENCE = the first image of the same series: match its art direction, colour grade and photographic quality (and its person, if a person appears in both), but NEVER copy its subject, set or composition: this image shows what is described for it below.",
     a.hasStyleRef === false ? "" : "Last image(s): the STYLE REFERENCE.",
@@ -429,7 +429,7 @@ export function maskEditPrompt(a: { product: Product; rules: string[]; instructi
 }
 
 /** Idées d'images : un directeur artistique propose une idée forte et différente pour CHAQUE image, avant toute génération. */
-export function ideasPrompt(a: { brief: string; n: number; type: string; perImage: string[][]; products: string; rules: string[]; people: boolean; inspMode: "copy" | "loose"; nInsp: number; analysis: string; avoid: string[]; theme?: string; textZone?: string; oneCampaign?: boolean; taste?: string }) {
+export function ideasPrompt(a: { brief: string; n: number; type: string; perImage: string[][]; products: string; rules: string[]; people: boolean; inspMode: "copy" | "loose"; nInsp: number; analysis: string; avoid: string[]; theme?: string; textZone?: string; oneCampaign?: boolean; taste?: string; hero?: boolean }) {
   return [
     "You are the creative director of an award-winning beauty advertising agency (think of the best campaigns of Glossier, Aesop, Byredo, Rhode, Jacquemus beauty, Fenty). You must come up with the IDEAS for the images of a shoot for the French cosmetics brand Irizée.",
     `Client brief (French, absolute priority): "${a.brief}"`,
@@ -449,6 +449,9 @@ export function ideasPrompt(a: { brief: string; n: number; type: string; perImag
       a.people
         ? "(a) hero portrait: the model with the product, looking at the camera (ONE image at most); (b) product still life in the set: the product alone, no person, staged with the materials of the set; (c) gesture detail: hands, the product and a prop or garment, no face in frame; (d) wide scene: the whole set with the model seen from head to at least the hips, the product smaller but identifiable; (e) off moment: the model in profile, from behind or looking away, caught in an action of the concept; (f) unexpected angle: top-down, low angle, through or behind an element of the set, or in a reflection."
         : "(a) hero still life: the product staged frontally in the set; (b) wide view: the whole set with the product smaller but identifiable; (c) close detail: part of the product with a material or prop of the set, tight framing; (d) top-down view; (e) the product interacting with a prop or with the formula itself (opened, texture visible); (f) unexpected angle: low angle, through or behind an element of the set, or in a reflection.",
+      a.hero
+        ? `THE FIRST IMAGE OF THE CAMPAIGN IS ALREADY DECIDED and is NOT in your list: it is the hero image shown in the LAST attached image (the sketch the client chose). Look at it: the ${a.n} shots you write are the OTHER images of the campaign, and none of them may repeat its kind, its framing or its pose.`
+        : "Shot 1 is always the hero image of the campaign (the strongest, most complete image): it is generated first and approved by the client before the others.",
       "Two shots never share the same framing AND the same pose or product placement. Start each idea with its kind in French (for example « Portrait », « Nature morte », « Détail mains », « Plan large », « Moment volé », « Angle inattendu »).",
     ].join(" ") : "",
     a.theme || a.oneCampaign ? "" : `Write ${a.n} ideas, ONE per image, each using a clearly DIFFERENT creative device. Devices to pick from (or better): play of scale (giant product, miniature set), sculptural set design (plaster, stone, blocks, sand), graphic hard shadows and light shapes, colour blocking, macro of the formula or ingredient as a landscape, water / splash / ripple frozen in motion, reflection and mirror games, levitation with real physical support, unexpected material contrast (chrome, ice, silk, velvet), tight crop on a detail of skin and product, still life with a story, raw ingredient (indigo powder cloud, plant) staged as art.`,
