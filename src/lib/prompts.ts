@@ -44,7 +44,7 @@ const textsBlock = (p: Product) => (p.texts ?? []).map((t) => `- ${t}`).join("\n
 
 export function buildPrompt(a: {
   product: Product; rules: string[]; userPrompt: string; aspect: string; analysis: string;
-  others?: { product: Product; n: number }[]; variation: string; nProductImages: number; hasModelRef: boolean; modelDescription?: string; noPeople: boolean; noProduct?: boolean;
+  others?: { product: Product; n: number; real?: boolean }[]; hasRealPhoto?: boolean; variation: string; nProductImages: number; hasModelRef: boolean; modelDescription?: string; noPeople: boolean; noProduct?: boolean;
   nModelRefs?: number; seriesRef?: boolean; typeLine?: string; realism?: string; hasStyleRef?: boolean; hasTexture?: boolean; shot?: string; inspMode?: "copy" | "loose"; layoutLine?: string; seriesMode?: "carousel" | "campaign" | "sketch" | "sketchLoose";
 }) {
   const nModels = a.hasModelRef ? Math.max(1, a.nModelRefs ?? 1) : 0;
@@ -58,8 +58,8 @@ export function buildPrompt(a: {
     p.texts?.length ? `Printed texts, spelled exactly:\n${textsBlock(p)}` : "",
   ].filter(Boolean).join("\n");
   const roles = [
-    a.noProduct ? "" : (a.nProductImages > 1 ? `Images 1 to ${a.nProductImages}: packshots` : "Image 1: packshot") + ` of the real product "${a.product.name}".`,
-    ...oth.map((o) => `Next ${o.n} image(s): packshot of the real product "${o.product.name}".`),
+    a.noProduct ? "" : (a.nProductImages > 1 ? `Images 1 to ${a.nProductImages}: packshots` : "Image 1: packshot") + ` of the product "${a.product.name}".` + (a.hasRealPhoto ? ` Next image: a REAL PHOTO of "${a.product.name}": exactly what it looks like in real life.` : ""),
+    ...oth.map((o) => o.real ? `Next ${o.n + 1} images: the packshot, then a REAL PHOTO (what it looks like in real life), of the product "${o.product.name}".` : `Next ${o.n} image(s): packshot of the product "${o.product.name}".`),
     a.hasTexture ? "Next image: TEXTURE REFERENCE = how the formula of the product looks (colour, finish) out of the tube or on skin. Use it only for the formula, never as packaging." : "",
     nModels === 1 ? "Next image: the MODEL REFERENCE (the person to show)." : nModels > 1 ? `Next ${nModels} images: the MODEL REFERENCES (the ${nModels} persons to show, one image per person).` : "",
     !a.seriesRef ? ""
@@ -95,7 +95,7 @@ export function buildPrompt(a: {
       : [
         `3. PRODUCT: ${one}. Any product mentioned elsewhere but not listed here must NOT appear.`,
         products.map(productBlock).join("\n\n"),
-        "The packshot gives the DESIGN of each product: its silhouette, proportions, cap, colours, logo, label layout and text direction. The photo shows the real object with this design, whole in the frame and at its real size (held in a hand it is never longer than that hand, even in a close-up or in the foreground). Products seen in the style reference belong to other brands: never copy their design.",
+        `The packshot gives the DESIGN of each product: its silhouette, proportions, cap, colours, logo, label layout and text direction. The photo shows the real object with this design${a.hasRealPhoto || oth.some((o) => o.real) ? " and with the real look of its REAL PHOTO (same material, same sheen, same way of catching the light)" : ""}, whole in the frame and at its real size (held in a hand it is never longer than that hand, even in a close-up or in the foreground). Products seen in the style reference belong to other brands: never copy their design.`,
         NO_MIRROR,
       ]),
     "",
@@ -125,6 +125,11 @@ export function buildPrompt(a: {
 const originalNote = "The image after Image 1 is the ORIGINAL version of this photo before earlier corrections: use it to restore any element the client says has disappeared or changed by mistake, copying it exactly as it was.";
 const refNote = (n: number) =>
   `The next ${n} image(s) are REFERENCE image(s) supplied by the client to show what they want (a pose, a grip, an arrangement, a style, an element). Reproduce the IDEA they show (pose, arrangement, shape) in the requested change, but never copy any person, face, brand, logo or text from them: the person, the product and everything else stay as in Image 1.`;
+
+/** Les images du produit jointes à une retouche : packshot(s) = le design ; photo réelle (si la fiche en a une) = l'aspect réel. */
+const packNote = (p: Product) => p.real_photo_path
+  ? "The following images = the product references: first the packshot render(s), which show its DESIGN (shape, colours, logo, label layout), then a REAL PHOTO, which shows exactly what it looks like in real life (its material and sheen)."
+  : "The following image(s) = the product packshot(s): a clean studio render that shows the product's DESIGN (shape, colours, logo, label layout), not what it looks like in real life.";
 
 export const sizeLine = (p: Product) => p.real_size ? `REAL SIZE of the product: ${p.real_size.replace(/\n/g, ", ")}. Respect this real scale relative to the hands and body (a hand-held product of this size is only about as long as the model's hand).` : "";
 
@@ -261,7 +266,7 @@ export function localEditPrompt(a: { product: Product; rules: string[]; instruct
   const texts = a.product.texts?.length ? `Texts printed on the product:\n${textsBlock(a.product)}` : "";
   return [
     "You are retouching a CROPPED region of an advertising photo for the cosmetics brand Irizée.",
-    "Image 1 = the crop to edit." + (a.hasOriginal ? " The next image is the same crop taken from the ORIGINAL version of the photo before earlier corrections: use it to restore any element that disappeared or changed by mistake." : "") + (a.refCount ? ` ${refNote(a.refCount)}` : "") + " The following image(s) = the product packshot(s): a clean studio render that shows the product's DESIGN (shape, colours, logo, label layout), not what it looks like in real life.",
+    "Image 1 = the crop to edit." + (a.hasOriginal ? " The next image is the same crop taken from the ORIGINAL version of the photo before earlier corrections: use it to restore any element that disappeared or changed by mistake." : "") + (a.refCount ? ` ${refNote(a.refCount)}` : "") + " " + packNote(a.product),
     a.rules.length || a.product.rules?.length ? `Brand rules:\n${numbered([...a.rules, ...(a.product.rules ?? [])])}` : "", "",
     a.mode === "label"
       ? "TASK: fix ONLY the printed label of the product visible in the crop so that every word, logo and number matches the packshot exactly, sharp and legible, with the same layout, text direction and colors." + (a.instruction ? ` ${a.instruction}` : "")
@@ -426,7 +431,7 @@ export function maskEditPrompt(a: { product: Product; rules: string[]; instructi
   const texts = a.product.texts?.length ? `Texts that must appear exactly on the product:\n${textsBlock(a.product)}` : "";
   return [
     "You are a high-end photo retoucher working on an advertising photograph for the cosmetics brand Irizée.",
-    "Image 1 = the FULL photo to retouch (its outer edges may be a mirrored padding: ignore them)." + (a.refCount ? ` ${refNote(a.refCount)}` : "") + " The following image(s) = the product packshot(s): a clean studio render that shows the product's DESIGN (shape, colours, logo, label layout), not what it looks like in real life.",
+    "Image 1 = the FULL photo to retouch (its outer edges may be a mirrored padding: ignore them)." + (a.refCount ? ` ${refNote(a.refCount)}` : "") + " " + packNote(a.product),
     a.rules.length || a.product.rules?.length ? `Brand rules:\n${numbered([...a.rules, ...(a.product.rules ?? [])])}` : "",
     `RETOUCH: ${a.instruction}`,
     "The change must be obvious at first glance, never a timid touch-up.",

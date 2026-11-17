@@ -81,12 +81,12 @@ export default async function StudioPage({ searchParams }: { searchParams: { con
   if (searchParams.product) prefill = { ...(prefill ?? {}), productIds: prefill?.productIds ?? [searchParams.product] };
   if (!classic) {
     const [{ data: full }, { data: lib }] = await Promise.all([
-      sb.from("products").select("id, name, real_size, applied_look, product_images(id)").order("name"),
+      sb.from("products").select("id, name, real_size, applied_look, real_photo_path, product_images(id)").order("name"),
       sb.from("inspiration_library").select("id, path, analysis, summary").order("created_at", { ascending: false }).limit(24),
     ]);
     const wProducts = (full ?? []).map((p: any) => ({
       id: p.id as string, name: p.name as string,
-      missing: [!String(p.real_size ?? "").trim() ? "taille réelle" : "", !String(p.applied_look ?? "").trim() ? "couleur et texture du soin" : "", (p.product_images ?? []).length < 2 ? "une vraie photo en plus" : ""].filter(Boolean),
+      missing: [!String(p.real_size ?? "").trim() ? "taille réelle" : "", !String(p.applied_look ?? "").trim() ? "couleur et texture du soin" : "", !p.real_photo_path && (p.product_images ?? []).length < 2 ? "une photo de référence réaliste" : ""].filter(Boolean),
     }));
     return (
       <div>

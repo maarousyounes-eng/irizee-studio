@@ -325,7 +325,14 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
   const otherIds = noProduct ? [] : plan.otherIds;
   const others: { product: Product; paths: string[] }[] = [];
   for (const oid of otherIds) { try { const o = await loadProduct(sb, oid); others.push({ product: o.product, paths: o.imagePaths }); } catch { /* produit supprimé : ignoré */ } }
-  const packshots = await Promise.all([...imagePaths, ...others.map((o) => o.paths[0])].map((p) => download(sb, p)));
+  // Images du produit : ses packshots (le design) puis, si la fiche en a une, sa photo de référence réaliste (l'aspect réel)
+  const real = async (p: Product) => (!noProduct && p.real_photo_path ? await download(sb, p.real_photo_path).catch(() => null) : null);
+  const mainReal = await real(product);
+  const otherReals = await Promise.all(others.map((o) => real(o.product)));
+  const packshots: Img[] = [
+    ...(await Promise.all(imagePaths.map((p) => download(sb, p)))), ...(mainReal ? [mainReal] : []),
+    ...(await Promise.all(others.map(async (o, k) => [await download(sb, o.paths[0]), ...(otherReals[k] ? [otherReals[k] as Img] : [])]))).flat(),
+  ];
   const aspect = image.aspect || shoot.aspect;
   let parts: Part[] = [];
   let model: string;
@@ -445,7 +452,7 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
         inspMode: tp.inspMode === "copy" ? "copy" : tp.inspMode === "loose" ? "loose" : undefined,
         layoutLine: vtype === "ad" ? textZoneLine(tp.textZone) : undefined,
         seriesRef: !!series, seriesMode,
-        others: others.map((o) => ({ product: o.product, n: 1 })), variation: sameAi ?? variationHint(image.variant_index, shoot.no_people), nProductImages: imagePaths.length,
+        others: others.map((o, k) => ({ product: o.product, n: 1, real: !!otherReals[k] })), hasRealPhoto: !!mainReal, variation: sameAi ?? variationHint(image.variant_index, shoot.no_people), nProductImages: imagePaths.length,
         hasModelRef: modelRefs.length > 0, nModelRefs: modelRefs.length, modelDescription: descs.join(" / "), noPeople: shoot.no_people, noProduct,
         ...(vtype === "photo" ? {} : { typeLine: typeLine(vtype, tp, image.variant_index, nSlides), hasStyleRef: inspirations.length > 0, realism: vtype === "ba" ? REALISM_NATURAL : undefined }),
       });

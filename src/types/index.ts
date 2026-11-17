@@ -9,6 +9,8 @@ export interface Profile {
 }
 export interface Product {
   id: string; name: string; texts: string[]; look: string; real_size: string; rules: string[]; applied_look?: string; texture_path?: string | null;
+  /** Photo de référence réaliste (vraie photo ou proposition IA choisie) : l'aspect réel du produit */
+  real_photo_path?: string | null; ref_candidates?: { path: string; label: string }[];
   product_images?: { id: string; path: string; position: number }[];
 }
 export interface Model {

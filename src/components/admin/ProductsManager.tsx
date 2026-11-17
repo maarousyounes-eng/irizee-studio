@@ -2,8 +2,8 @@
 
 import { useRef, useState } from "react";
 import { ImagePlus, Plus, Trash2, X } from "lucide-react";
-import { Badge, Btn, Card, Empty, INPUT, Label, Modal, Spinner } from "@/components/ui";
-import { api, uploadImage, useSignedUrls, useSupabase } from "@/lib/client";
+import { Badge, Btn, Card, Empty, INPUT, Label, Lightbox, Modal, Spinner } from "@/components/ui";
+import { api, apiJob, uploadImage, useSignedUrls, useSupabase } from "@/lib/client";
 import type { Product } from "@/types";
 
 export default function ProductsManager({ initial, userId }: { initial: Product[]; userId: string }) {
@@ -85,6 +85,26 @@ function ProductCard({ p, urls, onChange }: { p: Product; urls: Record<string, s
   const [texture, setTexture] = useState<string | null>(p.texture_path ?? null);
   const texRef = useRef<HTMLInputElement>(null);
   const texUrls = useSignedUrls([texture]);
+  // Photo de référence réaliste : l'aspect réel du produit (vraie photo importée, ou proposition IA choisie)
+  const [real, setReal] = useState<string | null>(p.real_photo_path ?? null);
+  const [cands, setCands] = useState<{ path: string; label: string }[]>(p.ref_candidates ?? []);
+  const [refBusy, setRefBusy] = useState(false);
+  const [refErr, setRefErr] = useState<string | null>(null);
+  const realRef = useRef<HTMLInputElement>(null);
+  const refUrls = useSignedUrls([real, ...cands.map((c) => c.path)]);
+  const [zoom, setZoom] = useState<string | null>(null);
+  async function chooseReal(path: string | null) {
+    setReal(path);
+    await sb.from("products").update({ real_photo_path: path }).eq("id", p.id);
+    onChange();
+  }
+  async function proposeRefs() {
+    if (!confirm("Créer 4 photos réalistes de ce produit ? 4 images payantes, environ 0,80 € au total.")) return;
+    setRefErr(null); setRefBusy(true);
+    try { const r = await apiJob<{ candidates: { path: string; label: string }[] }>(sb, `/api/products/${p.id}/reference`, {}, 420_000); setCands(r.candidates); }
+    catch (e) { setRefErr(e instanceof Error ? e.message : "Erreur"); }
+    setRefBusy(false);
+  }
   const [rules, setRules] = useState<string[]>(p.rules ?? []);
   const [newRule, setNewRule] = useState("");
   const [saved, setSaved] = useState(false);
@@ -136,6 +156,47 @@ function ProductCard({ p, urls, onChange }: { p: Product; urls: Record<string, s
             {texture && <button type="button" className="block text-[11px] text-[#A0A0A8] hover:text-[#E8444A] mt-1" onClick={() => setTexture(null)}>Retirer</button>}
             <input ref={texRef} type="file" accept="image/*" hidden onChange={async (e) => { const f = e.target.files?.[0]; if (f) setTexture(await uploadImage(sb, "products", f, 1400)); }} />
           </div>
+        </div>
+        <div className="rounded-2xl border border-[#E4E4E7] p-3 space-y-2.5">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="max-w-xl">
+              <Label>Photo de référence réaliste</Label>
+              <p className="text-[12px] text-[#52525B]">Le packshot montre le design. Cette photo montre à l&apos;IA à quoi le produit ressemble en vrai (matière, reflets) : elle est reprise dans les esquisses, les images et les corrections. Importez une vraie photo du produit, ou choisissez parmi 4 propositions.</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Btn size="sm" variant="ghost" onClick={() => realRef.current?.click()}><ImagePlus size={12} /> Importer une vraie photo</Btn>
+              <Btn size="sm" onClick={proposeRefs} disabled={refBusy}>{refBusy ? "Création en cours (environ 2 minutes)…" : cands.length ? "Refaire 4 propositions (≈ 0,80 €)" : "Créer 4 propositions (≈ 0,80 €)"}</Btn>
+            </div>
+            <input ref={realRef} type="file" accept="image/*" hidden onChange={async (e) => { const f = e.target.files?.[0]; if (f) await chooseReal(await uploadImage(sb, "products", f, 1800)); e.target.value = ""; }} />
+          </div>
+          {refErr && <p className="text-[12px] text-[#B91C1C]">{refErr}</p>}
+          {real && (
+            <div className="flex items-center gap-3 bg-[#E7F6EC] rounded-xl p-2">
+              {refUrls[real] && /* eslint-disable-next-line @next/next/no-img-element */ <img src={refUrls[real]} alt="Photo de référence actuelle" onClick={() => setZoom(refUrls[real])} className="w-16 h-24 object-cover rounded-lg cursor-zoom-in" />}
+              <p className="text-[12px] text-[#14532D] flex-1"><b>Référence actuelle.</b> Elle est utilisée dans toutes les nouvelles générations de ce produit.</p>
+              <Btn size="sm" variant="ghost" onClick={() => chooseReal(null)}>Retirer</Btn>
+            </div>
+          )}
+          {cands.length > 0 && (
+            <div>
+              <p className="text-[12px] font-semibold mb-1.5">Les propositions, du plus lisse au plus marqué. Cliquez sur une image pour l&apos;agrandir, puis choisissez celle qui fait vrai pour vous.</p>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {cands.map((c) => {
+                  const on = real === c.path;
+                  return (
+                    <div key={c.path} className={`rounded-xl border p-1.5 space-y-1.5 ${on ? "border-[#2B6EE8] bg-[#EBF2FF]" : "border-[#E4E4E7] bg-white"}`}>
+                      <div className="aspect-[2/3] rounded-lg overflow-hidden bg-[#F4F4F5]">
+                        {refUrls[c.path] && /* eslint-disable-next-line @next/next/no-img-element */ <img src={refUrls[c.path]} alt={`Proposition : ${c.label}`} onClick={() => setZoom(refUrls[c.path])} className="w-full h-full object-cover cursor-zoom-in" />}
+                      </div>
+                      <p className="text-[11px] font-semibold text-center">{c.label}</p>
+                      <Btn size="sm" variant={on ? "primary" : "ghost"} className="w-full" onClick={() => chooseReal(c.path)}>{on ? "Choisie" : "Choisir"}</Btn>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          <Lightbox src={zoom} onClose={() => setZoom(null)} />
         </div>
         <div>
           <Label>Règles propres à ce produit</Label>
