@@ -5,7 +5,7 @@ import { textZoneLine, maskEditPrompt, wantsPhoneUi, baAfterPrompt, typeLine, RE
 import { normalizeSlides, type TypeParams } from "./visualTypes";
 import { cropTo, cropWindow, type Box } from "./framing";
 import { ensurePilotLook } from "./pilot";
-import { OPENAI_RATIOS, cropBoxFor, cropImage, pasteBack, unionZones, zoneFromBox, zonesFromBoxes, type CropBox, type Zone } from "./localedit";
+import { OPENAI_RATIOS, cropBoxFor, cropImage, pasteBack, sameSceneOutsideZone, unionZones, zoneFromBox, zonesFromBoxes, type CropBox, type Zone } from "./localedit";
 import type { ImageRow, Product, QC } from "@/types";
 
 const BUCKET = "studio";
@@ -109,6 +109,11 @@ async function localEditCrop(a: {
   let edited: Buffer | null = null;
   for (let t = 0; t < 2 && !edited; t++) {
     try { edited = firstImage(await gemini(a.model, lp, { purpose: a.mode === "label" ? "réparation étiquette" : "retouche locale", image: true, aspect: box.ratio, size: t === 0 ? (a.mode === "label" || Math.max(box.width, box.height) > 1100 ? "2K" : "1K") : undefined, signal: a.signal, timeoutMs: a.timeoutMs })); } catch { /* nouvelle tentative */ }
+  }
+  // Garde-fou : si le modèle a rendu une AUTRE photo (autre décor, autre objet) au lieu de retoucher celle-ci, on ne la recolle jamais
+  if (edited && !(await sameSceneOutsideZone(crop, edited, box, a.region, a.W, a.H))) {
+    console.warn("retouche locale écartée : le modèle a rendu une autre image que le recadrage envoyé");
+    return null;
   }
   return edited ? { edited, box } : null;
 }

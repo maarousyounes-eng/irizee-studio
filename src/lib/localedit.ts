@@ -80,6 +80,34 @@ export async function pasteBack(original: Buffer, edited: Buffer, box: CropBox, 
   return sharp(original).removeAlpha().composite([{ input: patch, left, top }]).png().toBuffer();
 }
 
+/**
+ * Le modèle a-t-il bien retouché LA MÊME photo ? Hors de la zone à modifier, le recadrage rendu doit rester la même scène.
+ * Comparaison en très basse résolution (insensible aux petits décalages et aux écarts de ton) : si tout a changé,
+ * le modèle a redessiné une autre image et il ne faut surtout pas la recoller.
+ */
+export async function sameSceneOutsideZone(origCrop: Buffer, edited: Buffer, box: CropBox, zone: Zone, W: number, H: number): Promise<boolean> {
+  try {
+    const w = 64, h = Math.max(8, Math.round((64 * box.height) / box.width));
+    const lum = (b: Buffer) => sharp(b).resize(w, h, { fit: "fill" }).removeAlpha().greyscale().raw().toBuffer();
+    const [o, e] = await Promise.all([lum(origCrop), lum(edited)]);
+    const m = 0.04; // petite marge autour de la zone
+    const zx0 = (zone.x * W - box.left) / box.width - m, zy0 = (zone.y * H - box.top) / box.height - m;
+    const zx1 = ((zone.x + zone.w) * W - box.left) / box.width + m, zy1 = ((zone.y + zone.h) * H - box.top) / box.height + m;
+    let n = 0, so = 0, se = 0, soo = 0, see = 0, soe = 0;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const fx = (x + 0.5) / w, fy = (y + 0.5) / h;
+      if (fx > zx0 && fx < zx1 && fy > zy0 && fy < zy1) continue;
+      const a = o[y * w + x], b = e[y * w + x];
+      n++; so += a; se += b; soo += a * a; see += b * b; soe += a * b;
+    }
+    if (n < 0.12 * w * h) return true; // la zone couvre presque tout le recadrage : rien à comparer
+    const vo = soo / n - (so / n) ** 2, ve = see / n - (se / n) ** 2;
+    if (vo < 4 || ve < 4) return Math.abs(so / n - se / n) < 60; // contour uni : on compare seulement la clarté
+    const r = (soe / n - (so / n) * (se / n)) / Math.sqrt(vo * ve);
+    return r >= 0.55;
+  } catch { return true; }
+}
+
 /** Zone normalisée à partir d'une boîte [ymin, xmin, ymax, xmax] en 0–1000 (renvoyée par le modèle de vision). */
 export function zoneFromBox(box: unknown, pad = 0.02): Zone | null {
   if (!Array.isArray(box) || box.length !== 4 || !box.every((n) => typeof n === "number")) return null;
