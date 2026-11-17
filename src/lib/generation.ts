@@ -739,9 +739,10 @@ function verdict(qc: QC, correction = false) {
   const unwanted = !!qc.unwanted_changes && !/^(none|aucun|n\/a|-)?$/i.test(qc.unwanted_changes.trim());
   // Une correction est jugée sur sa demande et sur les dégâts qu'elle cause, pas sur les défauts déjà présents avant :
   // texte du produit faux, main déformée ailleurs, etc. passent en « à vérifier » (le bouton Étiquette sert à les réparer).
+  const measured = (!!qc.facts?.scale && qc.facts.scale !== "ok") || qc.framing_ok === false;
   const hard = correction
     ? qc.instruction_followed === false || qc.ghost_or_duplicate === true || qc.foreign_logo || qc.matches_reference === false || (qc.edit_quality_0_10 ?? 10) < 5
-    : deviant || wrong > 0 || qc.added_text === true || (!!qc.expected_count && !!qc.product_count && qc.product_count !== qc.expected_count) || qc.instruction_followed === false || qc.ghost_or_duplicate === true || qc.all_copies_exact === false || qc.label_orientation_ok === false || !qc.color_ok || !qc.shape_ok || qc.foreign_logo || anatomyBad;
+    : measured || deviant || wrong > 0 || qc.added_text === true || (!!qc.expected_count && !!qc.product_count && qc.product_count !== qc.expected_count) || qc.instruction_followed === false || qc.ghost_or_duplicate === true || qc.all_copies_exact === false || qc.label_orientation_ok === false || !qc.color_ok || !qc.shape_ok || qc.foreign_logo || anatomyBad;
   const soft = qc.text_zone_clear === false || unwanted || (correction && (qc.sharpness_ratio ?? 1) < 0.8) || (correction && (deviant || (qc.edit_quality_0_10 ?? 10) < 8 || wrong > 0 || qc.all_copies_exact === false || anatomyBad || !qc.color_ok || !qc.shape_ok || qc.label_orientation_ok === false))
     || qc.framing_ok === false || qc.skin_natural === false || unread > 1 || !qc.proportion_ok || !qc.angle_ok || (qc.product_height_pct ?? 100) < 8 || qc.realism_0_10 < 6;
   const w = correction ? 0.25 : 1; // poids des défauts hérités dans le score d'une correction

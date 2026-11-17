@@ -58,7 +58,7 @@ export function buildPrompt(a: {
     p.texts?.length ? `Printed texts, spelled exactly:\n${textsBlock(p)}` : "",
   ].filter(Boolean).join("\n");
   const roles = [
-    a.noProduct ? "" : (a.nProductImages > 1 ? `Images 1 to ${a.nProductImages}: packshots` : "Image 1: packshot") + ` of the product "${a.product.name}".` + (a.hasRealPhoto ? ` Next image: a REAL PHOTO of "${a.product.name}": exactly what it looks like in real life.` : ""),
+    a.noProduct ? "" : (a.nProductImages > 1 ? `Images 1 to ${a.nProductImages}: the product "${a.product.name}": image 1 is its packshot (the design reference), the other${a.nProductImages > 2 ? "s are" : " is"} an additional view of the same product, never a scene to reproduce.` : `Image 1: packshot of the product "${a.product.name}".`) + (a.hasRealPhoto ? ` Next image: a REAL PHOTO of "${a.product.name}": exactly what it looks like in real life.` : ""),
     ...oth.map((o) => o.real ? `Next ${o.n + 1} images: the packshot, then a REAL PHOTO (what it looks like in real life), of the product "${o.product.name}".` : `Next ${o.n} image(s): packshot of the product "${o.product.name}".`),
     a.hasTexture ? "Next image: TEXTURE REFERENCE = how the formula of the product looks (colour, finish) out of the tube or on skin. Use it only for the formula, never as packaging." : "",
     nModels === 1 ? "Next image: the MODEL REFERENCE (the person to show)." : nModels > 1 ? `Next ${nModels} images: the MODEL REFERENCES (the ${nModels} persons to show, one image per person).` : "",
@@ -128,8 +128,8 @@ const refNote = (n: number) =>
 
 /** Les images du produit jointes à une retouche : packshot(s) = le design ; photo réelle (si la fiche en a une) = l'aspect réel. */
 const packNote = (p: Product) => p.real_photo_path
-  ? "The following images = the product references: first the packshot render(s), which show its DESIGN (shape, colours, logo, label layout), then a REAL PHOTO, which shows exactly what it looks like in real life (its material and sheen)."
-  : "The following image(s) = the product packshot(s): a clean studio render that shows the product's DESIGN (shape, colours, logo, label layout), not what it looks like in real life.";
+  ? "The following images = the product references: first its packshot (a clean render that shows its DESIGN: shape, colours, logo, label layout) and any additional view of it, then, last, a REAL PHOTO that shows exactly what it looks like in real life (its material and sheen). They are references only: never paste them or reproduce their background."
+  : "The following image(s) = the product references: its packshot (a clean render that shows its DESIGN: shape, colours, logo, label layout, not what it looks like in real life) and any additional view of it. They are references only: never paste them or reproduce their background.";
 
 export const sizeLine = (p: Product) => p.real_size ? `REAL SIZE of the product: ${p.real_size.replace(/\n/g, ", ")}. Respect this real scale relative to the hands and body (a hand-held product of this size is only about as long as the model's hand).` : "";
 
