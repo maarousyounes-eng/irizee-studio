@@ -435,7 +435,7 @@ export function ideasPrompt(a: { brief: string; n: number; type: string; perImag
     `Client brief (French, absolute priority): "${a.brief}"`,
     a.products ? `Products, exactly as they are (never invent another packaging, colour or product):\n${a.products}` : "No product appears in these images.",
     a.rules.length ? `Brand rules:\n${numbered(a.rules)}` : "",
-    a.people ? "A model can appear when it serves the idea." : "No person appears in these images.",
+    a.people ? "A model can appear when it serves the idea. She is chosen elsewhere and is the same person in the whole campaign: write only « la mannequin » and NEVER describe her face, hair (colour, length, style), skin tone or age." : "No person appears in these images.",
     a.type === "social" ? "Use: organic Instagram posts." : a.type === "ad" ? "Use: paid social ads: the product must be the hero and the image must stop the scroll." : "",
     a.nInsp ? (a.inspMode === "copy"
       ? `The ${a.nInsp} attached image(s) are references the client wants REPRODUCED: keep their composition, and only vary the staging details from one image to the next.`
