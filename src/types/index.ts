@@ -32,7 +32,7 @@ export interface QC {
   product_height_pct: number; hero_foreground: boolean; proportion_ok: boolean; angle_ok: boolean;
   realism_0_10: number; comment: string;
   /** Mesures faites sur l'image (taille du produit, part du visage) et cadrage */
-  facts?: { scale: "ok" | "big" | "small" | null; scale_rel?: number; scale_ruler?: string; face_frac?: number; issues: string[] }; framing_ok?: boolean;
+  facts?: { scale: "ok" | "big" | "small" | "big?" | "small?" | null; scale_rel?: number; scale_ruler?: string; face_frac?: number; issues: string[] }; framing_ok?: boolean; subject_cut?: boolean;
 }
 export interface ImageRow {
   id: string; shoot_id: string; parent_id: string | null;

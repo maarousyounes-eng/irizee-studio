@@ -735,16 +735,19 @@ function verdict(qc: QC, correction = false) {
   const h = qc.human;
   const humanBad = !!h && h.present !== false && [h.hands_ok, h.fingers_count_ok, h.grip_ok, h.face_ok, h.limbs_ok, h.body_ok, h.accessories_ok].some((x) => x === false);
   const anatomyBad = !qc.anatomy_ok || humanBad;
-  const deviant = qc.artifacts_ok === false || qc.face_matches_model === false;
+
   const unwanted = !!qc.unwanted_changes && !/^(none|aucun|n\/a|-)?$/i.test(qc.unwanted_changes.trim());
   // Une correction est jugée sur sa demande et sur les dégâts qu'elle cause, pas sur les défauts déjà présents avant :
   // texte du produit faux, main déformée ailleurs, etc. passent en « à vérifier » (le bouton Étiquette sert à les réparer).
-  const measured = (!!qc.facts?.scale && qc.facts.scale !== "ok") || qc.framing_ok === false;
+  const measured = qc.facts?.scale === "big" || qc.facts?.scale === "small" || qc.framing_ok === false;
+  // « ressemble au mannequin » n'a de sens que si un visage est visible (une nature morte ou un détail de mains n'en montre pas)
+  const faceSeen = !!qc.facts ? (qc.facts.face_frac ?? 0) > 0 : qc.human?.present !== false;
+  const deviant = qc.artifacts_ok === false || (qc.face_matches_model === false && faceSeen);
   const hard = correction
     ? qc.instruction_followed === false || qc.ghost_or_duplicate === true || qc.foreign_logo || qc.matches_reference === false || (qc.edit_quality_0_10 ?? 10) < 5
     : measured || deviant || wrong > 0 || qc.added_text === true || (!!qc.expected_count && !!qc.product_count && qc.product_count !== qc.expected_count) || qc.instruction_followed === false || qc.ghost_or_duplicate === true || qc.all_copies_exact === false || qc.label_orientation_ok === false || !qc.color_ok || !qc.shape_ok || qc.foreign_logo || anatomyBad;
   const soft = qc.text_zone_clear === false || unwanted || (correction && (qc.sharpness_ratio ?? 1) < 0.8) || (correction && (deviant || (qc.edit_quality_0_10 ?? 10) < 8 || wrong > 0 || qc.all_copies_exact === false || anatomyBad || !qc.color_ok || !qc.shape_ok || qc.label_orientation_ok === false))
-    || qc.framing_ok === false || qc.skin_natural === false || unread > 1 || !qc.proportion_ok || !qc.angle_ok || (qc.product_height_pct ?? 100) < 8 || qc.realism_0_10 < 6;
+    || qc.subject_cut === true || qc.skin_natural === false || unread > 1 || !qc.proportion_ok || !qc.angle_ok || (qc.product_height_pct ?? 100) < 8 || qc.realism_0_10 < 6;
   const w = correction ? 0.25 : 1; // poids des défauts hérités dans le score d'une correction
   const score = Math.max(0, Math.min(100, Math.round(
     qc.realism_0_10 * 6 - wrong * 12 * w - unread * 3 * w - (qc.color_ok ? 0 : 20 * w) - (qc.shape_ok ? 0 : 15 * w) - (qc.foreign_logo ? 20 : 0)
@@ -823,8 +826,12 @@ async function qualityCheckInner(sb: SupabaseClient, image: ImageRow) {
     }
     // Avant / après : un visage en très gros plan paraît déformé
     if (sa?.visual_type === "ba" && (facts.face_frac ?? 0) > 0.5) { qc.framing_ok = false; facts.issues.push(`Visage en très gros plan (${Math.round((facts.face_frac ?? 0) * 100)} % de la hauteur) : cadrage trop serré, le visage paraît déformé.`); }
+    // Pas de visage visible (produit seul, détail de mains, dos) : rien à comparer au mannequin
+    if (!(facts.face_frac ?? 0)) { if (qc.face_matches_model === false) qc.face_matches_model = true; qc.issues = qc.issues.filter((t) => !/mannequin|identité|visage (est )?hors cadre/i.test(t)); }
     qc.issues = [...facts.issues, ...qc.issues].slice(0, 6);
   }
+  // Le recadrage au format n'a pas pu garder tout le sujet : on le signale (le bouton « Formats » permet de recadrer)
+  if ((image.params as any)?.subject_cut) { qc.subject_cut = true; qc.issues = [...((qc.issues ?? []) as string[]), "Le sujet est coupé par le recadrage : ouvrez « Formats » pour choisir le cadrage."].slice(0, 6); }
   const v = verdict(qc, !!before);
   await sb.from("images").update({ qc, verdict: v.verdict, score: v.score }).eq("id", image.id);
   return v;

@@ -9,7 +9,8 @@ type Img = { buf: Buffer; mime: string };
  * - Visage : sa part dans l'image (un très gros plan donne un visage d'aspect déformé).
  */
 export interface Facts {
-  scale: "ok" | "big" | "small" | null; scale_rel?: number; scale_ruler?: "main" | "visage" | "main (estimation)";
+  /** « big? » / « small? » : écart modéré, un doute à vérifier à l'œil (jamais un défaut affirmé) */
+  scale: "ok" | "big" | "small" | "big?" | "small?" | null; scale_rel?: number; scale_ruler?: string;
   /** Hauteur du visage (menton → racine des cheveux) rapportée à la hauteur de l'image mesurée */
   face_frac?: number;
   issues: string[];
@@ -46,26 +47,41 @@ export async function factCheck(img: Img, a: { hasProduct: boolean; realSize?: s
     const W = meta.width ?? 0, H = meta.height ?? 0;
     if (!W || !H) return out;
     const small = await sharp(img.buf).resize({ width: 1024, withoutEnlargement: true }).jpeg({ quality: 85 }).toBuffer();
-    const r = await gemini(MODELS.vision, [{ text: MEASURE_PROMPT }, imgPart(small, "image/jpeg")], { purpose: "mesures (contrôle)", json: true, timeoutMs: 45_000 });
-    const m = parseJson<{ product_ends?: unknown[] | null; knuckles?: unknown[] | null; hand_facing?: string | null; face?: number[] | null; product_near_face?: boolean | null; apparent_length_cm?: number | null }>(firstText(r));
+    type M = { product_ends?: unknown[] | null; knuckles?: unknown[] | null; hand_facing?: string | null; face?: number[] | null; product_near_face?: boolean | null; apparent_length_cm?: number | null };
+    const measure = async (): Promise<M | null> => {
+      try { return parseJson<M>(firstText(await gemini(MODELS.vision, [{ text: MEASURE_PROMPT }, imgPart(small, "image/jpeg")], { purpose: "mesures (contrôle)", json: true, timeoutMs: 45_000 }))); } catch { return null; }
+    };
+    // Deux passages indépendants : une seule estimation varie trop (jusqu'à ±30 %) pour décider seule
+    const runs = (await Promise.all([measure(), measure()])).filter(Boolean) as M[];
+    if (!runs.length) return out;
+    const m = runs[0];
 
-    // 1. Taille du produit
-    const e0 = pt(m.product_ends?.[0], W, H), e1 = pt(m.product_ends?.[1], W, H);
-    const est = typeof m.apparent_length_cm === "number" && m.apparent_length_cm > 1 ? m.apparent_length_cm : 0;
-    if (a.hasProduct && ((e0 && e1) || est)) {
-      const len = e0 && e1 ? dist(e0, e1) : 0, real = realLengthCm(a.realSize);
-      const k0 = pt(m.knuckles?.[0], W, H), k1 = pt(m.knuckles?.[1], W, H);
-      const faceH = Array.isArray(m.face) && m.face.length === 4 ? ((m.face[2] - m.face[0]) / 1000) * H : 0;
-      let rel = 0;
-      if (len && k0 && k1 && m.hand_facing !== "angled" && dist(k0, k1) > 0.02 * Math.min(W, H)) { rel = len / dist(k0, k1) / (real / PALM_CM); out.scale_ruler = "main"; }
-      else if (est) { rel = est / real; out.scale_ruler = "main (estimation)"; }
-      else if (len && faceH > 0.05 * H && m.product_near_face === true) { rel = len / faceH / (real / FACE_CM); out.scale_ruler = "visage"; }
-      if (rel > 0) {
+    // 1. Taille du produit : moyenne de toutes les règles disponibles (jointures de la main, main comme règle, visage voisin)
+    if (a.hasProduct) {
+      const real = realLengthCm(a.realSize);
+      const rels: number[] = []; const rulers = new Set<string>();
+      for (const r of runs) {
+        const e0 = pt(r.product_ends?.[0], W, H), e1 = pt(r.product_ends?.[1], W, H);
+        const len = e0 && e1 ? dist(e0, e1) : 0;
+        const k0 = pt(r.knuckles?.[0], W, H), k1 = pt(r.knuckles?.[1], W, H);
+        const faceH = Array.isArray(r.face) && r.face.length === 4 ? ((r.face[2] - r.face[0]) / 1000) * H : 0;
+        const one: number[] = [];
+        if (len && k0 && k1 && r.hand_facing !== "angled" && dist(k0, k1) > 0.02 * Math.min(W, H)) { one.push(len / dist(k0, k1) / (real / PALM_CM)); rulers.add("main"); }
+        if (typeof r.apparent_length_cm === "number" && r.apparent_length_cm > 1) { one.push(r.apparent_length_cm / real); rulers.add("main"); }
+        if (len && faceH > 0.05 * H && r.product_near_face === true) { one.push(len / faceH / (real / FACE_CM)); rulers.add("visage"); }
+        if (one.length) rels.push(one.reduce((x, y) => x + y, 0) / one.length);
+      }
+      if (rels.length) {
+        const rel = rels.reduce((x, y) => x + y, 0) / rels.length;
         out.scale_rel = Math.round(rel * 100) / 100;
-        out.scale = rel > 1.35 ? "big" : rel < 0.6 ? "small" : "ok";
+        out.scale_ruler = rulers.has("main") && rulers.has("visage") ? "main et visage" : rulers.has("visage") ? "visage" : "main";
+        // net (rouge) à partir de 50 % d'écart ; entre 30 et 50 %, simple doute à vérifier à l'œil
+        out.scale = rel >= 1.5 ? "big" : rel <= 0.5 ? "small" : rel >= 1.3 ? "big?" : rel <= 0.65 ? "small?" : "ok";
         const ref = out.scale_ruler === "visage" ? "au visage" : "à la main";
         if (out.scale === "big") out.issues.push(`Produit trop grand par rapport ${ref} (environ ${Math.round((rel - 1) * 100)} % de trop).`);
         if (out.scale === "small") out.issues.push(`Produit trop petit par rapport ${ref} (environ ${Math.round((1 - rel) * 100)} % de moins).`);
+        if (out.scale === "big?") out.issues.push(`Produit peut-être un peu grand par rapport ${ref} : à vérifier à l'œil.`);
+        if (out.scale === "small?") out.issues.push(`Produit peut-être un peu petit par rapport ${ref} : à vérifier à l'œil.`);
       }
     }
 
