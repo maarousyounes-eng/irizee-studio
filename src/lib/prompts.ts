@@ -58,8 +58,8 @@ export function buildPrompt(a: {
     p.texts?.length ? `Printed texts, spelled exactly:\n${textsBlock(p)}` : "",
   ].filter(Boolean).join("\n");
   const roles = [
-    a.noProduct ? "" : (a.nProductImages > 1 ? `Images 1 to ${a.nProductImages}: the product "${a.product.name}": image 1 is its packshot (the design reference), the other${a.nProductImages > 2 ? "s are" : " is"} an additional view of the same product, never a scene to reproduce.` : `Image 1: packshot of the product "${a.product.name}".`) + (a.hasRealPhoto ? ` Next image: a REAL PHOTO of "${a.product.name}": exactly what it looks like in real life.` : ""),
-    ...oth.map((o) => o.real ? `Next ${o.n + 1} images: the packshot, then a REAL PHOTO (what it looks like in real life), of the product "${o.product.name}".` : `Next ${o.n} image(s): packshot of the product "${o.product.name}".`),
+    a.noProduct ? "" : (a.nProductImages > 1 ? `Images 1 to ${a.nProductImages}: the product "${a.product.name}": image 1 is its packshot (the design reference), the other${a.nProductImages > 2 ? "s are" : " is"} an additional view of the same product, never a scene to reproduce.` : `Image 1: packshot of the product "${a.product.name}".`) + (a.hasRealPhoto ? ` Next image: a REAL PHOTO of "${a.product.name}": exactly what the real object looks like (its material, sheen, cap and details). Use it only for the product: ignore its background and the surface it lies on.` : ""),
+    ...oth.map((o) => o.real ? `Next ${o.n + 1} images: the packshot, then a REAL PHOTO (what the real object looks like; ignore its background), of the product "${o.product.name}".` : `Next ${o.n} image(s): packshot of the product "${o.product.name}".`),
     a.hasTexture ? "Next image: TEXTURE REFERENCE = how the formula of the product looks (colour, finish) out of the tube or on skin. Use it only for the formula, never as packaging." : "",
     nModels === 1 ? "Next image: the MODEL REFERENCE (the person to show)." : nModels > 1 ? `Next ${nModels} images: the MODEL REFERENCES (the ${nModels} persons to show, one image per person).` : "",
     !a.seriesRef ? ""
