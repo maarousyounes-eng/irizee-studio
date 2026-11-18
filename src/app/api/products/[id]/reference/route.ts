@@ -56,6 +56,30 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       };
       const shoot1 = async (parts: Part[]) => firstImage(await withAiCtx({ sb, userId: user.id }, () => gemini(IMAGE_MODEL, parts, { purpose: "photo de référence produit", image: true, aspect: "2:3", noFit: true, timeoutMs: 240_000 })));
 
+      // « Photo réelle remise au propre » : le vrai produit (forme, bouchon, matière de la photo du client), photographié proprement,
+      // avec l'étiquette nette du packshot. Une seule référence claire vaut mieux que deux images qui se contredisent.
+      if (b?.clean === true) {
+        if (!product.real_photo_path) throw new HttpError(400, "Importez d'abord une vraie photo du produit");
+        const realImg = await download(sb, product.real_photo_path);
+        const text = [
+          "Studio product photograph for the cosmetics brand Irizée: ONE clean reference photo of this real product.",
+          "Image 1 = a REAL phone photo of the product: this is the product exactly as it is. Keep its shape and proportions, its cap, its material and sheen, and its small real irregularities. Ignore the table, the background and the light of that photo.",
+          `The next image${packs.length > 1 ? "s" : ""} = its label artwork (a clean render and other views): the exact printed texts, the logo and their layout. Wherever the artwork differs from the real photo (cap, surface), the REAL photo is right.`,
+          `Product: "${product.name}"${product.look ? `: ${product.look}` : ""}`,
+          product.texts?.length ? `Printed texts, spelled exactly:\n${product.texts.map((t) => `- ${t}`).join("\n")}` : "",
+          "Photograph THIS real product in a clean studio, standing upright in the same position as the label artwork, whole in the frame with some margin: plain light grey seamless background, one large soft light from the upper left with a gentle fill, a soft contact shadow, everything sharp. The label is printed exactly as in the artwork, every word legible.",
+          "No hand, no prop, no added text, no frame.",
+          NO_MIRROR,
+        ].filter(Boolean).join("\n");
+        const buf = await shoot1([{ text }, imgPart(realImg.buf, realImg.mime), ...packs.map((p) => imgPart(p.buf, p.mime))]);
+        if (!buf) throw new HttpError(502, "La photo n'a pas pu être créée, réessayez");
+        const cand = { path: await save(buf), label: "Photo réelle remise au propre" };
+        const { data: cur } = await sb.from("products").select("ref_candidates").eq("id", params.id).single();
+        const candidates = [...(((cur?.ref_candidates as unknown[]) ?? []) as { path: string; label: string }[]).filter((c) => c.path !== product.real_photo_path), { path: product.real_photo_path, label: "Votre photo" }, cand];
+        await sb.from("products").update({ ref_candidates: candidates }).eq("id", params.id);
+        return { candidates, added: cand };
+      }
+
       // « Même aspect, forme du packshot » : on garde la matière d'une proposition choisie, on reprend la forme exacte du packshot
       const like = typeof b?.like === "string" && /^products\/[\w\-./]+$/.test(b.like) ? (b.like as string) : null;
       if (like) {

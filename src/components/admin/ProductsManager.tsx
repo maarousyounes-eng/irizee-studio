@@ -105,6 +105,16 @@ function ProductCard({ p, urls, onChange }: { p: Product; urls: Record<string, s
     catch (e) { setRefErr(e instanceof Error ? e.message : "Erreur"); }
     setRefBusy(false);
   }
+  /** Vraie photo importée → photo de studio propre du même produit, étiquette nette (1 image payante) */
+  async function cleanReal() {
+    if (!real || !confirm("Créer une photo de studio propre à partir de votre photo ? 1 image payante, environ 0,20 €.")) return;
+    setRefErr(null); setRefBusy(true);
+    try {
+      const r = await apiJob<{ candidates: { path: string; label: string }[]; added: { path: string } }>(sb, `/api/products/${p.id}/reference`, { clean: true }, 420_000);
+      setCands(r.candidates);
+    } catch (e) { setRefErr(e instanceof Error ? e.message : "Erreur"); }
+    setRefBusy(false);
+  }
   /** Garde l'aspect de la référence actuelle, mais avec la forme exacte du packshot (1 image payante) */
   async function reshape() {
     if (!real || !confirm("Refaire cette photo avec la forme exacte du packshot ? 1 image payante, environ 0,20 €.")) return;
@@ -184,7 +194,7 @@ function ProductCard({ p, urls, onChange }: { p: Product; urls: Record<string, s
             <div className="flex items-center gap-3 bg-[#E7F6EC] rounded-xl p-2">
               {refUrls[real] && /* eslint-disable-next-line @next/next/no-img-element */ <img src={refUrls[real]} alt="Photo de référence actuelle" onClick={() => setZoom(refUrls[real])} className="w-16 h-24 object-cover rounded-lg cursor-zoom-in" />}
               <p className="text-[12px] text-[#14532D] flex-1"><b>Référence actuelle.</b> Elle est utilisée dans toutes les nouvelles générations de ce produit.</p>
-              <Btn size="sm" variant="ghost" onClick={reshape} disabled={refBusy} title="Même matière, mais la silhouette exacte du packshot">Refaire avec la forme du packshot (≈ 0,20 €)</Btn>
+              <Btn size="sm" variant="ghost" onClick={cleanReal} disabled={refBusy} title="Le même produit, photographié proprement en studio, avec l'étiquette nette">Remettre ma photo au propre (≈ 0,20 €)</Btn>
               <Btn size="sm" variant="ghost" onClick={() => chooseReal(null)}>Retirer</Btn>
             </div>
           )}
