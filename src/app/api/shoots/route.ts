@@ -3,7 +3,7 @@ import { ANALYSIS_SEP, analyzeInspirations, checkQuota } from "@/lib/generation"
 import { withAiCtx } from "@/lib/gemini";
 import { ANALYZE_PROMPT } from "@/lib/prompts";
 import { FORMATS } from "@/types";
-import { isVisualType, BA_CHANGES, SOCIAL_STYLES, TEXT_ZONES, CAROUSEL_STYLES, normalizeSlides, emptySlide, type Slide, type TypeParams } from "@/lib/visualTypes";
+import { isVisualType, BA_CHANGES, BA_ZONES, BA_INTENSITIES, BA_AGES, BA_SKINS, BA_STYLES, baPanelAspect, SOCIAL_STYLES, TEXT_ZONES, CAROUSEL_STYLES, normalizeSlides, emptySlide, type Slide, type TypeParams } from "@/lib/visualTypes";
 import { planSlides } from "@/lib/slides";
 import { proposeIdeas } from "@/lib/ideas";
 
@@ -22,7 +22,17 @@ export async function POST(req: Request) {
     const tp: TypeParams = { inspMode: tpIn.inspMode === "copy" ? "copy" : "loose" };
     if (vtype === "social") tp.socialStyle = SOCIAL_STYLES.some((x) => x.id === tpIn.socialStyle) ? tpIn.socialStyle : "feed";
     if (vtype === "ad") tp.textZone = TEXT_ZONES.some((x) => x.id === tpIn.textZone) ? tpIn.textZone : "top";
-    if (vtype === "ba") { tp.baChange = BA_CHANGES.some((x) => x.id === tpIn.baChange) ? tpIn.baChange : "terne"; tp.baBefore = s(tpIn.baBefore); tp.baAfter = s(tpIn.baAfter); if (tp.baChange === "autre" && (!tp.baBefore || !tp.baAfter)) throw new HttpError(400, "Décris l'avant et l'après"); }
+    if (vtype === "ba") { tp.baChange = BA_CHANGES.some((x) => x.id === tpIn.baChange) ? tpIn.baChange : "terne"; tp.baBefore = s(tpIn.baBefore); tp.baAfter = s(tpIn.baAfter); if (tp.baChange === "autre" && (!tp.baBefore || !tp.baAfter)) throw new HttpError(400, "Décris l'avant et l'après");
+      // Avant / après « preuve » : gros plan sur une zone, personne ordinaire, montage en une image
+      if (BA_ZONES.some((x) => x.id === tpIn.baZone)) {
+        const pick = (list: { id: string }[], v: unknown, d: string) => (list.some((x) => x.id === v) ? String(v) : d);
+        tp.baZone = String(tpIn.baZone); tp.baIntensity = pick(BA_INTENSITIES, tpIn.baIntensity, "moyen"); tp.baAge = pick(BA_AGES, tpIn.baAge, "30-40");
+        tp.baSkin = pick(BA_SKINS, tpIn.baSkin, "claire"); tp.baStyle = pick(BA_STYLES, tpIn.baStyle, "cabinet");
+        tp.baLayout = tpIn.baLayout === "haut" || tpIn.baLayout === "cote" ? tpIn.baLayout : FORMATS[b.aspect] && b.aspect === "9:16" ? "haut" : "cote";
+        tp.baLabels = tpIn.baLabels !== false; tp.baMention = tpIn.baMention === true;
+        tp.baPanel = baPanelAspect(String(b.aspect), tp.baLayout);
+      }
+    }
     let slides: Slide[] = [];
     if (vtype === "carousel") { tp.carouselStyle = CAROUSEL_STYLES.some((x) => x.id === tpIn.carouselStyle) ? tpIn.carouselStyle : "edu"; slides = normalizeSlides(tpIn.slides); }
     let prompt = s(b.prompt, 4000);
@@ -41,6 +51,8 @@ export async function POST(req: Request) {
       const { data: c } = await sb.from("concepts").select("analysis").eq("id", b.conceptId).single();
       analysis = c?.analysis ?? null;
     }
+    const proof = vtype === "ba" && !!tp.baZone;
+    if (proof) { b.noProduct = true; b.noPeople = false; b.modelIds = []; }
     const modelIds: string[] = Array.isArray(b.modelIds) ? b.modelIds.filter((x: unknown) => typeof x === "string").slice(0, 12) : [];
     const paths: string[] = Array.isArray(b.inspirationPaths) ? b.inspirationPaths : [];
     // Direction artistique choisie (campagnes et carrousels ; un avant/après reste neutre)
@@ -111,7 +123,7 @@ export async function POST(req: Request) {
 
     // Carrousel : pas d'image à générer pour les slides texte seules (elles sont faites dans l'éditeur Ads)
     const rows = (pilot ? [indexes[0]] : indexes).map((i) => ({
-      shoot_id: shoot.id, kind: "generated", variant_index: i, aspect: b.aspect, created_by: user.id,
+      shoot_id: shoot.id, kind: "generated", variant_index: i, aspect: proof ? tp.baPanel : b.aspect, created_by: user.id,
       // Carrousel : le même mannequin sur toutes les slides ; avant/après : le même dans la paire ; ensemble : tous (lus sur le shooting)
       model_id: b.noPeople || !modelIds.length || (b.modelMode === "together" && modelIds.length > 1) ? null
         : modelIds[(vtype === "carousel" ? 0 : vtype === "ba" ? Math.floor(i / 2) : i) % modelIds.length],

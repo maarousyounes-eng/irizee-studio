@@ -7,7 +7,7 @@ import { ImagePlus, Wand2, X } from "lucide-react";
 import { Btn, Card, INPUT, Label, Spinner } from "@/components/ui";
 import { api, apiJob, imgUrl, uploadImage, useSupabase } from "@/lib/client";
 import { FORMATS } from "@/types";
-import { TEXT_ZONES, BA_CHANGES, CAROUSEL_STYLES, emptySlide, type Slide } from "@/lib/visualTypes";
+import { TEXT_ZONES, BA_CHANGES, BA_ZONES, BA_INTENSITIES, BA_AGES, BA_SKINS, BA_STYLES, BA_LAYOUTS, CAROUSEL_STYLES, emptySlide, type Slide } from "@/lib/visualTypes";
 import SlideCards from "./SlideCards";
 
 interface Props {
@@ -65,10 +65,18 @@ export default function CampaignWizard({ products, models, library, prefill }: P
   const [planFor, setPlanFor] = useState("");
   const [planRework, setPlanRework] = useState("");
   // Avant / après
-  const [baChange, setBaChange] = useState("terne");
+  const [baChange, setBaChange] = useState("taches");
   const [baBefore, setBaBefore] = useState("");
   const [baAfter, setBaAfter] = useState("");
   const [pairs, setPairs] = useState(1);
+  const [baZone, setBaZone] = useState("joue");
+  const [baIntensity, setBaIntensity] = useState("moyen");
+  const [baAge, setBaAge] = useState("30-40");
+  const [baSkin, setBaSkin] = useState("claire");
+  const [baStyle, setBaStyle] = useState("cabinet");
+  const [baLayout, setBaLayout] = useState("cote");
+  const [baLabels, setBaLabels] = useState(true);
+  const [baMention, setBaMention] = useState(false);
   const isCar = vtype === "carousel";
   const isBa = vtype === "ba";
   const flow: Step[] = isBa ? ["setup", "brief"] : isCar ? ["setup", "brief", "direction", "plan"] : ["setup", "brief", "direction"];
@@ -234,7 +242,7 @@ export default function CampaignWizard({ products, models, library, prefill }: P
         productId: productIds[0] ?? products[0]?.id, productIds, productMode, noProduct, modelIds, noPeople, modelMode: "split",
         prompt: brief, aspect, size: "2K", variants: count, slideCount: slides.length, pairs, visualType: vtype, pilot: true, sketchPath: d ? sketches[d.title]?.path ?? null : keptSketch, conceptId,
         inspirationPaths: inspirations.map((x) => x.path), inspirationAnalyses: inspirations.filter((x) => x.state === "done").map((x) => ({ path: x.path, analysis: x.analysis, note: "" })),
-        typeParams: isBa ? { inspMode, baChange, baBefore, baAfter }
+        typeParams: isBa ? { inspMode, baChange, baBefore, baAfter, baZone, baIntensity, baAge, baSkin, baStyle, baLayout, baLabels, baMention }
           : isCar ? { inspMode, direction: chosenText, carouselStyle, slides }
           : { inspMode, direction: chosenText, textZone, socialStyle: "feed" },
       });
@@ -271,7 +279,7 @@ export default function CampaignWizard({ products, models, library, prefill }: P
               {TYPES.map(([k, l]) => <button key={k} type="button" className={chip(vtype === k)} onClick={() => pickType(k)}>{l}</button>)}
             </div>
             {isCar && <p className="text-[12px] text-[#52525B] mt-2">3 à 10 slides qui se suivent, dans un seul univers. Vous validez la direction, puis le plan (photos et textes), puis la couverture, avant de créer les autres photos.</p>}
-            {isBa && <p className="text-[12px] text-[#52525B] mt-2">Même personne, même cadrage, même lumière : seule la peau change. Vous validez la photo « avant », puis l&apos;« après » est créé à partir d&apos;elle.</p>}
+            {isBa && <p className="text-[12px] text-[#52525B] mt-2">Un gros plan sur une zone de peau, comme une photo de cabinet ou de cliente : même personne, même cadrage, seule la peau change. Vous validez la photo « avant », puis l&apos;« après » est créé à partir d&apos;elle.</p>}
           </div>
           {isCar && (
             <div className="grid sm:grid-cols-[1fr_auto] gap-4">
@@ -286,18 +294,51 @@ export default function CampaignWizard({ products, models, library, prefill }: P
             </div>
           )}
           {isBa && (
-            <div className="space-y-2">
-              <Label>Ce qui change entre l&apos;avant et l&apos;après</Label>
-              <div className="flex flex-wrap gap-2">{BA_CHANGES.map((x) => <button key={x.id} type="button" className={chip(baChange === x.id)} onClick={() => setBaChange(x.id)}>{x.label}</button>)}</div>
+            <div className="space-y-4">
+              <div>
+                <Label>Zone montrée (gros plan)</Label>
+                <div className="flex flex-wrap gap-2">{BA_ZONES.map((x) => <button key={x.id} type="button" className={chip(baZone === x.id)} onClick={() => setBaZone(x.id)}>{x.label}</button>)}</div>
+              </div>
+              <div className="grid sm:grid-cols-[1fr_auto] gap-4">
+                <div>
+                  <Label>Problème de peau</Label>
+                  <div className="flex flex-wrap gap-2">{BA_CHANGES.map((x) => <button key={x.id} type="button" className={chip(baChange === x.id)} onClick={() => setBaChange(x.id)}>{x.label}</button>)}</div>
+                </div>
+                <div>
+                  <Label>Intensité au départ</Label>
+                  <div className="flex flex-wrap gap-2">{BA_INTENSITIES.map((x) => <button key={x.id} type="button" className={chip(baIntensity === x.id)} onClick={() => setBaIntensity(x.id)}>{x.label}</button>)}</div>
+                </div>
+              </div>
               {baChange === "autre" && (
                 <div className="grid sm:grid-cols-2 gap-2">
                   <input className={INPUT} value={baBefore} onChange={(e) => setBaBefore(e.target.value)} aria-label="La peau avant" placeholder="Avant : ex. peau déshydratée, ridules visibles" />
                   <input className={INPUT} value={baAfter} onChange={(e) => setBaAfter(e.target.value)} aria-label="La peau après" placeholder="Après : ex. peau rebondie, ridules atténuées" />
                 </div>
               )}
-              <p className="text-[12px] p-2.5 rounded-xl bg-[#FFF4D6] text-[#7A4B00]">Rappel : en publicité payante, Meta et la réglementation française refusent un « résultat » trompeur. Un avant/après créé par IA ne doit pas être présenté comme un vrai résultat client. C&apos;est plus souple en publication classique.</p>
+              <div className="grid sm:grid-cols-2 gap-4">
+                <div>
+                  <Label>Personne (ordinaire, jamais un mannequin)</Label>
+                  <div className="flex flex-wrap gap-2 mb-2">{BA_AGES.map((x) => <button key={x.id} type="button" className={chip(baAge === x.id)} onClick={() => setBaAge(x.id)}>{x.label}</button>)}</div>
+                  <div className="flex flex-wrap gap-2">{BA_SKINS.map((x) => <button key={x.id} type="button" className={chip(baSkin === x.id)} onClick={() => setBaSkin(x.id)}>{x.label}</button>)}</div>
+                </div>
+                <div>
+                  <Label>Style de photo</Label>
+                  <div className="flex flex-wrap gap-2">{BA_STYLES.map((x) => <button key={x.id} type="button" className={chip(baStyle === x.id)} onClick={() => setBaStyle(x.id)}>{x.label}</button>)}</div>
+                </div>
+              </div>
+              <div>
+                <Label>Montage final (une seule image)</Label>
+                <div className="flex flex-wrap items-center gap-2">
+                  {BA_LAYOUTS.map((x) => <button key={x.id} type="button" className={chip(baLayout === x.id)} onClick={() => setBaLayout(x.id)}>{x.label}</button>)}
+                  <label className="flex items-center gap-1.5 text-sm ml-2"><input type="checkbox" checked={baLabels} onChange={(e) => setBaLabels(e.target.checked)} /> Étiquettes « AVANT » et « APRÈS »</label>
+                  <label className="flex items-center gap-1.5 text-sm ml-2"><input type="checkbox" checked={baMention} onChange={(e) => setBaMention(e.target.checked)} /> Mention « Illustration »</label>
+                </div>
+                <p className="text-[11px] text-[#6B6B72] mt-1.5">Les deux photos sont assemblées par la plateforme, au même cadrage. Les étiquettes sont posées par la plateforme, jamais dessinées par l&apos;IA. Le montage se refait gratuitement (autre disposition, avec ou sans étiquettes).</p>
+              </div>
+              <p className="text-[12px] p-2.5 rounded-xl bg-[#FFF4D6] text-[#7A4B00]">Rappel : un avant/après créé par IA est une illustration. En publicité payante, Meta et la réglementation française refusent de le présenter comme un vrai résultat client. La mention « Illustration » est là pour ça.</p>
             </div>
           )}
+          {!isBa && (<>
           <div>
             <Label>{isBa ? "Produit dans la photo" : "Produits (4 maximum)"}</Label>
             <div className="flex flex-wrap gap-2 mb-2">
@@ -341,12 +382,13 @@ export default function CampaignWizard({ products, models, library, prefill }: P
             {isCar && <p className="text-[11px] text-[#6B6B72] mt-1.5">Un carrousel garde le même mannequin sur toutes les slides.</p>}
             {isBa && <p className="text-[11px] text-[#6B6B72] mt-1.5">Chaque paire avant/après garde la même personne. Avec plusieurs mannequins, chaque paire a le sien.</p>}
           </div>
+          </>)}
           <div className="grid sm:grid-cols-3 gap-4">
             {isBa ? (
               <div>
                 <Label>Paires avant / après</Label>
                 <div className="flex flex-wrap gap-2">{[1, 2, 3].map((n) => <button key={n} type="button" className={chip(pairs === n)} onClick={() => setPairs(n)}>{n}</button>)}</div>
-                <p className="text-[11px] text-[#6B6B72] mt-1">{pairs * 2} images au total.</p>
+                <p className="text-[11px] text-[#6B6B72] mt-1">{pairs > 1 ? `${pairs} personnes différentes, ` : ""}{pairs * 2} images payantes.</p>
               </div>
             ) : !isCar && (
               <div>
@@ -355,9 +397,9 @@ export default function CampaignWizard({ products, models, library, prefill }: P
               </div>
             )}
             <div>
-              <Label>Format de départ</Label>
+              <Label>{isBa ? "Format du montage" : "Format de départ"}</Label>
               <select className={INPUT} value={aspect} onChange={(e) => setAspect(e.target.value)}>{Object.entries(FORMATS).map(([k, v]) => <option key={k} value={k}>{v.short}</option>)}</select>
-              <p className="text-[11px] text-[#6B6B72] mt-1">Recadrable ensuite à la souris, dans tous les formats.</p>
+              {!isBa && <p className="text-[11px] text-[#6B6B72] mt-1">Recadrable ensuite à la souris, dans tous les formats.</p>}
             </div>
             {vtype === "ad" && (
               <div>
@@ -373,12 +415,12 @@ export default function CampaignWizard({ products, models, library, prefill }: P
       {step === "brief" && (
         <div className="grid lg:grid-cols-[1fr_340px] gap-4 items-start">
           <Card className="p-5 space-y-4">
-            <h2 className="text-lg font-semibold">{isBa ? "Précisions sur le portrait (facultatif)" : isCar ? "Racontez votre carrousel" : "Dites ce que vous aimeriez faire"}</h2>
-            <p className="text-sm text-[#52525B]">{isBa ? "Cadrage, lumière, coiffure, âge… Laissez vide pour un portrait de face, en lumière neutre."
+            <h2 className="text-lg font-semibold">{isBa ? "Précisions (facultatif)" : isCar ? "Racontez votre carrousel" : "Dites ce que vous aimeriez faire"}</h2>
+            <p className="text-sm text-[#52525B]">{isBa ? "Ce que vous voulez préciser sur la personne ou la photo. Vous pouvez aussi déposer à droite un vrai avant/après que vous aimez : l'IA reprend son cadrage et sa lumière, jamais la personne."
               : isCar ? "Le sujet et le message, même en une phrase. Si vous avez déjà votre plan slide par slide, collez-le ici : il sera suivi tel quel. Le plan détaillé vous est proposé à l'étape 4."
               : "Même en une phrase vague. Les idées, c'est l'étape suivante qui les apporte."}</p>
             <textarea className={INPUT + " min-h-[130px]"} value={brief} onChange={(e) => setBrief(e.target.value)} aria-label="Votre brief" autoFocus
-              placeholder={isBa ? "Ex. : portrait de face, cheveux attachés, fond clair." : isCar ? "Ex. : pourquoi le nila bleu illumine le teint, du geste jusqu'au résultat. Ton direct, pas nunuche." : "Ex. : une campagne hiver pour le Masque Nila, luxe et mode, pas nunuche."} />
+              placeholder={isBa ? "Ex. : taches surtout sur la pommette, cheveux bruns attachés, bandeau blanc." : isCar ? "Ex. : pourquoi le nila bleu illumine le teint, du geste jusqu'au résultat. Ton direct, pas nunuche." : "Ex. : une campagne hiver pour le Masque Nila, luxe et mode, pas nunuche."} />
             {!isBa && (
               <div className="flex flex-wrap items-center gap-2">
                 <Btn size="sm" variant="ghost" onClick={improve} disabled={busy !== "" || !brief.trim()}>{busy === "brief" ? <Spinner /> : <Wand2 size={13} />} Améliorer mon brief</Btn>

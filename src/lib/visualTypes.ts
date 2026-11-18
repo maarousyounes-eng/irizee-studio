@@ -33,8 +33,49 @@ export const BA_CHANGES: { id: string; label: string; before: string; after: str
   { id: "terne", label: "Teint terne → lumineux", before: "a dull, tired, uneven-looking complexion lacking radiance", after: "a fresh, radiant, luminous complexion" },
   { id: "taches", label: "Taches → teint unifié", before: "visible dark spots and uneven pigmentation", after: "a more even skin tone with the dark spots faded (still natural, not erased)" },
   { id: "imperf", label: "Imperfections → peau nette", before: "a few visible blemishes and some redness", after: "clearer, calmer skin with less redness" },
+  { id: "rougeurs", label: "Rougeurs → peau apaisée", before: "diffuse redness on the cheeks and around the nose", after: "calmer skin, clearly less red and more even (still natural)" },
   { id: "autre", label: "Autre (à décrire)", before: "", after: "" },
 ];
+
+/** Avant / après « preuve » : un gros plan sur une zone de peau, comme les photos de cabinet ou de clientes. */
+export const BA_ZONES: { id: string; label: string; en: string }[] = [
+  { id: "joue", label: "Joue (profil ou trois-quarts)", en: "the cheek seen in profile or three-quarter view: from the temple down to the jaw, with the ear and part of the nose and mouth at the edges of the frame" },
+  { id: "demi", label: "Demi-visage", en: "one half of the face seen from the front: one eye, half of the nose and mouth, and the whole cheek up to the ear" },
+  { id: "bas", label: "Bas du visage", en: "the lower face seen from the front: from just under the eyes down to the chin (nose, both cheeks, mouth, chin); the eyes are out of the frame" },
+  { id: "front", label: "Front", en: "the forehead and temples seen from the front: from the hairline down to the eyebrows and the top of the nose" },
+  { id: "face", label: "Visage entier de face", en: "the whole face seen from the front, from the hairline to the chin, neutral expression, hair held back" },
+];
+export const BA_INTENSITIES: { id: string; label: string; en: string }[] = [
+  { id: "leger", label: "Léger", en: "mild but clearly noticeable" },
+  { id: "moyen", label: "Moyen", en: "moderate, obvious at first glance" },
+  { id: "marque", label: "Marqué", en: "pronounced, covering a large part of the framed zone" },
+];
+export const BA_AGES: { id: string; label: string; en: string }[] = [
+  { id: "20-30", label: "20 à 30 ans", en: "a woman in her twenties" },
+  { id: "30-40", label: "30 à 40 ans", en: "a woman in her thirties" },
+  { id: "40-55", label: "40 à 55 ans", en: "a woman between 40 and 55, with the fine lines of her age" },
+];
+export const BA_SKINS: { id: string; label: string; en: string }[] = [
+  { id: "claire", label: "Peau claire", en: "fair skin" },
+  { id: "mate", label: "Peau mate", en: "olive or light-brown skin" },
+  { id: "foncee", label: "Peau foncée", en: "dark-brown skin" },
+];
+export const BA_STYLES: { id: string; label: string; en: string }[] = [
+  { id: "cabinet", label: "Cabinet (lumière neutre)", en: "taken in a skincare clinic by the practitioner: neutral, even, slightly flat light, a plain white wall behind, the hair held back by a white headband or a clip; an ordinary camera or phone, documentary quality" },
+  { id: "bain", label: "Salle de bain, au téléphone", en: "taken at home with a phone, in a bathroom: ordinary indoor light, slightly warm, a plain wall or tiles behind, a little grain; a customer's own photo" },
+  { id: "neutre", label: "Fond neutre, lumière du jour", en: "taken against a plain light-grey wall in soft daylight from a window: simple and neutral" },
+];
+export const BA_LAYOUTS: { id: string; label: string }[] = [
+  { id: "cote", label: "Côte à côte" },
+  { id: "haut", label: "Haut / bas" },
+];
+/** Format d'origine de chaque photo (celui que l'IA sait produire) selon le montage final : moitiés hautes, carrées ou larges. */
+export function baPanelAspect(finalAspect: string, layout: string): "2:3" | "1:1" | "3:2" {
+  const [w, h] = finalAspect.split(":").map(Number);
+  if (!w || !h) return "2:3";
+  const r = layout === "haut" ? w / (h / 2) : w / 2 / h;
+  return r < 0.85 ? "2:3" : r > 1.2 ? "3:2" : "1:1";
+}
 
 export const CAROUSEL_STYLES: { id: string; label: string; en: string }[] = [
   { id: "edu", label: "Éducatif (les bienfaits)", en: "educational: a cover with a strong promise, then one benefit or key fact per slide, then a closing slide with a call to action" },
@@ -88,6 +129,9 @@ export interface TypeParams {
   baChange?: string;
   baBefore?: string;
   baAfter?: string;
+  /** Avant / après « preuve » (gros plan sur une zone de peau, montage en une image) */
+  baZone?: string; baIntensity?: string; baAge?: string; baSkin?: string; baStyle?: string;
+  baLayout?: string; baLabels?: boolean; baMention?: boolean; baPanel?: string;
 }
 
 /** Libellé d'une image selon le type du shooting (Slide 3, Avant, Après…). */

@@ -1,11 +1,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { MODELS, gemini, imgPart, firstImage, firstText, noImageReason, parseJson, withAiCtx, type Part } from "./gemini";
 import sharp from "sharp";
-import { textZoneLine, maskEditPrompt, wantsPhoneUi, baAfterPrompt, typeLine, REALISM_NATURAL, buildPrompt, correctionPrompt, qcPromptNoProduct, sizeLine, formatPrompt, interpretPrompt, localEditPrompt, LOCATE_PRODUCT_PROMPT, READ_LABEL_PROMPT, qcPrompt, variationHint } from "./prompts";
+import { textZoneLine, maskEditPrompt, wantsPhoneUi, baAfterPrompt, baBeforePrompt, typeLine, REALISM_NATURAL, buildPrompt, correctionPrompt, qcPromptNoProduct, sizeLine, formatPrompt, interpretPrompt, localEditPrompt, LOCATE_PRODUCT_PROMPT, READ_LABEL_PROMPT, qcPrompt, variationHint } from "./prompts";
 import { normalizeSlides, type TypeParams } from "./visualTypes";
 import { cropTo, cropWindow, type Box } from "./framing";
 import { ensurePilotLook } from "./pilot";
 import { factCheck } from "./facts";
+import { makeBAComposite } from "./baComposite";
 import { OPENAI_RATIOS, cropBoxFor, cropImage, pasteBack, sameSceneOutsideZone, unionZones, zoneFromBox, zonesFromBoxes, type CropBox, type Zone } from "./localedit";
 import type { ImageRow, Product, QC } from "@/types";
 
@@ -367,7 +368,16 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
       const full = bef.params?.master_path && c ? await download(sb, String(bef.params.master_path)).catch(() => null) : null;
       if (full && c) sameCrop = c;
       const before = full ?? (await download(sb, bef.path));
-      parts = [{ text: baAfterPrompt({ tp, rules: [...rules, ...(noProduct ? [] : product.rules ?? [])], hasProduct: !noProduct, aspect, sameFrame: !!sameCrop }) }, imgPart(before.buf, before.mime), ...packshots.map((p) => imgPart(p.buf, p.mime))];
+      parts = tp.baZone
+        ? [{ text: baAfterPrompt({ tp, rules: [], hasProduct: false, aspect, sameFrame: true }) }, imgPart(before.buf, before.mime)]
+        : [{ text: baAfterPrompt({ tp, rules: [...rules, ...(noProduct ? [] : product.rules ?? [])], hasProduct: !noProduct, aspect, sameFrame: !!sameCrop }) }, imgPart(before.buf, before.mime), ...packshots.map((p) => imgPart(p.buf, p.mime))];
+    } else if (vtype === "ba" && tp.baZone && !redo) {
+      // Avant / après « preuve » : la photo « avant » est une photo documentaire d'une personne ordinaire (aucune consigne publicitaire)
+      const insp0 = (shoot.inspiration_paths as string[])[0];
+      const inspImg = insp0 ? await download(sb, insp0).catch(() => null) : null;
+      const dfltBrief = /^(Portrait beauté naturel, de face\.|Natural beauty portrait\.)$/.test(String(shoot.prompt ?? "").trim());
+      parts = [{ text: baBeforePrompt({ tp, brief: dfltBrief ? "" : String(shoot.prompt ?? ""), panel: String(aspect), hasInspiration: !!inspImg, analysis: String(shoot.analysis ?? "").split(ANALYSIS_SEP)[0] ?? "", pair: Math.floor(image.variant_index / 2) }) }, ...(inspImg ? [imgPart(inspImg.buf, inspImg.mime)] : [])];
+      nInsp = inspImg ? 1 : 0;
     } else {
       // Une inspiration par variante : l'image i suit SON inspiration (pose, cadrage, lumière, style) ; elles tournent s'il y a plus de variantes que d'inspirations.
       // Carrousel : la même inspiration pour toutes les slides (cohérence de la série).
@@ -651,14 +661,14 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
   // visage en très gros plan sur un avant/après) → elle est refaite une seule fois, avec la raison donnée à l'IA.
   let autoRetry: string | null = null;
   const tpP = (shoot.type_params ?? {}) as TypeParams;
-  if (buf && image.kind === "generated" && tpP.pilot === "pending" && left() > 110_000) {
+  if (buf && image.kind === "generated" && tpP.pilot === "pending" && left() > 110_000 && !(String(shoot.visual_type) === "ba" && tpP.baZone)) {
     const first: Buffer = buf;
     try {
       const f = await factCheck({ buf: first, mime: "image/png" }, { hasProduct: !noProduct, realSize: product.real_size, people: !shoot.no_people });
       const fm = await sharp(first).metadata();
       const [aw, ah] = String(aspect).split(":").map(Number);
       const keptH = fm.width && fm.height && aw && ah ? Math.min(1, (fm.width * ah) / aw / fm.height) : 1; // part de la hauteur gardée après recadrage
-      const closeUp = String(shoot.visual_type) === "ba" && (f.face_frac ?? 0) / keptH > 0.5;
+      const closeUp = String(shoot.visual_type) === "ba" && !tpP.baZone && (f.face_frac ?? 0) / keptH > 0.5;
       const why = f.scale === "big" ? "the product was TOO LARGE compared with the hand or the face. Make it clearly smaller, at its real size"
         : f.scale === "small" ? "the product was TOO SMALL compared with the hand or the face. Make it larger, at its real size"
         : closeUp ? "the face filled the frame in an extreme close-up, which distorts it. Step back: a head-and-shoulders portrait where the head takes about half of the image height" : null;
@@ -728,6 +738,10 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
   if (up.error) throw new Error("Enregistrement de l'image impossible : " + up.error.message);
   await sb.from("images").update({ path, thumb_path: upT.error ? null : thumbPath, state: "done", model_used: model, error: null, aspect, ...(Object.keys(extraParams).length ? { params: { ...((cur.params as Record<string, unknown>) ?? {}), ...extraParams } } : {}), ...(unchanged ? { qc: UNCHANGED_QC, verdict: "rejected", score: 0 } : {}) }).eq("id", image.id);
   await sb.from("usage_events").insert({ user_id: userId, kind: image.kind, units: 1, model });
+  // Avant / après « preuve » : dès qu'une photo de la paire est (re)faite et que les deux existent, le montage est assemblé (sans IA)
+  if (String(shoot.visual_type) === "ba" && tpP.baZone && image.kind !== "format") {
+    try { await makeBAComposite(sb, shoot, Math.floor(image.variant_index / 2), userId); } catch { /* le montage peut être refait depuis la page */ }
+  }
 }
 
 function verdict(qc: QC, correction = false) {
@@ -826,7 +840,7 @@ async function qualityCheckInner(sb: SupabaseClient, image: ImageRow) {
       qc.issues = qc.issues.filter((t) => !/trop (grand|gros|petit)|surdimensionn|taille|échelle|echelle/i.test(t));
     }
     // Avant / après : un visage en très gros plan paraît déformé
-    if (sa?.visual_type === "ba" && (facts.face_frac ?? 0) > 0.5) { qc.framing_ok = false; facts.issues.push(`Visage en très gros plan (${Math.round((facts.face_frac ?? 0) * 100)} % de la hauteur) : cadrage trop serré, le visage paraît déformé.`); }
+    if (sa?.visual_type === "ba" && !(sa?.type_params as TypeParams | null)?.baZone && (facts.face_frac ?? 0) > 0.5) { qc.framing_ok = false; facts.issues.push(`Visage en très gros plan (${Math.round((facts.face_frac ?? 0) * 100)} % de la hauteur) : cadrage trop serré, le visage paraît déformé.`); }
     // Pas de visage visible (produit seul, détail de mains, dos) : rien à comparer au mannequin
     if (!(facts.face_frac ?? 0)) { if (qc.face_matches_model === false) qc.face_matches_model = true; qc.issues = qc.issues.filter((t) => !/mannequin|identité|visage (est )?hors cadre/i.test(t)); }
     qc.issues = [...facts.issues, ...qc.issues].slice(0, 6);

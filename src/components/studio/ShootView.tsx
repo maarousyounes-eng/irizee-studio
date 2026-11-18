@@ -256,6 +256,14 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
     } catch (e) { flash(e instanceof Error ? e.message : "Erreur"); }
   }
 
+  /** Refait le montage avant / après (gratuit, sans IA) : autre disposition, étiquettes, mention */
+  async function remount(img: ImageRow, opts: { layout?: string; labels?: boolean; mention?: boolean }) {
+    try {
+      await api(`/api/shoots/${shoot.id}/ba-composite`, { pair: img.params?.pair ?? Math.floor(img.variant_index / 2), layout: opts.layout ?? img.params?.layout, labels: opts.labels ?? img.params?.labels, mention: opts.mention ?? img.params?.mention });
+      await load(); flash("Montage refait");
+    } catch (e) { flash(e instanceof Error ? e.message : "Erreur"); }
+  }
+
   async function retryFix(img: ImageRow) {
     const parent = images.find((i) => i.id === img.parent_id);
     if (!parent) return;
@@ -376,7 +384,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
             <div className="text-sm text-[#1F3F7A] max-w-2xl">
               <b>{isBa ? "Étape 3 : la photo « avant »." : isCar ? "Étape 5 : la slide de couverture." : "Étape 4 : l'image pilote."}</b>{" "}
               {!pilotImg ? "Elle est en cours de création (1 à 2 minutes). Vous n'avez payé qu'une image."
-                : isBa ? `Si elle vous plaît, validez-la : la photo « après » sera créée à partir d'elle (même personne, même cadrage, même lumière, seule la peau change)${rest > 1 ? `, puis les ${(rest - 1) / 2} autre(s) paire(s)` : ""}. Sinon, utilisez « Corriger » sous l'image.`
+                : isBa ? `Si elle vous plaît, validez-la : la photo « après » sera créée à partir d'elle (même personne, même cadrage, même lumière, seule la peau change), puis les deux seront assemblées en une seule image${rest > 1 ? `, puis les ${(rest - 1) / 2} autre(s) paire(s)` : ""}. Sinon, utilisez « Corriger » sous l'image.`
                 : isCar ? `Si elle vous plaît, validez-la : les ${rest} autres photos du carrousel seront créées dans le même univers (même style, même lumière${shoot.no_people ? "" : ", même mannequin"}). Sinon, utilisez « Corriger » ou « Autre idée » sous l'image, ou changez de direction.`
                 : `Si elle vous plaît, validez-la : les ${rest} autres images seront créées à partir d'elle (même décor, même lumière, même style). Sinon, utilisez « Corriger » ou « Autre idée » sous l'image, ou changez de direction.`}
               {pilotVersions.length > 1 && <span className="block mt-1 text-[12px]">Il y a {pilotVersions.length} versions : c&apos;est la plus récente qui sert de modèle. Mettez à la corbeille celles que vous ne voulez pas.</span>}
@@ -485,7 +493,7 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
                   <div className="absolute top-2 left-2 right-2 flex justify-between items-start gap-1">
                     <div className="flex flex-col gap-1 items-start">
                       {v ? <Badge tone={v.tone} className="bg-white/95">{v.label}</Badge> : <Badge tone="gray" className="bg-white/95"><Spinner className="w-3 h-3" /> Contrôle…</Badge>}
-                      {(img.kind !== "generated" || img.version > 1) && <Badge tone="blue" className="bg-white/95">{img.kind === "format" ? `Format ${FORMATS[img.aspect ?? ""]?.short ?? img.aspect}` : img.params?.n > 1 ? `Proposition ${img.params.i}/${img.params.n}` : `Version ${img.version}`}</Badge>}
+                      {(img.kind !== "generated" || img.version > 1) && <Badge tone="blue" className="bg-white/95">{img.params?.composite ? "Montage avant / après" : img.kind === "format" ? `Format ${FORMATS[img.aspect ?? ""]?.short ?? img.aspect}` : img.params?.n > 1 ? `Proposition ${img.params.i}/${img.params.n}` : `Version ${img.version}`}</Badge>}
                       {imageLabel(shoot.visual_type, img.variant_index) && <Badge tone="gray" className="bg-white/95">{imageLabel(shoot.visual_type, img.variant_index)}{shoot.visual_type === "carousel" && slideInfo[img.variant_index] ? ` · ${slideInfo[img.variant_index].slice(0, 40)}` : ""}</Badge>}
                       {img.id === latestFixId && <Badge tone="blue" className="bg-white/95">★ Dernière corrigée</Badge>}
                       {img.params?.archived && <Badge tone="gray" className="bg-white/95">Écartée</Badge>}
@@ -551,10 +559,16 @@ export default function ShootView({ shoot, productName, modelNames, me, initialI
                   )}
 
                     <div className="flex flex-wrap gap-1.5 mt-auto">
-                      <Btn size="sm" variant="ghost" onClick={() => setFix(img.id)}><Pencil size={12} /> Corriger</Btn>
+                      {img.params?.composite ? (
+                        <>
+                          <Btn size="sm" variant="ghost" onClick={() => remount(img, { layout: img.params?.layout === "haut" ? "cote" : "haut" })}>{img.params?.layout === "haut" ? "Mettre côte à côte" : "Mettre haut / bas"}</Btn>
+                          <Btn size="sm" variant="ghost" onClick={() => remount(img, { labels: !img.params?.labels })}>{img.params?.labels ? "Sans étiquettes" : "Avec étiquettes"}</Btn>
+                          <Btn size="sm" variant="ghost" onClick={() => remount(img, { mention: !img.params?.mention })}>{img.params?.mention ? "Sans « Illustration »" : "Mention « Illustration »"}</Btn>
+                        </>
+                      ) : <Btn size="sm" variant="ghost" onClick={() => setFix(img.id)}><Pencil size={12} /> Corriger</Btn>}
                       {img.kind !== "format" && shoot.visual_type !== "ba" && <Btn size="sm" variant="ghost" onClick={() => { setIdeaFor(img); setIdeaHint(""); setIdeaText(""); }} title="Une autre idée de photo pour cette image"><Lightbulb size={12} /> Autre idée</Btn>}
                       {img.kind === "correction" && img.params?.n > 1 && !img.params?.archived && <Btn size="sm" onClick={() => { archiveGroup(img); flash("Proposition gardée, les autres sont écartées"); }}><Check size={12} /> Garder celle-ci</Btn>}
-                      {img.kind === "format" && !img.params?.archived && <Btn size="sm" variant="ghost" onClick={() => retryFormat(img)} title="Refait cette déclinaison depuis la même image"><RotateCcw size={12} /> Réessayer</Btn>}
+                      {img.kind === "format" && !img.params?.composite && !img.params?.archived && <Btn size="sm" variant="ghost" onClick={() => retryFormat(img)} title="Refait cette déclinaison depuis la même image"><RotateCcw size={12} /> Réessayer</Btn>}
                       {img.kind === "correction" && !img.params?.archived && <Btn size="sm" variant="ghost" onClick={() => retryFix(img)} title="Relance en tenant compte de ce qui n'a pas marché"><RotateCcw size={12} /> Réessayer</Btn>}
                       {img.path && <Btn size="sm" variant="ghost" onClick={() => setCropFor(img)} title="Recadrer ou créer un autre format, à la souris (gratuit)"><LayoutTemplate size={12} /> Formats</Btn>}
                       <details className="relative">

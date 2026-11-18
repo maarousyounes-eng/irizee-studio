@@ -1,5 +1,5 @@
 import type { Product } from "@/types";
-import { SOCIAL_STYLES, TEXT_ZONES, BA_CHANGES, CAROUSEL_STYLES, SLIDE_ZONES, normalizeSlides, type TypeParams } from "./visualTypes";
+import { SOCIAL_STYLES, TEXT_ZONES, BA_CHANGES, BA_ZONES, BA_INTENSITIES, BA_AGES, BA_SKINS, BA_STYLES, CAROUSEL_STYLES, SLIDE_ZONES, normalizeSlides, type TypeParams } from "./visualTypes";
 
 const VARIATIONS = [
   "a young woman with a sharp black bob and fringe",
@@ -354,10 +354,45 @@ export function typeLine(type: string, tp: TypeParams, vi: number, nSlides: numb
 export const REALISM_NATURAL =
   "SKIN & DETAIL QUALITY: realistic, unretouched skin with natural pores and texture, true-to-life colours, crisp detail. Never plastic, waxy or blurred. Keep every styling detail exactly as described.";
 
+/**
+ * Photo « avant » d'un avant / après « preuve » : un gros plan sur une zone de peau, une personne ordinaire,
+ * une photo de cabinet ou de cliente. Rien d'une publicité : c'est ce qui la rend crédible.
+ */
+export function baBeforePrompt(a: { tp: TypeParams; brief: string; panel: string; hasInspiration: boolean; analysis: string; pair: number }) {
+  const zone = BA_ZONES.find((x) => x.id === a.tp.baZone) ?? BA_ZONES[0];
+  const c = BA_CHANGES.find((x) => x.id === a.tp.baChange) ?? BA_CHANGES[1];
+  const concern = (c.id === "autre" ? a.tp.baBefore : c.before) || "visible skin imperfections";
+  const intensity = BA_INTENSITIES.find((x) => x.id === a.tp.baIntensity) ?? BA_INTENSITIES[1];
+  const age = BA_AGES.find((x) => x.id === a.tp.baAge) ?? BA_AGES[1];
+  const skin = BA_SKINS.find((x) => x.id === a.tp.baSkin) ?? BA_SKINS[0];
+  const style = BA_STYLES.find((x) => x.id === a.tp.baStyle) ?? BA_STYLES[0];
+  const strip = a.panel === "2:3" ? "The image will be cropped to a tall, narrow strip: keep the zone in the central half of the width." : a.panel === "3:2" ? "The image will be cropped to a wide, low strip: keep the zone in the central half of the height." : "";
+  return [
+    "An authentic BEFORE photo for a skincare before/after comparison, like the photos that clinics and real customers take. It must look like a REAL photo of a REAL, ordinary person. It is not an advertisement and not a beauty shot.",
+    `PERSON: ${age.en}, ${skin.en}. An everyday person, not a model: an ordinary face with natural asymmetry, real skin (pores, fine hairs, small marks, the texture of her age), no makeup at all, hair simply pulled back. Nothing glamorous, nothing symmetrical or sculpted, no filter.${a.pair > 0 ? " She is a different person from the other pairs of this series." : ""}`,
+    `SKIN CONCERN, ${intensity.en}: ${concern}. It is clearly visible in the framed zone and looks medically plausible (irregular shapes and edges, natural colour variations), never painted on.`,
+    `FRAMING: a close-up of ${zone.en}. The camera is at the height of the face, close, with everything in the zone sharp. ${strip}`,
+    `PHOTO: ${style.en}. No beauty lighting, no retouching, no blurred background effect: a plain, honest record of the skin.`,
+    a.brief ? `CLIENT NOTES (they have priority over everything above): ${a.brief}` : "",
+    a.hasInspiration ? `The attached image is a real before/after the client likes${a.analysis ? ` (${a.analysis.slice(0, 600)})` : ""}. It may be a split image: look at ONE half only and take its framing, its distance, its light and its photo quality. Never copy its person, its split, its text or its logo.` : "",
+    "ONE single photo: no split screen, no text, no label, no logo, no product, no arrow. (The AFTER photo will be made later from this exact photo.)",
+    "The person is fictional and does not resemble any real, identifiable person.",
+  ].filter(Boolean).join("\n");
+}
+
 /** L'après : la même photo, seule la peau change. */
 export function baAfterPrompt(a: { tp: TypeParams; rules: string[]; hasProduct: boolean; aspect: string; sameFrame?: boolean }) {
   const c = BA_CHANGES.find((x) => x.id === a.tp.baChange) ?? BA_CHANGES[0];
   const after = (c.id === "autre" ? a.tp.baAfter : c.after) || "healthier, more radiant skin";
+  // Avant / après « preuve » : même photo au pixel près, amélioration nette mais crédible
+  if (a.tp.baZone) {
+    return [
+      "You are creating the AFTER photo of a skincare before/after comparison. Image 1 = the BEFORE photo.",
+      "Recreate EXACTLY the same photo: the same person, the same framing and distance, the same angle, the same light, the same background, the same hair and every detail in the same place, with the same image format (never zoom, crop or shift anything).",
+      `ONLY the skin concern changes: the skin now shows ${after}. The improvement is clear when the two photos are side by side, and it stays credible: what was visible is faded, lighter and less extensive, not erased; the pores, the fine hairs, the lines and the natural texture of the skin are all still there. No makeup, no smoothing, no beauty filter, no change of skin tone.`,
+      "No text, no label, no logo, no arrow.",
+    ].join("\n");
+  }
   return [
     "You are creating the AFTER photo of a before/after pair for the cosmetics brand Irizée.",
     "Image 1 = the BEFORE photo." + (a.hasProduct ? " The following image(s) = the REAL product packshot(s)." : ""),

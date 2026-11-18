@@ -35,7 +35,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     const modelIds: string[] = shoot.no_people ? [] : ((shoot.model_ids as string[] | null) ?? []);
     const together = shoot.model_mode === "together" && modelIds.length > 1;
     const rows = todo.map((i) => ({
-      shoot_id: shoot.id, kind: "generated", variant_index: i, aspect: shoot.aspect, created_by: user.id,
+      shoot_id: shoot.id, kind: "generated", variant_index: i, aspect: vtype === "ba" && tp.baZone && tp.baPanel ? tp.baPanel : shoot.aspect, created_by: user.id,
       // Carrousel : le même mannequin partout ; avant/après : le même dans la paire ; campagne : en alternance
       model_id: !modelIds.length || together ? null : modelIds[(vtype === "carousel" ? 0 : vtype === "ba" ? Math.floor(i / 2) : i) % modelIds.length],
     }));
