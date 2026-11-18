@@ -773,11 +773,11 @@ async function qualityCheckInner(sb: SupabaseClient, image: ImageRow) {
   const { data: shoot } = await sb.from("shoots").select("product_id, product_ids, product_mode, no_people, no_product").eq("id", image.shoot_id).single();
   const qPlan = productPlan(shoot!, image);
   const { product, imagePaths } = await loadProduct(sb, qPlan.mainId);
-  const pack = await download(sb, imagePaths[0]);
+  const pack = await download(sb, product.real_photo_path || imagePaths[0]).catch(() => download(sb, imagePaths[0]));
   const qcOthers: Product[] = [];
   const extraPacks: { buf: Buffer; mime: string }[] = [];
   for (const oid of qPlan.otherIds) {
-    try { const o = await loadProduct(sb, oid); qcOthers.push(o.product); extraPacks.push(await download(sb, o.imagePaths[0])); } catch { /* ignoré */ }
+    try { const o = await loadProduct(sb, oid); qcOthers.push(o.product); extraPacks.push(await download(sb, o.product.real_photo_path || o.imagePaths[0])); } catch { /* ignoré */ }
   }
   let modelRef: { buf: Buffer; mime: string } | null = null;
   const mid = (image as any).model_id as string | null;

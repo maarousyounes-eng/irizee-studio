@@ -95,7 +95,7 @@ export function buildPrompt(a: {
       : [
         `3. PRODUCT: ${one}. Any product mentioned elsewhere but not listed here must NOT appear.`,
         products.map(productBlock).join("\n\n"),
-        `The packshot gives the DESIGN of each product: its silhouette, proportions, cap, colours, logo, label layout and text direction. The photo shows the real object with this design${a.hasRealPhoto || oth.some((o) => o.real) ? " and with the real look of its REAL PHOTO (same material, same sheen, same way of catching the light)" : ""}, whole in the frame and at its real size (held in a hand it is never longer than that hand, even in a close-up or in the foreground). Products seen in the style reference belong to other brands: never copy their design.`,
+        `The packshot gives the DESIGN of each product: its silhouette, proportions, cap, colours, logo, label layout and text direction. The photo shows the real object with this design${a.hasRealPhoto || oth.some((o) => o.real) ? " and with the real look of its REAL PHOTO (same material, same sheen, same cap and details). Where the packshot and the REAL PHOTO differ, the REAL PHOTO is right; the packshot stays the reference for the printed texts and their layout" : ""}, whole in the frame and at its real size (held in a hand it is never longer than that hand, even in a close-up or in the foreground). Products seen in the style reference belong to other brands: never copy their design.`,
         NO_MIRROR,
       ]),
     "",
@@ -128,7 +128,7 @@ const refNote = (n: number) =>
 
 /** Les images du produit jointes à une retouche : packshot(s) = le design ; photo réelle (si la fiche en a une) = l'aspect réel. */
 const packNote = (p: Product) => p.real_photo_path
-  ? "The following images = the product references: first its packshot (a clean render that shows its DESIGN: shape, colours, logo, label layout) and any additional view of it, then, last, a REAL PHOTO that shows exactly what it looks like in real life (its material and sheen). They are references only: never paste them or reproduce their background."
+  ? "The following images = the product references: first its packshot (a clean render that shows its DESIGN: shape, colours, logo, label layout) and any additional view of it, then, last, a REAL PHOTO that shows exactly what it looks like in real life (its material, sheen, cap and details): where it differs from the packshot, the REAL PHOTO is right. They are references only: never paste them or reproduce their background."
   : "The following image(s) = the product references: its packshot (a clean render that shows its DESIGN: shape, colours, logo, label layout, not what it looks like in real life) and any additional view of it. They are references only: never paste them or reproduce their background.";
 
 export const sizeLine = (p: Product) => p.real_size ? `REAL SIZE of the product: ${p.real_size.replace(/\n/g, ", ")}. Respect this real scale relative to the hands and body (a hand-held product of this size is only about as long as the model's hand).` : "";
