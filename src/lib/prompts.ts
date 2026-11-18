@@ -58,8 +58,10 @@ export function buildPrompt(a: {
     p.texts?.length ? `Printed texts, spelled exactly:\n${textsBlock(p)}` : "",
   ].filter(Boolean).join("\n");
   const roles = [
-    a.noProduct ? "" : (a.nProductImages > 1 ? `Images 1 to ${a.nProductImages}: the product "${a.product.name}": image 1 is its packshot (the design reference), the other${a.nProductImages > 2 ? "s are" : " is"} an additional view of the same product, never a scene to reproduce.` : `Image 1: packshot of the product "${a.product.name}".`) + (a.hasRealPhoto ? ` Next image: a REAL PHOTO of "${a.product.name}": exactly what the real object looks like (its material, sheen, cap and details). Use it only for the product: ignore its background and the surface it lies on.` : ""),
-    ...oth.map((o) => o.real ? `Next ${o.n + 1} images: the packshot, then a REAL PHOTO (what the real object looks like; ignore its background), of the product "${o.product.name}".` : `Next ${o.n} image(s): packshot of the product "${o.product.name}".`),
+    a.noProduct ? "" : a.hasRealPhoto
+      ? `Image 1: a REAL PHOTO of the product "${a.product.name}": the product exactly as it is (its shape, its cap, its material and sheen). Use it only for the product: ignore its background and the surface it lies on. Image${a.nProductImages > 1 ? `s 2 to ${a.nProductImages + 1}` : " 2"}: its label artwork (a clean render and other views): use ${a.nProductImages > 1 ? "them" : "it"} to read the printed texts and their layout; wherever ${a.nProductImages > 1 ? "they differ" : "it differs"} from the real photo (cap, material, surface), the REAL PHOTO is right.`
+      : (a.nProductImages > 1 ? `Images 1 to ${a.nProductImages}: the product "${a.product.name}": image 1 is its packshot (the design reference), the other${a.nProductImages > 2 ? "s are" : " is"} an additional view of the same product, never a scene to reproduce.` : `Image 1: packshot of the product "${a.product.name}".`),
+    ...oth.map((o) => o.real ? `Next ${o.n + 1} images: a REAL PHOTO (the product exactly as it is; ignore its background), then the label artwork, of the product "${o.product.name}".` : `Next ${o.n} image(s): packshot of the product "${o.product.name}".`),
     a.hasTexture ? "Next image: TEXTURE REFERENCE = how the formula of the product looks (colour, finish) out of the tube or on skin. Use it only for the formula, never as packaging." : "",
     nModels === 1 ? "Next image: the MODEL REFERENCE (the person to show)." : nModels > 1 ? `Next ${nModels} images: the MODEL REFERENCES (the ${nModels} persons to show, one image per person).` : "",
     !a.seriesRef ? ""
@@ -95,7 +97,7 @@ export function buildPrompt(a: {
       : [
         `3. PRODUCT: ${one}. Any product mentioned elsewhere but not listed here must NOT appear.`,
         products.map(productBlock).join("\n\n"),
-        `The packshot gives the DESIGN of each product: its silhouette, proportions, cap, colours, logo, label layout and text direction. The photo shows the real object with this design${a.hasRealPhoto || oth.some((o) => o.real) ? " and with the real look of its REAL PHOTO (same material, same sheen, same cap and details). Where the packshot and the REAL PHOTO differ, the REAL PHOTO is right; the packshot stays the reference for the printed texts and their layout" : ""}, whole in the frame and at its real size (held in a hand it is never longer than that hand, even in a close-up or in the foreground). Products seen in the style reference belong to other brands: never copy their design.`,
+        `${a.hasRealPhoto || oth.some((o) => o.real) ? "The REAL PHOTO is the product: keep its silhouette, proportions, cap, material and sheen exactly; the label artwork gives the printed texts, the logo and their layout. The photo shows this real object" : "The packshot gives the DESIGN of each product: its silhouette, proportions, cap, colours, logo, label layout and text direction. The photo shows the real object with this design"}, whole in the frame and at its real size (held in a hand it is never longer than that hand, even in a close-up or in the foreground). Products seen in the style reference belong to other brands: never copy their design.`,
         NO_MIRROR,
       ]),
     "",
@@ -128,7 +130,7 @@ const refNote = (n: number) =>
 
 /** Les images du produit jointes à une retouche : packshot(s) = le design ; photo réelle (si la fiche en a une) = l'aspect réel. */
 const packNote = (p: Product) => p.real_photo_path
-  ? "The following images = the product references: first its packshot (a clean render that shows its DESIGN: shape, colours, logo, label layout) and any additional view of it, then, last, a REAL PHOTO that shows exactly what it looks like in real life (its material, sheen, cap and details): where it differs from the packshot, the REAL PHOTO is right. They are references only: never paste them or reproduce their background."
+  ? "The following images = the product references: first a REAL PHOTO, the product exactly as it is (its shape, cap, material and sheen), then its label artwork (a clean render and other views) for the printed texts and their layout: wherever they differ, the REAL PHOTO is right. They are references only: never paste them or reproduce their background."
   : "The following image(s) = the product references: its packshot (a clean render that shows its DESIGN: shape, colours, logo, label layout, not what it looks like in real life) and any additional view of it. They are references only: never paste them or reproduce their background.";
 
 export const sizeLine = (p: Product) => p.real_size ? `REAL SIZE of the product: ${p.real_size.replace(/\n/g, ", ")}. Respect this real scale relative to the hands and body (a hand-held product of this size is only about as long as the model's hand).` : "";
@@ -343,7 +345,7 @@ export function typeLine(type: string, tp: TypeParams, vi: number, nSlides: numb
   if (type === "ba") {
     const c = BA_CHANGES.find((x) => x.id === tp.baChange) ?? BA_CHANGES[0];
     const before = (c.id === "autre" ? tp.baBefore : c.before) || "skin before the skincare routine";
-    return `BEFORE PHOTO of a before/after pair: a front-facing head-and-shoulders beauty portrait with a confident, direct gaze, even soft light that shows the skin honestly, simple background. Framing and lens: shot with an 85 mm portrait lens from about 1.5 metres, so the face has its natural, flattering proportions (never a wide-angle close-up, which bulges the forehead and nose and widens the face); the head takes about half of the height of the image, with clear space above the hair and both shoulders in the frame. The skin shows ${before}. No foundation and no retouching, so the condition of the skin is real and visible; the model herself is as striking and well cast as in any campaign of the brand.`;
+    return `BEFORE PHOTO of a before/after pair. The skin shows ${before}: no foundation and no retouching, so its condition is real and clearly visible. The kind of photo is the one the client brief asks for (selfie, studio portrait, daily-life photo...); if the brief does not say, a simple front-facing head-and-shoulders portrait in even soft light on a plain background. In every case the face keeps natural proportions and is never an extreme close-up: the head takes at most half of the height of the image, with the shoulders in the frame.`;
   }
   return "";
 }

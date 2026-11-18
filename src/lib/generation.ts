@@ -332,8 +332,8 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
   const mainReal = await real(product);
   const otherReals = await Promise.all(others.map((o) => real(o.product)));
   const packshots: Img[] = [
-    ...(await Promise.all(imagePaths.map((p) => download(sb, p)))), ...(mainReal ? [mainReal] : []),
-    ...(await Promise.all(others.map(async (o, k) => [await download(sb, o.paths[0]), ...(otherReals[k] ? [otherReals[k] as Img] : [])]))).flat(),
+    ...(mainReal ? [mainReal] : []), ...(await Promise.all(imagePaths.map((p) => download(sb, p)))),
+    ...(await Promise.all(others.map(async (o, k) => [...(otherReals[k] ? [otherReals[k] as Img] : []), await download(sb, o.paths[0])]))).flat(),
   ];
   const aspect = image.aspect || shoot.aspect;
   let parts: Part[] = [];
@@ -436,10 +436,11 @@ async function generateImageInner(sb: SupabaseClient, image: ImageRow, userId: s
       // (sinon la consigne décrivait toujours la même personne générique, sans rapport avec la marque)
       let casting: string | null = null;
       if (vtype === "ba" && !modelRefs.length && !shoot.no_people) {
-        const { data: ms } = await sb.from("models").select("description").eq("state", "ready").order("is_brand_model", { ascending: false }).order("name").limit(6);
-        const styles = (ms ?? []).map((m: any) => String(m.description ?? "").trim()).filter(Boolean);
-        const style = styles.length ? styles[Math.floor(image.variant_index / 2) % styles.length].slice(0, 500) : "";
-        casting = `The model: a fictional professional model cast for a premium beauty campaign of this brand: strikingly photogenic, confident, with real presence${style ? `. She has the casting style of the brand's own models, described here (take the type, the attitude and the level of beauty; she is a different person): "${style}"` : ""}. Her face has natural, harmonious proportions: nothing exaggerated or surgical-looking (no inflated lips, no oversized jaw or forehead). Her hair is styled and kept away from her face, her brows are groomed, no sunglasses: her whole face is visible. Her skin is bare (no foundation) so that its real condition shows.`;
+        // Brief laissé vide (texte par défaut) : une personne naturelle, sans type imposé. Sinon : la personne décrite par le client, telle quelle.
+        const noBrief = /^(Portrait beauté naturel, de face\.|Natural beauty portrait\.)$/.test(String(shoot.prompt ?? "").trim());
+        casting = noBrief
+          ? "The model: a naturally beautiful, photogenic young woman with natural, harmonious features (nothing exaggerated or surgical-looking), her hair away from her face, no sunglasses. Her skin is bare (no foundation) so that its real condition shows."
+          : "The model: exactly the person the client brief describes (age, origin, skin tone, hair, style) and no other type of person; a real, natural-looking face with harmonious features. Her skin is bare (no foundation) unless the brief says otherwise, so that its real condition shows.";
       }
       // Mannequin choisi : les visages des inspirations sont floutés pour ne jamais se mélanger avec le sien
       if (modelRefs.length && inspirations.length) inspirations = await Promise.all(inspirations.map(blurFaces));
