@@ -5,13 +5,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import JSZip from "jszip";
 import { toJpeg } from "html-to-image";
-import { Copy, Download, Trash2, Wand2 } from "lucide-react";
+import { Copy, Download, Sparkles, Trash2, Wand2 } from "lucide-react";
 import { Btn, Spinner } from "@/components/ui";
 import { api, imgUrl, useSupabase } from "@/lib/client";
 import AdCanvas, { AD_FMTS, bandTop, onColor, type AdEl, type AdItem, type ElKind, type Kit } from "./AdCanvas";
 import { newEl } from "./defaults";
 
-interface Design { id: string; name: string; fmt: string; items: AdItem[] }
+interface Design { id: string; name: string; fmt: string; items: AdItem[]; parent?: { id: string; code: string } | null }
 const KIND: Record<ElKind, string> = { title: "Titre", sub: "Sous-titre", cta: "Bouton", badge: "Pastille", logo: "Logo" };
 export const adCode = (id: string) => `IZ-${id.replace(/-/g, "").slice(0, 6).toUpperCase()}`;
 
@@ -224,9 +224,12 @@ export default function Editor({ design, kit, formats }: { design: Design; kit: 
         <div className="min-w-0">
           <Link href="/ads" className="text-xs text-[#52525B] hover:text-[#0A0A0B]">← Mes pubs</Link>
           <input aria-label="Nom de la pub" value={name} onChange={(e) => setName(e.target.value)} className="block text-2xl font-semibold mt-1 bg-transparent border-b border-transparent hover:border-[#E4E4E7] focus:border-[#2B6EE8] outline-none max-w-full" />
-          <p className="text-xs text-[#52525B] mt-1">Code de suivi <b>{adCode(design.id)}</b> · {saved === "saving" ? "Enregistrement…" : saved === "error" ? "Erreur d'enregistrement" : "Enregistré"}</p>
+          <p className="text-xs text-[#52525B] mt-1">Code de suivi <b>{adCode(design.id)}</b> · {saved === "saving" ? "Enregistrement…" : saved === "error" ? "Erreur d'enregistrement" : "Enregistré"}
+            {design.parent && <> · Déclinaison de <Link href={`/ads/d/${design.parent.id}`} className="font-semibold text-[#2B6EE8] hover:underline">{design.parent.code}</Link></>}
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Link href={`/ads/decliner?code=${adCode(design.id)}`}><Btn variant="soft" size="sm"><Sparkles size={13} /> Décliner</Btn></Link>
           <Btn variant="ghost" size="sm" onClick={duplicate}><Copy size={13} /> Dupliquer</Btn>
           <Btn variant="ghost" size="sm" onClick={remove}><Trash2 size={13} /> Supprimer</Btn>
         </div>
