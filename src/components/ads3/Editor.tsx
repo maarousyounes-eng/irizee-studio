@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import JSZip from "jszip";
 import { toJpeg } from "html-to-image";
-import { Copy, Download, Sparkles, Trash2, Wand2 } from "lucide-react";
+import { Copy, Download, Send, Sparkles, Trash2, Wand2 } from "lucide-react";
 import { Btn, Spinner } from "@/components/ui";
 import { api, imgUrl, useSupabase } from "@/lib/client";
 import AdCanvas, { AD_FMTS, bandTop, onColor, type AdEl, type AdItem, type ElKind, type Kit } from "./AdCanvas";
@@ -32,6 +32,10 @@ export default function Editor({ design, kit, formats }: { design: Design; kit: 
   const drag = useRef<{ id: string; sx: number; sy: number; ox: number; oy: number; w: number; h: number } | null>(null);
   const exportRef = useRef<HTMLDivElement>(null);
   const [exportJob, setExportJob] = useState<{ item: AdItem; f: (typeof AD_FMTS)[number] } | null>(null);
+  // « Envoyer en pub » : vers la file « À valider » d'Irizée Brand (rien n'est publié sans validation)
+  const [send, setSend] = useState<null | { fmt: string; text: string; headline: string; link: string; cta: string }>(null);
+  const [sending, setSending] = useState(false);
+  const [sentUrl, setSentUrl] = useState<string | null>(null);
 
   const F = AD_FMTS.find((f) => f.key === fmt)!;
   const item = items[Math.min(cur, items.length - 1)];
@@ -202,6 +206,35 @@ export default function Editor({ design, kit, formats }: { design: Design; kit: 
     setExportJob(null); setExporting(false);
   }
 
+  function openSend() {
+    const t = els.find((e) => e.kind === "title")?.text.replace(/\n/g, " ").trim() ?? "";
+    const sub = els.find((e) => e.kind === "sub")?.text.replace(/\n/g, " ").trim() ?? "";
+    setSentUrl(null);
+    setSend({ fmt: AD_FMTS.some((f) => f.key === fmt && f.key !== "16:9") ? fmt : "4:5", text: [t, sub].filter(Boolean).join("\n\n"), headline: t.slice(0, 40), link: "https://irizee.com", cta: "SHOP_NOW" });
+  }
+
+  async function sendToBrand() {
+    if (!send || !item) return;
+    if (!send.text.trim()) return setMsg("Écris le texte principal de la pub");
+    if (!/^https:\/\/\S+$/.test(send.link.trim())) return setMsg("Lien du site : une adresse https://… est attendue");
+    setSending(true); setMsg(null);
+    try {
+      await document.fonts.ready;
+      const f = AD_FMTS.find((x) => x.key === send.fmt)!;
+      const data = await renderOne({ item, f });
+      const blob = await (await fetch(data)).blob();
+      const path = `ads-out/${design.id}/${f.key.replace(":", "x")}-${Date.now()}.jpg`;
+      const { error } = await sb.storage.from("studio").upload(path, blob, { contentType: "image/jpeg" });
+      if (error) throw new Error("Envoi de l'image impossible : " + error.message);
+      const r = await api<{ reviewUrl: string }>("/api/ads3/send", {
+        designId: design.id, path, fmt: f.key, primary_text: send.text, headline: send.headline, link_url: send.link.trim(), cta_type: send.cta,
+      });
+      setSentUrl(r.reviewUrl);
+      setMsg("Pub envoyée dans Irizée Brand : elle attend ta validation dans « À valider ». Rien n'est publié avant.");
+    } catch (e) { setMsg(e instanceof Error ? e.message : "Envoi impossible"); }
+    setExportJob(null); setSending(false);
+  }
+
   async function remove() {
     if (!confirm("Supprimer cette pub ? Les visuels du shooting ne sont pas touchés.")) return;
     await sb.from("ad_designs").update({ deleted_at: new Date().toISOString() }).eq("id", design.id);
@@ -229,6 +262,7 @@ export default function Editor({ design, kit, formats }: { design: Design; kit: 
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Btn size="sm" onClick={openSend}><Send size={13} /> Envoyer en pub</Btn>
           <Link href={`/ads/decliner?code=${adCode(design.id)}`}><Btn variant="soft" size="sm"><Sparkles size={13} /> Décliner</Btn></Link>
           <Btn variant="ghost" size="sm" onClick={duplicate}><Copy size={13} /> Dupliquer</Btn>
           <Btn variant="ghost" size="sm" onClick={remove}><Trash2 size={13} /> Supprimer</Btn>
@@ -395,6 +429,35 @@ export default function Editor({ design, kit, formats }: { design: Design; kit: 
                 </div>
               )}
               <button type="button" onClick={() => { setEls((list) => list.filter((e) => e.id !== sel)); setSel(null); }} className="w-full h-11 rounded-xl border border-red-200 text-red-700 text-sm font-semibold hover:bg-red-50">Supprimer cet élément</button>
+            </div>
+          )}
+
+          {send && (
+            <div className="bg-white border border-[#2B6EE8] rounded-2xl p-4 space-y-3">
+              <h2 className="text-sm font-semibold">Envoyer en pub (Meta)</h2>
+              <p className="text-[11px] text-[#52525B]">L&apos;image affichée (n° {Math.min(cur, items.length - 1) + 1}) part dans Irizée Brand, onglet « À valider ». La pub n&apos;est créée chez Meta, en pause, qu&apos;après ta validation là-bas.</p>
+              <div className="flex flex-wrap gap-1.5">
+                {AD_FMTS.filter((f) => f.key !== "16:9").map((f) => <button key={f.key} type="button" className={chip(send.fmt === f.key)} onClick={() => setSend({ ...send, fmt: f.key })}>{f.label}</button>)}
+              </div>
+              <label className="block text-xs font-semibold text-[#3F3F46]">Texte principal (au-dessus de l&apos;image)
+                <textarea value={send.text} onChange={(e) => setSend({ ...send, text: e.target.value })} rows={4} className="mt-1 w-full rounded-xl border border-[#E4E4E7] px-3 py-2 text-sm font-normal" />
+              </label>
+              <label className="block text-xs font-semibold text-[#3F3F46]">Titre (sous l&apos;image, 40 caractères max) <span className="font-normal text-[#52525B]">{send.headline.length}/40</span>
+                <input value={send.headline} onChange={(e) => setSend({ ...send, headline: e.target.value })} className="mt-1 w-full rounded-xl border border-[#E4E4E7] px-3 py-2 text-sm font-normal" />
+              </label>
+              <label className="block text-xs font-semibold text-[#3F3F46]">Lien du site
+                <input value={send.link} onChange={(e) => setSend({ ...send, link: e.target.value })} placeholder="https://irizee.com/products/…" className="mt-1 w-full rounded-xl border border-[#E4E4E7] px-3 py-2 text-sm font-normal" />
+              </label>
+              <label className="block text-xs font-semibold text-[#3F3F46]">Bouton
+                <select value={send.cta} onChange={(e) => setSend({ ...send, cta: e.target.value })} className="mt-1 w-full rounded-xl border border-[#E4E4E7] px-3 py-2 text-sm font-normal bg-white">
+                  <option value="SHOP_NOW">Acheter</option><option value="LEARN_MORE">En savoir plus</option><option value="ORDER_NOW">Commander</option><option value="GET_OFFER">Profiter de l&apos;offre</option>
+                </select>
+              </label>
+              <div className="flex gap-2">
+                <Btn className="flex-1" onClick={sendToBrand} disabled={sending}>{sending ? <Spinner className="border-white/40 border-t-white" /> : <Send size={14} />} Envoyer pour validation</Btn>
+                <Btn variant="ghost" onClick={() => setSend(null)} disabled={sending}>Fermer</Btn>
+              </div>
+              {sentUrl && <a href={sentUrl} target="_blank" rel="noreferrer" className="block text-xs font-semibold text-[#2B6EE8] hover:underline">Ouvrir « À valider » dans Irizée Brand →</a>}
             </div>
           )}
 
