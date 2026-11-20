@@ -15,8 +15,9 @@ export async function POST(req: Request) {
   return handle(async () => {
     const { sb, profile } = await requireUser();
     if (profile.role === "creator") throw new HttpError(403, "Réservé à l'équipe");
-    const secret = process.env.STUDIO_TO_BRAND_SECRET;
-    if (!secret) throw new HttpError(500, "STUDIO_TO_BRAND_SECRET manquant dans Vercel (Studio).");
+    // secret partagé avec Brand : dédié s'il existe, sinon celui de la connexion unique (même valeur sur les projets)
+    const secret = process.env.STUDIO_TO_BRAND_SECRET || process.env.SSO_SHARED_SECRET;
+    if (!secret) throw new HttpError(500, "Secret partagé avec Brand manquant dans Vercel (STUDIO_TO_BRAND_SECRET ou SSO_SHARED_SECRET).");
 
     const b = await req.json();
     const designId = String(b.designId ?? "");
